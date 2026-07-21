@@ -8,6 +8,7 @@ final class RuntimeStateStoreTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let settings = RuntimeStateSettings(defaults: defaults)
+        XCTAssertFalse(settings.outputSummariesEnabled)
 
         settings.persistenceEnabled = false
         settings.predictionHistoryEnabled = false

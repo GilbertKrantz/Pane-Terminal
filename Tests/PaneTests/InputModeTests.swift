@@ -34,6 +34,17 @@ extension InputModeTests {
         XCTAssertEqual(snapshot.terminalModeAttribution, .foregroundProcess("ssh"))
     }
 
+    func testKnownInteractiveFallbackRecognizesNormalBufferAgentTUIs() {
+        for processName in ["codex", "claude", "opencode", "node"] {
+            XCTAssertTrue(
+                ForegroundProcessSnapshot.isKnownInteractiveProgram(named: processName),
+                "Expected \(processName) to request direct input"
+            )
+        }
+        XCTAssertFalse(ForegroundProcessSnapshot.isKnownInteractiveProgram(named: "brew"))
+        XCTAssertFalse(ForegroundProcessSnapshot.isKnownInteractiveProgram(named: "tail"))
+    }
+
     func testForegroundSnapshotUsesRawTermiosAsTerminalSignal() {
         let snapshot = ForegroundProcessSnapshot(
             processGroupID: 42,
@@ -85,6 +96,25 @@ extension InputModeTests {
 
         XCTAssertFalse(snapshot.echoEnabled)
         XCTAssertEqual(snapshot.terminalModeAttribution, .rawTermios("sudo"))
+    }
+
+    func testTerminalInputRequirementModelsBlockFirstStates() {
+        XCTAssertEqual(TerminalInputRequirement.shellIdle, .shellIdle)
+        XCTAssertNotEqual(TerminalInputRequirement.lineOriented, .direct)
+        XCTAssertNotEqual(TerminalInputRequirement.secure, .direct)
+    }
+
+
+    func testTerminalPresentationIsIndependentFromInputRequirement() {
+        XCTAssertNotEqual(ActiveTerminalPresentation.compact, .expanded)
+        XCTAssertNotEqual(ActiveTerminalPresentation.none, .compact)
+    }
+
+    func testSecureInputAttributionIsExplicit() {
+        XCTAssertEqual(
+            InputModeAttribution.secureInput.explanation,
+            "secure input is active"
+        )
     }
 
     func testModeAttributionExplanationsAreUserFacing() {

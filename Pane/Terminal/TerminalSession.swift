@@ -94,6 +94,7 @@ final class TerminalSession: NSObject, ObservableObject {
     @Published private(set) var blockTimeline = CommandBlockTimeline()
     @Published private(set) var isAlternateScreenActive = false
     @Published private(set) var modeAttribution: InputModeAttribution = .manual
+    @Published private(set) var inputRequirement: TerminalInputRequirement = .shellIdle
     @Published private(set) var terminalSecurityState: TerminalSecurityState = .normal
     @Published private(set) var runtimeStateDiagnostic: String?
     @Published private(set) var activeCommandVisibleLineCount = 1
@@ -104,7 +105,10 @@ final class TerminalSession: NSObject, ObservableObject {
     private var process: LocalProcess?
     private var processBridge: PTYProcessDelegateBridge?
     private var processGeneration: UInt64 = 0
-    private weak var terminalView: TerminalView?
+    private var terminalView: TerminalView?
+    private var authoritativeTerminalHostView: AuthoritativeTerminalHostView?
+    private var suspendedCommandDraft: String?
+    private var manualSecureInputActive = false
     private weak var liveCommandTerminalView: TerminalView?
     private var liveCommandTerminalBlockID: UUID?
     private var streamParser = BlockStreamParser()
@@ -172,6 +176,34 @@ final class TerminalSession: NSObject, ObservableObject {
         self.runtimeStateController = runtimeStateController
         self.currentDirectory = shellConfiguration.workingDirectory
         super.init()
+    }
+
+    func makeAuthoritativeTerminalView() -> PaneTerminalView {
+        if let terminalView = terminalView as? PaneTerminalView { return terminalView }
+        let terminalView = PaneTerminalView(
+            frame: .zero,
+            font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        )
+        terminalView.autoresizingMask = [.width, .height]
+        terminalView.changeScrollback(10_000)
+        terminalView.optionAsMetaKey = true
+        terminalView.allowMouseReporting = true
+        terminalView.caretViewTracksFocus = true
+        attach(terminalView: terminalView)
+        return terminalView
+    }
+
+    func makeAuthoritativeTerminalHostView() -> AuthoritativeTerminalHostView {
+        if let authoritativeTerminalHostView { return authoritativeTerminalHostView }
+        let hostView = AuthoritativeTerminalHostView(
+            terminalView: makeAuthoritativeTerminalView()
+        )
+        authoritativeTerminalHostView = hostView
+        return hostView
+    }
+
+    func ensureAuthoritativeTerminalIsRunning() {
+        _ = makeAuthoritativeTerminalHostView()
     }
 
     func attach(terminalView: TerminalView) {
@@ -361,6 +393,13 @@ final class TerminalSession: NSObject, ObservableObject {
 
     func submitDraft() {
         if blockTimeline.activeBlockID != nil {
+            refreshForegroundProcessMode()
+            guard terminalSecurityState.inputMode == .normal,
+                  inputRequirement != .direct,
+                  inputRequirement != .secure else {
+                focusAuthoritativeTerminal()
+                return
+            }
             guard send(bytes: CommandSerializer.serializeInputLine(commandDraft)) else { return }
             commandDraft = ""
             return
@@ -404,6 +443,7 @@ final class TerminalSession: NSObject, ObservableObject {
         }
 
         selectedBlockID = blockID
+        inputRequirement = .lineOriented
         let sanitizedCommand = sensitiveDataSanitizer.sanitizeCommand(command)
         if sanitizedCommand.redactionCount == 0 {
             history.append(sanitizedCommand.value)
@@ -496,6 +536,9 @@ final class TerminalSession: NSObject, ObservableObject {
         shouldReturnToBlocksAfterAlternateScreen = false
         modeAttribution = .manual
         mode.toggle()
+        inputRequirement = mode == .terminal
+            ? (isSecureInputActive ? .secure : .direct)
+            : (isCommandActive ? .lineOriented : .shellIdle)
     }
 
     func setMode(_ newMode: InputMode) {
@@ -503,6 +546,9 @@ final class TerminalSession: NSObject, ObservableObject {
         shouldReturnToBlocksAfterAlternateScreen = false
         modeAttribution = .manual
         mode = newMode
+        inputRequirement = newMode == .terminal
+            ? (isSecureInputActive ? .secure : .direct)
+            : (isCommandActive ? .lineOriented : .shellIdle)
     }
 
     func selectBlock(_ id: UUID) {
@@ -579,12 +625,38 @@ final class TerminalSession: NSObject, ObservableObject {
         _ = send(bytes: [0x04])
     }
 
+    func enterDirectInput() {
+        modeAttribution = .manual
+        inputRequirement = terminalSecurityState.inputMode == .secure ? .secure : .direct
+        if !isCommandActive {
+            mode = .terminal
+        }
+        focusAuthoritativeTerminal()
+    }
+
+    func enterSecureInput() {
+        manualSecureInputActive = true
+        activateSecureInput(source: .manualOverride)
+        modeAttribution = .secureInput
+        inputRequirement = .secure
+        if !isCommandActive {
+            mode = .terminal
+        }
+        focusAuthoritativeTerminal()
+    }
+
+    func exitSecureInput() {
+        manualSecureInputActive = false
+        updateSecurityState(echoEnabled: true, source: .manualOverride)
+    }
+
     func clearTerminal() {
         terminalView?.feed(text: "\u{001B}[2J\u{001B}[3J\u{001B}[H")
     }
 
     private func handleProcessData(_ bytes: [UInt8], generation: UInt64) {
         guard generation == processGeneration, process != nil else { return }
+        refreshForegroundProcessMode()
 
         // The persistent direct terminal is fed exactly once. The live block
         // terminal below is an independent emulator and receives parsed block
@@ -601,11 +673,14 @@ final class TerminalSession: NSObject, ObservableObject {
             case .output(let data):
                 routeActiveBlockOutput(data)
 
-            case .commandStarted:
+            case .commandStarted(let command):
                 // The bootstrap command installs these hooks. Existing hooks
                 // in a user's zshrc may emit START for that bootstrap itself;
                 // it is intentionally not represented as a user block.
                 guard isShellIntegrationReady else { continue }
+                if commandAwaitingStartID == nil, let command {
+                    enqueueDirectTerminalCommand(command)
+                }
                 if let id = blockTimeline.beginNext() {
                     commandAwaitingStartID = nil
                     beginActiveBlockCapture(blockID: id)
@@ -762,6 +837,9 @@ final class TerminalSession: NSObject, ObservableObject {
 
         guard send(bytes: CommandSerializer.serializeCommand(nextCommand.command)) else { return }
         commandAwaitingStartID = nextCommand.id
+        if mode == .blocks {
+            inputRequirement = .lineOriented
+        }
     }
 
     private func startRuntimeStateSession() {
@@ -801,7 +879,11 @@ final class TerminalSession: NSObject, ObservableObject {
             return
         }
 
-        let command = sensitiveDataSanitizer.sanitizeCommand(block.command).value
+        let sanitizedCommand = sensitiveDataSanitizer.sanitizeCommand(block.command)
+        // A redacted string is not an exact, safely rerunnable command. Keep
+        // the transient block, but do not turn it into durable history.
+        guard sanitizedCommand.redactionCount == 0 else { return }
+        let command = sanitizedCommand.value
         let output = sensitiveDataSanitizer.sanitizeOutput(block.output).value
         let summary = output.isEmpty ? nil : String(output.prefix(1_000))
         let durationMilliseconds = block.duration.map {
@@ -1030,15 +1112,29 @@ final class TerminalSession: NSObject, ObservableObject {
         if isActive {
             if mode == .blocks {
                 shouldReturnToBlocksAfterAlternateScreen = true
+                // TUIs commonly disable ECHO immediately before entering the
+                // alternate screen. If that brief transition was classified
+                // as secure input, the alternate-screen protocol is the more
+                // specific signal: keep routing bytes through SwiftTerm, but
+                // do not label the entire TUI as a password prompt. An
+                // explicit manual Secure Input choice remains sticky.
+                if isSecureInputActive, !manualSecureInputActive {
+                    updateSecurityState(
+                        echoEnabled: true,
+                        source: .applicationSignal
+                    )
+                }
                 modeAttribution = .alternateScreen
-                mode = .terminal
+                inputRequirement = .direct
+                announceAccessibility("Direct terminal input activated")
+                focusAuthoritativeTerminal()
             } else {
                 shouldReturnToBlocksAfterAlternateScreen = false
             }
         } else {
-            if shouldReturnToBlocksAfterAlternateScreen, mode == .terminal {
+            if shouldReturnToBlocksAfterAlternateScreen {
                 modeAttribution = .manual
-                mode = .blocks
+                inputRequirement = isCommandActive ? .lineOriented : .shellIdle
                 // Re-evaluate immediately after the protocol-owned mode ends.
                 // The same foreground process may still require raw input.
                 lastForegroundSnapshot = nil
@@ -1088,13 +1184,26 @@ final class TerminalSession: NSObject, ObservableObject {
         lastForegroundSnapshot = snapshot
 
         if let attribution = snapshot.terminalModeAttribution {
-            if mode != .terminal || modeAttribution != attribution {
+            if mode != .terminal {
+                let wasDirect = inputRequirement == .direct || inputRequirement == .secure
+                inputRequirement = terminalSecurityState.inputMode == .secure ? .secure : .direct
+                modeAttribution = terminalSecurityState.inputMode == .secure
+                    ? .secureInput
+                    : attribution
+                if !wasDirect {
+                    announceAccessibility("Direct terminal input activated")
+                }
+                focusAuthoritativeTerminal()
+            } else if terminalSecurityState.inputMode == .secure {
+                modeAttribution = .secureInput
+            } else if modeAttribution != attribution {
                 modeAttribution = attribution
-                mode = .terminal
             }
         } else if snapshot.isShellForeground, modeAttribution != .manual {
             modeAttribution = .manual
-            mode = .blocks
+            inputRequirement = isCommandActive ? .lineOriented : .shellIdle
+        } else if snapshot.isShellForeground {
+            inputRequirement = isCommandActive ? .lineOriented : .shellIdle
         }
     }
 
@@ -1103,12 +1212,21 @@ final class TerminalSession: NSObject, ObservableObject {
         source: SecureInputDetectionSource
     ) {
         let inputMode: TerminalInputMode = echoEnabled ? .normal : .secure
+        if manualSecureInputActive, inputMode == .normal {
+            return
+        }
         guard terminalSecurityState.inputMode != inputMode
             || terminalSecurityState.echoEnabled != echoEnabled else { return }
 
         if inputMode == .secure {
-            commandDraft = ""
-            history.resetNavigation()
+            activateSecureInput(source: source)
+            return
+        } else if !manualSecureInputActive, terminalSecurityState.inputMode == .secure {
+            if commandDraft.isEmpty, let suspendedCommandDraft {
+                commandDraft = suspendedCommandDraft
+            }
+            suspendedCommandDraft = nil
+            inputRequirement = isCommandActive ? .lineOriented : .shellIdle
         }
         terminalSecurityState = TerminalSecurityState(
             inputMode: inputMode,
@@ -1118,19 +1236,107 @@ final class TerminalSession: NSObject, ObservableObject {
         )
     }
 
+    private func activateSecureInput(source: SecureInputDetectionSource) {
+        let wasSecure = terminalSecurityState.inputMode == .secure
+        if !wasSecure {
+            if !commandDraft.isEmpty {
+                suspendedCommandDraft = commandDraft
+            }
+            commandDraft = ""
+            history.resetNavigation()
+        }
+        modeAttribution = .secureInput
+        inputRequirement = .secure
+        terminalSecurityState = TerminalSecurityState(
+            inputMode: .secure,
+            echoEnabled: false,
+            detectedAt: Date(),
+            source: source
+        )
+        if !wasSecure {
+            announceAccessibility("Secure input activated")
+        }
+    }
+
+    private func announceAccessibility(_ message: String) {
+        let element: Any
+        if let terminalView {
+            element = terminalView
+        } else {
+            element = NSApplication.shared
+        }
+        NSAccessibility.post(
+            element: element,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: message,
+                .priority: NSAccessibilityPriorityLevel.medium.rawValue
+            ]
+        )
+    }
+
+    private func focusAuthoritativeTerminal() {
+        DispatchQueue.main.async { [weak self] in
+            guard let terminalView = self?.terminalView else { return }
+            terminalView.window?.makeFirstResponder(terminalView)
+        }
+    }
+
+    var shouldEmbedAuthoritativeTerminalInActiveBlock: Bool {
+        activeTerminalPresentation != .none
+    }
+
+    var activeTerminalPresentation: ActiveTerminalPresentation {
+        guard mode == .blocks, isCommandActive else { return .none }
+        if isAlternateScreenActive { return .expanded }
+        if inputRequirement == .direct || inputRequirement == .secure {
+            return .compact
+        }
+        return .none
+    }
+
+    var shouldPresentExpandedAuthoritativeTerminal: Bool {
+        activeTerminalPresentation == .expanded
+    }
+
+    var shouldPresentCompactAuthoritativeTerminal: Bool {
+        activeTerminalPresentation == .compact
+    }
+
     /// Pane's precmd marker is emitted only after the foreground command has
     /// returned to the persistent shell. It is the authoritative boundary for
     /// leaving secure input; a termios poll can otherwise miss a short ECHO
     /// transition or observe the shell line editor changing flags again.
     private func handleNormalPromptBoundary() {
+        manualSecureInputActive = false
         updateSecurityState(echoEnabled: true, source: .applicationSignal)
         lastForegroundSnapshot = nil
 
-        guard !isAlternateScreenActive,
-              modeAttribution != .manual,
-              mode == .terminal else { return }
+        guard !isAlternateScreenActive else { return }
+        if mode == .terminal {
+            inputRequirement = .direct
+            return
+        }
         modeAttribution = .manual
-        mode = .blocks
+        inputRequirement = .shellIdle
+    }
+
+    private func enqueueDirectTerminalCommand(_ command: String) {
+        let sanitized = sensitiveDataSanitizer.sanitizeCommand(command)
+        let visibleCommand = sanitized.redactionCount == 0
+            ? sanitized.value
+            : "[Sensitive command omitted]"
+        let id = blockTimeline.enqueue(
+            command: visibleCommand,
+            workingDirectory: currentDirectory ?? shellConfiguration.workingDirectory
+        )
+        commandAwaitingStartID = id
+        selectedBlockID = id
+        if sanitized.redactionCount == 0 {
+            history.append(sanitized.value)
+        } else {
+            history.resetNavigation()
+        }
     }
 
     private func foregroundProcessSnapshot() -> ForegroundProcessSnapshot? {
@@ -1256,7 +1462,7 @@ extension TerminalSession: TerminalViewDelegate {
         let bytes = Array(data)
         MainActor.assumeIsolated {
             guard self.terminalView === source,
-                  self.mode == .terminal || self.terminalSecurityState.inputMode == .secure else { return }
+                  self.mode == .terminal || self.inputRequirement == .direct || self.inputRequirement == .secure else { return }
             _ = self.send(bytes: bytes)
         }
     }

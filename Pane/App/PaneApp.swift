@@ -148,6 +148,22 @@ private struct TerminalCommands: Commands {
 
             Divider()
 
+            Button("Direct Input") {
+                session.enterDirectInput()
+            }
+            .keyboardShortcut("d", modifiers: [.command, .shift])
+
+            Button(session.isSecureInputActive ? "Exit Secure Input" : "Enter Secure Input") {
+                if session.isSecureInputActive {
+                    session.exitSecureInput()
+                } else {
+                    session.enterSecureInput()
+                }
+            }
+            .keyboardShortcut("s", modifiers: [.command, .shift])
+
+            Divider()
+
             Button("Select Previous Block") {
                 session.selectPreviousBlock()
             }

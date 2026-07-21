@@ -15,7 +15,7 @@ final class RuntimeStateSettings: ObservableObject {
         defaults.register(defaults: [
             keyPrefix + "persistenceEnabled": true,
             keyPrefix + "predictionHistoryEnabled": true,
-            keyPrefix + "outputSummariesEnabled": true,
+            keyPrefix + "outputSummariesEnabled": false,
             keyPrefix + "filePathCollectionEnabled": true
         ])
         persistenceEnabled = defaults.bool(forKey: keyPrefix + "persistenceEnabled")

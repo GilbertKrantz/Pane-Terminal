@@ -3,7 +3,7 @@ import Foundation
 struct BlockStreamParser: Sendable {
     enum Event: Equatable, Sendable {
         case output(Data)
-        case commandStarted
+        case commandStarted(command: String?)
         case commandFinished(exitCode: Int32, workingDirectory: String)
     }
 
@@ -99,7 +99,15 @@ struct BlockStreamParser: Sendable {
     private func parse(_ payload: Data) -> Event? {
         let text = String(decoding: payload, as: UTF8.self)
         if text == "START" {
-            return .commandStarted
+            return .commandStarted(command: nil)
+        }
+        if text.hasPrefix("START;") {
+            let encoded = String(text.dropFirst("START;".count))
+            guard let data = Data(base64Encoded: encoded),
+                  let command = String(data: data, encoding: .utf8) else {
+                return nil
+            }
+            return .commandStarted(command: command)
         }
 
         let fields = text.split(

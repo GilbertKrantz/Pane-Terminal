@@ -142,7 +142,7 @@ final class TerminalSessionIntegrationTests: XCTestCase {
     }
 
     @MainActor
-    func testAlternateScreenAutomaticallyEntersAndLeavesTerminalMode() async throws {
+    func testAlternateScreenEmbedsDirectTerminalWithoutLeavingBlocksLayout() async throws {
         let configuration = ShellConfiguration.loginZsh(
             processEnvironment: [
                 "HOME": "/tmp",
@@ -165,14 +165,19 @@ final class TerminalSessionIntegrationTests: XCTestCase {
 
             XCTAssertTrue(terminalView.terminal.isCurrentBufferAlternate)
             try await waitUntil("session to observe DEC mode \(mode) entering") {
-                session.isAlternateScreenActive && session.mode == .terminal
+                session.isAlternateScreenActive
+                    && session.mode == .blocks
+                    && session.inputRequirement == .direct
+                    && session.shouldEmbedAuthoritativeTerminalInActiveBlock == false
             }
 
             terminalView.feed(text: "\u{001B}[?\(mode)l")
 
             XCTAssertFalse(terminalView.terminal.isCurrentBufferAlternate)
             try await waitUntil("session to observe DEC mode \(mode) leaving") {
-                !session.isAlternateScreenActive && session.mode == .blocks
+                !session.isAlternateScreenActive
+                    && session.mode == .blocks
+                    && session.inputRequirement == .shellIdle
             }
         }
 
@@ -199,8 +204,10 @@ final class TerminalSessionIntegrationTests: XCTestCase {
         defer { session.shutdown() }
 
         terminalView.feed(text: "\u{001B}[?1049h")
-        try await waitUntil("automatic Terminal mode after entering alternate screen") {
-            session.isAlternateScreenActive && session.mode == .terminal
+        try await waitUntil("embedded direct input after entering alternate screen") {
+            session.isAlternateScreenActive
+                && session.mode == .blocks
+                && session.inputRequirement == .direct
         }
 
         session.setMode(.blocks)
@@ -233,7 +240,7 @@ final class TerminalSessionIntegrationTests: XCTestCase {
     }
 
     @MainActor
-    func testKnownForegroundProgramAutomaticallyUsesTerminalMode() async throws {
+    func testNoninteractiveForegroundProgramDoesNotForceDirectInput() async throws {
         let session = makeTestSession()
         let terminalView = PaneTerminalView(
             frame: NSRect(x: 0, y: 0, width: 800, height: 400)
@@ -244,10 +251,14 @@ final class TerminalSessionIntegrationTests: XCTestCase {
         let command = "tail -f /dev/null"
         session.submit(command: command)
 
-        try await waitUntil("tail to trigger Terminal mode", timeout: 8) {
-            session.mode == .terminal
-                && session.modeAttribution == .foregroundProcess("tail")
+        try await waitUntil("tail to become the active command", timeout: 8) {
+            session.activeCommandBlock?.processName == "tail"
         }
+        try await Task.sleep(nanoseconds: 400_000_000)
+
+        XCTAssertEqual(session.mode, .blocks)
+        XCTAssertEqual(session.inputRequirement, .lineOriented)
+        XCTAssertEqual(session.activeTerminalPresentation, .none)
 
         session.sendInterrupt()
         try await waitUntil("shell foreground to restore Blocks mode", timeout: 8) {
@@ -285,7 +296,7 @@ final class TerminalSessionIntegrationTests: XCTestCase {
     }
 
     @MainActor
-    func testRawTermiosAutomaticallyUsesTerminalMode() async throws {
+    func testDirectTerminalCommandBecomesOneStructuredBlock() async throws {
         let session = makeTestSession()
         let terminalView = PaneTerminalView(
             frame: NSRect(x: 0, y: 0, width: 800, height: 400)
@@ -293,19 +304,196 @@ final class TerminalSessionIntegrationTests: XCTestCase {
         session.attach(terminalView: terminalView)
         defer { session.shutdown() }
 
-        let command = #"/bin/sh -c 'trap "stty echo icanon; exit 130" INT TERM; stty -echo -icanon; sleep 30'"#
+        session.submit(command: ":")
+        try await waitUntil("shell integration to become ready", timeout: 8) {
+            session.blocks.contains { block in
+                guard block.command == ":" else { return false }
+                if case .completed = block.state { return true }
+                return false
+            }
+        }
+
+        session.setMode(.terminal)
+        let command = "printf 'PANE_DIRECT_CAPTURED\\n'"
+        terminalView.send(data: Array("\(command)\r".utf8)[...])
+
+        try await waitUntil("direct terminal command block to complete", timeout: 8) {
+            session.blocks.contains { block in
+                guard block.command == command else { return false }
+                if case .completed(exitCode: 0) = block.state { return true }
+                return false
+            }
+        }
+        XCTAssertEqual(session.blocks.filter { $0.command == command }.count, 1)
+    }
+
+    @MainActor
+    func testAuthoritativeTerminalAndHostIdentitySurviveRemounting() {
+        let session = makeTestSession()
+        defer { session.shutdown() }
+
+        let firstHost = session.makeAuthoritativeTerminalHostView()
+        let firstTerminal = session.makeAuthoritativeTerminalView()
+        let secondHost = session.makeAuthoritativeTerminalHostView()
+        let secondTerminal = session.makeAuthoritativeTerminalView()
+
+        XCTAssertTrue(firstHost === secondHost)
+        XCTAssertTrue(firstTerminal === secondTerminal)
+        XCTAssertTrue(firstHost.terminalView === firstTerminal)
+    }
+
+    @MainActor
+    func testManualSecureInputSuspendsAndRestoresComposerDraft() {
+        let session = makeTestSession()
+        defer { session.shutdown() }
+        session.commandDraft = "unrelated draft"
+
+        session.enterSecureInput()
+        XCTAssertTrue(session.isSecureInputActive)
+        XCTAssertEqual(session.inputRequirement, .secure)
+        XCTAssertTrue(session.commandDraft.isEmpty)
+
+        session.exitSecureInput()
+        XCTAssertFalse(session.isSecureInputActive)
+        XCTAssertEqual(session.commandDraft, "unrelated draft")
+    }
+
+    @MainActor
+    func testRawTermiosAutomaticallyUsesEmbeddedDirectInput() async throws {
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        let command = #"/bin/sh -c 'trap "stty icanon; exit 130" INT TERM; stty -icanon echo min 1 time 0; sleep 30'"#
         session.submit(command: command)
 
-        try await waitUntil("raw termios to trigger Terminal mode", timeout: 8) {
-            guard session.mode == .terminal else { return false }
+        try await waitUntil("raw termios to trigger embedded direct input", timeout: 8) {
+            guard session.mode == .blocks,
+                  session.inputRequirement == .direct,
+                  session.shouldEmbedAuthoritativeTerminalInActiveBlock else { return false }
             if case .rawTermios = session.modeAttribution { return true }
             return false
         }
+        XCTAssertEqual(session.activeTerminalPresentation, .compact)
 
         session.sendInterrupt()
         try await waitUntil("canonical shell input to restore Blocks mode", timeout: 8) {
             session.mode == .blocks && !session.isCommandActive
         }
+    }
+
+    @MainActor
+    func testAlternateScreenOverridesTransientAutomaticSecureClassification() async throws {
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        let command = #"/bin/sh -c 'trap "printf \"\033[?1049l\"; stty echo icanon; exit 130" INT TERM; stty -echo -icanon; printf "\033[?1049h"; sleep 30'"#
+        session.submit(command: command)
+
+        try await waitUntil("alternate screen to use direct rather than secure input", timeout: 8) {
+            session.isAlternateScreenActive
+                && session.inputRequirement == .direct
+                && !session.isSecureInputActive
+                && session.modeAttribution == .alternateScreen
+                && session.shouldEmbedAuthoritativeTerminalInActiveBlock
+                && session.shouldPresentExpandedAuthoritativeTerminal
+        }
+
+        session.sendInterrupt()
+    }
+
+    @MainActor
+    func testAlternateScreenLayoutRemovesBottomComposer() async throws {
+        NSWindow.allowsAutomaticWindowTabbing = false
+        let session = makeTestSession()
+        let hostingView = NSHostingView(rootView: ContentView(session: session))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            session.shutdown()
+        }
+
+        hostingView.layoutSubtreeIfNeeded()
+        try await waitUntil("shell to start", timeout: 5) {
+            session.isShellRunning
+        }
+
+        let command = #"/bin/sh -c 'trap "printf \"\033[?1049l\"; stty echo icanon; exit 130" INT TERM; stty -echo -icanon; printf "\033[?1049h"; sleep 30'"#
+        session.submit(command: command)
+
+        try await waitUntil("alternate-screen block layout", timeout: 8) {
+            hostingView.layoutSubtreeIfNeeded()
+            return session.isAlternateScreenActive
+                && session.shouldEmbedAuthoritativeTerminalInActiveBlock
+                && session.shouldPresentExpandedAuthoritativeTerminal
+                && self.findTerminalView(in: hostingView) != nil
+                && self.findTextView(in: hostingView) == nil
+        }
+
+        XCTAssertTrue(session.inputRequirement == .direct)
+        XCTAssertFalse(session.isSecureInputActive)
+        session.sendInterrupt()
+    }
+
+    @MainActor
+    func testCharacterChoiceUsesCompactAuthoritativeBlockAndPreservesPrompt() async throws {
+        NSWindow.allowsAutomaticWindowTabbing = false
+        let session = makeTestSession()
+        let hostingView = NSHostingView(rootView: ContentView(session: session))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            session.shutdown()
+        }
+
+        hostingView.layoutSubtreeIfNeeded()
+        try await waitUntil("shell to start", timeout: 5) {
+            session.isShellRunning
+        }
+
+        let command = #"/bin/sh -c 'trap "stty icanon; exit 130" INT TERM; stty -icanon echo min 1 time 0; printf "PANE_CHOICE [y/n]"; sleep 30'"#
+        session.submit(command: command)
+
+        try await waitUntil("character choice compact input classification", timeout: 8) {
+            session.inputRequirement == .direct
+                && !session.isAlternateScreenActive
+                && !session.isSecureInputActive
+                && session.shouldPresentCompactAuthoritativeTerminal
+                && !session.shouldPresentExpandedAuthoritativeTerminal
+        }
+        try await waitUntil("compact authoritative terminal mount", timeout: 8) {
+            hostingView.layoutSubtreeIfNeeded()
+            return self.findTerminalView(in: hostingView) != nil
+        }
+        XCTAssertNil(findTextView(in: hostingView))
+        let mountedTerminal = try XCTUnwrap(findTerminalView(in: hostingView))
+        try await waitUntil("choice prompt in compact authoritative terminal", timeout: 8) {
+            self.bufferText(in: mountedTerminal, kind: .active)
+                .contains("PANE_CHOICE [y/n]")
+        }
+
+        session.sendInterrupt()
     }
 
     @MainActor
@@ -321,7 +509,11 @@ final class TerminalSessionIntegrationTests: XCTestCase {
         session.submit(command: command)
 
         try await waitUntil("disabled echo to enter secure input", timeout: 8) {
-            session.isSecureInputActive && session.mode == .terminal
+            session.isSecureInputActive
+                && session.mode == .blocks
+                && session.inputRequirement == .secure
+                && session.shouldEmbedAuthoritativeTerminalInActiveBlock
+                && session.shouldPresentCompactAuthoritativeTerminal
         }
         let readyOutput = try await waitFor(
             "PANE_SECURE_READY",
@@ -462,19 +654,20 @@ final class TerminalSessionIntegrationTests: XCTestCase {
         }
 
         hostingView.layoutSubtreeIfNeeded()
-        try await waitUntil("terminal and composer to mount") {
+        try await waitUntil("composer to mount") {
             hostingView.layoutSubtreeIfNeeded()
-            return self.findTerminalView(in: hostingView) != nil
-                && self.findTextView(in: hostingView) != nil
+            return self.findTextView(in: hostingView) != nil
         }
 
         let initialComposer = try XCTUnwrap(findTextView(in: hostingView))
         XCTAssertTrue(window.makeFirstResponder(initialComposer))
-        let terminalView = try XCTUnwrap(findTerminalView(in: hostingView))
+        let terminalView = session.makeAuthoritativeTerminalView()
 
         terminalView.feed(text: "\u{001B}[?1049h")
         try await waitUntil("deferred alternate-screen entry") {
-            session.isAlternateScreenActive && session.mode == .terminal
+            session.isAlternateScreenActive
+                && session.mode == .blocks
+                && session.inputRequirement == .direct
         }
 
         // Exit as soon as the deferred entry notification is observed. This

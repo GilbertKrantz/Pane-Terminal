@@ -81,19 +81,21 @@ struct CommandComposerView: View {
                     .padding(.bottom, 6)
             }
 
-            if session.isSecureInputActive {
-                SecureInputIndicator()
+            if !session.shouldPresentCompactAuthoritativeTerminal {
+                if session.inputRequirement == .unknown {
+                    DirectInputPrompt(session: session)
+                        .padding(.bottom, 4)
+                } else if !visibleSuggestions.isEmpty {
+                    AutocompleteSuggestionsRow(
+                        suggestions: visibleSuggestions,
+                        highlightedSuggestionID: autocompleteSelection.highlightedSuggestionID,
+                        onAccept: acceptSuggestion
+                    )
                     .padding(.bottom, 4)
-            } else if !visibleSuggestions.isEmpty {
-                AutocompleteSuggestionsRow(
-                    suggestions: visibleSuggestions,
-                    highlightedSuggestionID: autocompleteSelection.highlightedSuggestionID,
-                    onAccept: acceptSuggestion
-                )
-                .padding(.bottom, 4)
-            }
+                }
 
-            editorRow
+                editorRow
+            }
         }
     }
 
@@ -111,7 +113,7 @@ struct CommandComposerView: View {
                 }
 
                 if session.isSecureInputActive {
-                    Text("Password input — characters are hidden")
+                    Text("Secure Input")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .padding(.top, 1)
@@ -136,7 +138,9 @@ struct CommandComposerView: View {
             measuredHeight: $editorHeight,
             selectionUTF16Offset: $caretUTF16Offset,
             selectionRequest: selectionRequest,
-            shouldFocus: session.mode == .blocks,
+            shouldFocus: session.mode == .blocks
+                && session.inputRequirement != .direct
+                && session.inputRequirement != .secure,
             shouldRouteTerminalControlKeys: session.isCommandActive,
             onSubmit: { session.submitDraft() },
             onInterrupt: { session.sendInterrupt() },
@@ -343,6 +347,19 @@ private struct SecureInputIndicator: View {
     }
 }
 
+private struct DirectInputPrompt: View {
+    let session: TerminalSession
+
+    var body: some View {
+        Button { session.enterDirectInput() } label: {
+            Label("Direct Input", systemImage: "keyboard")
+        }
+        .font(.caption.weight(.semibold))
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Focus the authoritative terminal for direct input")
+    }
+}
+
 private struct AutocompleteQuery: Equatable {
     let draft: String
     let caretUTF16Offset: Int
@@ -372,7 +389,7 @@ private struct ComposerSelectionRequest: Equatable {
 
 private struct ActiveCommandSurface: View {
     let block: CommandBlock
-    let session: TerminalSession
+    @ObservedObject var session: TerminalSession
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -393,6 +410,23 @@ private struct ActiveCommandSurface: View {
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
+
+                if session.shouldPresentCompactAuthoritativeTerminal {
+                    Label(
+                        session.isSecureInputActive ? "Secure Input" : "Direct Input",
+                        systemImage: session.isSecureInputActive ? "lock.fill" : "keyboard"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                    Button {
+                        session.sendInterrupt()
+                    } label: {
+                        Image(systemName: "stop.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Send Interrupt")
+                }
             }
             .frame(minHeight: 28)
             .padding(.horizontal, 2)
@@ -401,22 +435,23 @@ private struct ActiveCommandSurface: View {
                 isRunning ? "Running \(block.command)" : "Starting \(block.command)"
             )
 
-            if isRunning, session.isAlternateScreenActive {
-                Label("Interactive terminal session active", systemImage: "rectangle.inset.filled")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 52, alignment: .center)
-                    .accessibilityLabel("Interactive terminal session active in Terminal mode")
-            } else if isRunning {
-                LiveCommandTerminalViewRepresentable(session: session, blockID: block.id)
-                    // NSViewRepresentable coordinators retain their immutable
-                    // block ID. Explicit identity prevents SwiftUI from
-                    // recycling a completed block's terminal for its successor.
-                    .id(block.id)
-                    .padding(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
-                    .frame(height: liveTerminalHeight)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
+            if isRunning {
+                if session.shouldPresentCompactAuthoritativeTerminal {
+                    TerminalViewRepresentable(session: session)
+                        .id("authoritative-compact-\(block.id)")
+                        .frame(height: compactTerminalHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                } else {
+                    LiveCommandTerminalViewRepresentable(session: session, blockID: block.id)
+                        // NSViewRepresentable coordinators retain their immutable
+                        // block ID. Explicit identity prevents SwiftUI from
+                        // recycling a completed block's terminal for its successor.
+                        .id(block.id)
+                        .padding(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
+                        .frame(height: liveTerminalHeight)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
             }
         }
     }
@@ -431,6 +466,12 @@ private struct ActiveCommandSurface: View {
         // One command-output row stays compact; the surface grows upward only
         // as output arrives, then scrolls inside its ten-row ceiling.
         return CGFloat(min(max(session.activeCommandVisibleLineCount, 1), 10)) * 17 + 24
+    }
+
+    private var compactTerminalHeight: CGFloat {
+        // Six terminal rows keep the current prompt and nearby context visible
+        // without turning a one-key confirmation into a full-workspace TUI.
+        126
     }
 
     private func statusText(at date: Date) -> String {

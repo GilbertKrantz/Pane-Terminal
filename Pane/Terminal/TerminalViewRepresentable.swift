@@ -23,6 +23,39 @@ private func applyPaneTerminalPalette(to terminalView: TerminalView) {
     }
 }
 
+
+final class AuthoritativeTerminalHostView: NSView {
+    let terminalView: PaneTerminalView
+
+    init(terminalView: PaneTerminalView) {
+        self.terminalView = terminalView
+        super.init(frame: .zero)
+        addSubview(terminalView)
+        terminalView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            terminalView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            terminalView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            terminalView.topAnchor.constraint(equalTo: topAnchor),
+            terminalView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+}
+
+final class AuthoritativeTerminalMountView: NSView {
+    func mount(_ hostView: AuthoritativeTerminalHostView) {
+        guard hostView.superview !== self else { return }
+        hostView.removeFromSuperview()
+        hostView.frame = bounds
+        hostView.autoresizingMask = [.width, .height]
+        addSubview(hostView)
+    }
+}
+
 final class PaneTerminalView: TerminalView {
     var onAlternateScreenChanged: ((Bool) -> Void)?
     var onTerminalResponse: ((ArraySlice<UInt8>) -> Void)?
@@ -72,116 +105,28 @@ final class PaneTerminalView: TerminalView {
 struct TerminalViewRepresentable: NSViewRepresentable {
     @ObservedObject var session: TerminalSession
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(session: session)
+    func makeNSView(context: Context) -> AuthoritativeTerminalMountView {
+        let mountView = AuthoritativeTerminalMountView()
+        let hostView = session.makeAuthoritativeTerminalHostView()
+        applyPaneTerminalPalette(to: hostView.terminalView)
+        mountView.mount(hostView)
+        return mountView
     }
 
-    func makeNSView(context: Context) -> PaneTerminalView {
-        let terminalView = PaneTerminalView(
-            frame: .zero,
-            font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-        )
-        terminalView.autoresizingMask = [.width, .height]
-        context.coordinator.applyPaletteIfNeeded(
-            to: terminalView,
-            using: applyPalette
-        )
-        terminalView.changeScrollback(10_000)
-        terminalView.optionAsMetaKey = true
-        terminalView.allowMouseReporting = true
-        terminalView.caretViewTracksFocus = true
-        terminalView.isHidden = session.mode != .terminal
-        context.coordinator.isTerminalVisible = !terminalView.isHidden
-        context.coordinator.isMounted = true
-        DispatchQueue.main.async { [
-            weak terminalView,
-            weak coordinator = context.coordinator
-        ] in
-            guard let terminalView, let coordinator, coordinator.isMounted else { return }
-            coordinator.session?.attach(terminalView: terminalView)
-        }
-        return terminalView
-    }
-
-    func updateNSView(_ terminalView: PaneTerminalView, context: Context) {
-        context.coordinator.applyPaletteIfNeeded(
-            to: terminalView,
-            using: applyPalette
-        )
-
-        let shouldShowTerminal = session.mode == .terminal
-        context.coordinator.scheduleVisibility(
-            shouldShowTerminal,
-            for: terminalView
-        )
-    }
-
-    static func dismantleNSView(_ terminalView: PaneTerminalView, coordinator: Coordinator) {
-        coordinator.isMounted = false
-        coordinator.session?.detach(terminalView: terminalView)
-    }
-
-    private func applyPalette(to terminalView: TerminalView) {
-        applyPaneTerminalPalette(to: terminalView)
-    }
-
-    @MainActor
-    final class Coordinator {
-        weak var session: TerminalSession?
-        var isMounted = false
-        var isTerminalVisible = false
-        private var appliedAppearanceName: NSAppearance.Name?
-        private var visibilityGeneration = 0
-
-        init(session: TerminalSession) {
-            self.session = session
-        }
-
-        func applyPaletteIfNeeded(
-            to terminalView: TerminalView,
-            using apply: (TerminalView) -> Void
-        ) {
-            let appearanceName = terminalView.effectiveAppearance.bestMatch(
-                from: [.aqua, .darkAqua]
-            )
-            guard appearanceName != appliedAppearanceName else { return }
-            appliedAppearanceName = appearanceName
-            apply(terminalView)
-        }
-
-        func scheduleVisibility(
-            _ shouldShowTerminal: Bool,
-            for terminalView: TerminalView
-        ) {
-            guard isTerminalVisible != shouldShowTerminal
-                || terminalView.isHidden == shouldShowTerminal else { return }
-
-            isTerminalVisible = shouldShowTerminal
-            visibilityGeneration += 1
-            let generation = visibilityGeneration
-
-            DispatchQueue.main.async { [weak self, weak terminalView] in
-                guard let self,
-                      let terminalView,
-                      self.isMounted,
-                      self.visibilityGeneration == generation,
-                      self.isTerminalVisible == shouldShowTerminal else { return }
-
-                let wasHidden = terminalView.isHidden
-                terminalView.isHidden = !shouldShowTerminal
-
-                guard shouldShowTerminal else { return }
-                terminalView.terminal.updateFullScreen()
-                terminalView.setNeedsDisplay(terminalView.bounds)
-                terminalView.layer?.setNeedsDisplay()
-
-                guard wasHidden,
-                      self.session?.mode == .terminal,
-                      let window = terminalView.window else { return }
-                window.makeFirstResponder(terminalView)
-            }
+    func updateNSView(_ mountView: AuthoritativeTerminalMountView, context: Context) {
+        let hostView = session.makeAuthoritativeTerminalHostView()
+        mountView.mount(hostView)
+        applyPaneTerminalPalette(to: hostView.terminalView)
+        hostView.terminalView.isHidden = false
+        hostView.terminalView.terminal.updateFullScreen()
+        hostView.terminalView.setNeedsDisplay(hostView.terminalView.bounds)
+        hostView.terminalView.layer?.setNeedsDisplay()
+        DispatchQueue.main.async { [weak terminalView = hostView.terminalView] in
+            terminalView?.window?.makeFirstResponder(terminalView)
         }
     }
+
+    static func dismantleNSView(_ mountView: AuthoritativeTerminalMountView, coordinator: ()) {}
 }
 
 /// A read-only terminal emulator used only while a block command is active.

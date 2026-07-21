@@ -22,8 +22,26 @@ enum InputMode: String, CaseIterable, Equatable, Sendable {
         self = self == .blocks ? .terminal : .blocks
     }
 }
+enum TerminalInputRequirement: Equatable, Sendable {
+    case shellIdle
+    case lineOriented
+    case direct
+    case secure
+    case unknown
+}
+
+/// Visual space is deliberately independent from how input bytes are routed.
+/// A one-key confirmation and a normal-buffer TUI both need direct PTY input,
+/// but only the latter should replace the main Blocks workspace.
+enum ActiveTerminalPresentation: Equatable, Sendable {
+    case none
+    case compact
+    case expanded
+}
+
 enum InputModeAttribution: Equatable, Sendable {
     case manual
+    case secureInput
     case foregroundProcess(String)
     case rawTermios(String?)
     case alternateScreen
@@ -32,6 +50,8 @@ enum InputModeAttribution: Equatable, Sendable {
         switch self {
         case .manual:
             return "manual selection"
+        case .secureInput:
+            return "secure input is active"
         case .foregroundProcess(let processName):
             return "\(processName) is running"
         case .rawTermios(let processName):
@@ -57,8 +77,7 @@ struct ForegroundProcessSnapshot: Equatable, Sendable {
     }
 
     var isKnownInteractiveProgram: Bool {
-        guard let processName else { return false }
-        return Self.knownInteractiveProcessNames.contains(processName)
+        Self.isKnownInteractiveProgram(named: processName)
     }
 
     var terminalModeAttribution: InputModeAttribution? {
@@ -77,10 +96,18 @@ struct ForegroundProcessSnapshot: Equatable, Sendable {
         return nil
     }
 
+    static func isKnownInteractiveProgram(named processName: String?) -> Bool {
+        guard let processName else { return false }
+        let normalizedName = URL(fileURLWithPath: processName)
+            .lastPathComponent
+            .lowercased()
+        return knownInteractiveProcessNames.contains(normalizedName)
+    }
+
     private static let knownInteractiveProcessNames: Set<String> = [
-        "bpython", "emacs", "fish", "fzf", "htop", "ipython",
-        "less", "more", "nano", "nvim", "python", "python2", "python3",
-        "radian", "ranger", "ssh", "tail", "tmux", "top", "vi", "vim",
-        "watch", "zellij"
+        "bpython", "claude", "codex", "emacs", "fish", "fzf", "htop",
+        "ipython", "less", "more", "nano", "node", "nvim", "opencode",
+        "python", "python2", "python3", "radian", "ranger", "ssh", "tmux",
+        "top", "vi", "vim", "watch", "zellij"
     ]
 }

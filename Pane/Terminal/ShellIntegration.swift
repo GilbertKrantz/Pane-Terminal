@@ -225,7 +225,8 @@ enum ShellIntegration {
 
     private static let lifecycleInstallationScript = #"""
 function __pane_preexec() {
-  printf '\e]777;Pane;START\a'
+  local __pane_command_b64=$(printf %s "$1" | /usr/bin/base64 | /usr/bin/tr -d '\n')
+  printf '\e]777;Pane;START;%s\a' "$__pane_command_b64"
 }
 
 function __pane_precmd() {
@@ -246,7 +247,8 @@ function __pane_preexec() {
   # the idle-only listener before the user's process is forked so git, brew,
   # language servers, and other descendants never retain Pane's endpoint.
   __pane_completion_close_socket
-  printf '\e]777;Pane;START\a'
+  local __pane_command_b64=$(printf %s "$1" | /usr/bin/base64 | /usr/bin/tr -d '\n')
+  printf '\e]777;Pane;START;%s\a' "$__pane_command_b64"
 }
 
 function __pane_precmd() {

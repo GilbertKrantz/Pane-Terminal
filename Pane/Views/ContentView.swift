@@ -12,26 +12,38 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            TerminalViewRepresentable(session: session)
-                .padding(.leading, PaneMetrics.contentTextColumn)
-                .padding(.trailing, PaneMetrics.contentTextColumn)
-                .padding(.top, 8)
-                .allowsHitTesting(session.mode == .terminal)
-                .accessibilityHidden(session.mode != .terminal)
-
             if session.mode == .blocks {
-                BlocksView(session: session)
+                if session.shouldPresentExpandedAuthoritativeTerminal,
+                   let activeBlock = session.activeCommandBlock {
+                    AuthoritativeInputCommandView(
+                        block: activeBlock,
+                        session: session
+                    )
                     .transition(.identity)
+                } else {
+                    BlocksView(session: session)
+                        .transition(.identity)
+                }
+            } else {
+                TerminalViewRepresentable(session: session)
+                    .padding(.leading, PaneMetrics.contentTextColumn)
+                    .padding(.trailing, PaneMetrics.contentTextColumn)
+                    .padding(.top, 8)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(PaneTheme.contentSurface)
         .animation(nil, value: session.mode)
+        .task {
+            session.ensureAuthoritativeTerminalIsRunning()
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if session.mode == .blocks {
+            if session.mode == .blocks && !session.shouldPresentExpandedAuthoritativeTerminal {
                 CommandComposerView(session: session)
             } else {
-                terminalModeBar
+                if session.mode == .terminal {
+                    terminalModeBar
+                }
             }
         }
         .toolbar { terminalToolbar }
@@ -73,6 +85,21 @@ struct ContentView: View {
             }
             Button("Clear Terminal", systemImage: "eraser") {
                 session.clearTerminal()
+            }
+
+            Divider()
+
+            Button("Direct Input", systemImage: "keyboard") {
+                session.enterDirectInput()
+            }
+            if session.isSecureInputActive {
+                Button("Exit Secure Input", systemImage: "lock.open") {
+                    session.exitSecureInput()
+                }
+            } else {
+                Button("Enter Secure Input", systemImage: "lock") {
+                    session.enterSecureInput()
+                }
             }
 
             Divider()

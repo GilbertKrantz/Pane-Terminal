@@ -114,7 +114,7 @@ Tests/
 
 - `TerminalSession` owns the SwiftTerm `LocalProcess`, PTY lifecycle, command writes, resize propagation, input mode, history, block timeline, transcript filtering, and cleanup.
 - `PaneTerminalView` is a small SwiftTerm `TerminalView` subclass that observes real buffer activation and invalidates the complete native drawing surface when the active buffer changes.
-- `TerminalViewRepresentable` creates one terminal view and keeps it mounted across SwiftUI refreshes and mode changes. Its update callback does not feed a transcript, recreate emulator state, or resize the PTY.
+- `TerminalSession` creates one authoritative terminal and stable AppKit host per session. `TerminalViewRepresentable` only moves that host between the active block and Full Terminal mounts; it never reconstructs emulator state or replays a transcript.
 - `AlternateScreenTranscriptFilter` separates full-screen frames from the structured Blocks transcript without changing the byte stream delivered to SwiftTerm.
 - `ShellIntegration` installs additive zsh `preexec` and `precmd` hooks. Private OSC 777 markers identify command start and completion without replacing Oh My Zsh hooks. It also registers a normal `zle -F` completion handler on a private per-shell Unix-domain socket.
 - `BlockStreamParser` removes those markers from captured output and updates working directory, exit status, and timing.
@@ -137,7 +137,7 @@ Pane uses three visual layers:
 
 1. The native macOS title and toolbar area, including shell status, the Blocks/Terminal segmented control, and a restrained actions menu.
 2. One uninterrupted terminal content surface for either the structured block timeline or SwiftTerm.
-3. A bottom interactive material layer: the command composer in Blocks mode or a compact return strip in Terminal mode.
+3. A bottom interactive material layer: the command composer for idle and line-oriented Blocks states, a compact authoritative terminal for one-key and secure prompts, or a compact return strip in Full Terminal. Expanded interactive apps suppress this layer so their authoritative terminal receives the main workspace.
 
 The terminal canvas has no glass wrapper. On macOS 26, the mode switcher and toolbar actions use the system's real interactive Liquid Glass and suppress the toolbar's automatic shared background to avoid nested capsules. On macOS 14 and 15, Pane falls back to a native segmented picker and borderless menu. The bottom composer uses one continuous, lightly outlined `.regularMaterial` surface on every supported release, with a transparent native text editor and one compact neutral rounded-square action inside the same group.
 
@@ -153,6 +153,8 @@ Terminal text, block text, and composer input share the same optical 24-point le
 | **Escape** | Dismiss visible autocomplete suggestions; otherwise use normal text behavior |
 | **Up / Down** | Navigate session command history while no command is active |
 | **Command-Shift-I** | Toggle Blocks / Terminal mode |
+| **Command-Shift-D** | Focus Direct Input, embedded in an active block when available |
+| **Command-Shift-S** | Enter or exit manual Secure Input |
 | **Command-Up / Command-Down** | Select the previous / next block |
 | **Command-Return** | Rerun the selected block |
 | **Command-E** | Put the selected command in the composer |
@@ -183,19 +185,19 @@ Capture has a short deadline and fixed request, candidate, and response-size cap
 
 **Clear Blocks** removes the in-memory block timeline. It does not clear SwiftTerm scrollback or change shell state.
 
-### Terminal mode
+### Direct input and Full Terminal
 
-SwiftTerm becomes first responder and receives keyboard, control, Escape, paste, arrow, Tab, Option/Meta, and mouse events directly. The composer is replaced with a compact status and return strip. Use Terminal mode for password prompts, shell completion, ZLE widgets, REPLs, SSH, `fzf`, terminal coding agents, and any character-at-a-time workflow.
+Pane opens in Blocks mode. Input routing and visual size are separate decisions. Any normal-buffer program that needs direct bytes—including a noncanonical `[y/n]` choice and line-oriented interfaces such as Codex, Claude, or OpenCode—stays in a compact active block backed by the single authoritative SwiftTerm view. Secure prompts use that same compact surface with prediction and persistence disabled. Only alternate-screen TUIs receive the expanded main active-block workspace. Full Terminal remains an explicit layout using the same SwiftTerm instance and PTY.
 
-Pane also watches the PTY foreground process group. The foreground shell keeps Blocks mode active; known interactive programs such as `vim`, `ssh`, Python, and `top` switch automatically to Terminal mode. Independently, disabling `ICANON` or `ECHO` on the PTY is treated as a stronger raw-input signal, including when the local `ssh` process is carrying a remote interactive session. The return strip explains why Pane switched modes. Manual switching through **Command-Shift-I** or the segmented control always remains available and overrides an automatic choice until the foreground state changes.
+Pane watches the PTY foreground process group. The foreground shell keeps the Blocks composer active; known interactive programs such as Codex, Claude, OpenCode, `vim`, `ssh`, Python, and `top` request direct input. Independently, disabling `ICANON` requests direct byte routing, and disabling `ECHO` activates secure input, including when local `ssh` carries a remote session. None of those normal-buffer signals expands the layout; alternate-screen activation is the automatic expansion boundary. Manual Full Terminal selection through **Command-Shift-I** or the segmented control remains sticky until the user leaves it.
 
 ### Alternate-screen behavior
 
 SwiftTerm owns both terminal buffers. On `ESC[?1049h`, the emulator activates a clean alternate buffer; Pane invalidates the complete native backing surface before the new frame is displayed. On `ESC[?1049l`, SwiftTerm restores the preserved normal buffer. The two buffers are never merged.
 
-DEC private modes 47, 1047, and 1049 trigger automatic entry into Terminal mode when Blocks mode is visible. Pane returns to Blocks mode after the normal buffer is restored only when the original switch was automatic and the user has not manually overridden the mode.
+DEC private modes 47, 1047, and 1049 move the authoritative terminal into the active block when Blocks layout is visible. Restoring the normal buffer returns input to the composer when no stronger direct-input signal remains. An explicitly selected Full Terminal layout is not changed automatically.
 
-The SwiftTerm view remains mounted while hidden, so mode changes preserve emulator parsing, scrollback, and both buffers. `updateNSView` applies appearance or schedules visibility only when those values actually change; it never replays the session transcript.
+The `PaneTerminalView` and its AppKit host are created once per session and reparented between presentation mounts, preserving parser state, scrollback, selection, and both buffers without transcript replay.
 
 The structured block path suppresses all alternate-screen frame bytes and inserts one plain `[Alternate screen active]` placeholder per entry. Private command-lifecycle markers still pass through so the originating command can complete normally.
 
@@ -223,16 +225,16 @@ Terminal delegate state is equality-guarded. Buffer-change notifications, visibi
 
 - The active-command mirror is a presentation-only emulator. It does not own the PTY, resize it, send terminal replies, or accept keyboard and mouse input. Its filtered stream and independent geometry can differ from the authoritative terminal for cursor-addressed output, live redraws, and full-screen applications.
 - Finalized blocks are plain-text snapshots extracted from that mirror, with sanitized captured bytes as a fallback. They do not preserve colors or terminal interactivity; Terminal mode is the authoritative view.
-- Commands typed directly in Terminal mode are not converted into structured blocks because they have no composer submission record.
-- While a command is active, Return sends one line of stdin and Shift-Return only edits that line. Active-only Control-C and Control-D are routed directly to the PTY, but other control sequences, arrows, Escape, Tab, mouse reporting, and raw input require Terminal mode.
+- Commands typed directly in Full Terminal become structured blocks when Pane's zsh lifecycle hooks identify their command, start, completion, directory, and exit status. Unsupported shells retain terminal operation with reduced structured capture.
+- While a line-oriented command is active, Return sends one line of stdin and Shift-Return edits that line. Raw, secure, alternate-screen, known interactive, and manually requested input routes through the authoritative terminal instead.
 - Foreground-process recognition is intentionally bounded, and a program can retain canonical/echo input without using a recognized name. Manually switch to Terminal mode when an interactive program exposes none of Pane's signals.
-- Secure-input detection is driven primarily by PTY ECHO state and therefore follows programs that correctly disable echo. A misbehaving program that reads a secret while leaving ECHO enabled provides no authoritative terminal signal; manually enter Terminal mode for such programs.
+- Secure-input detection is driven primarily by PTY ECHO state and therefore follows programs that correctly disable echo. A misbehaving program that reads a secret while leaving ECHO enabled provides no authoritative terminal signal; use manual Secure Input for such programs.
 - Up and Down navigate command history rather than moving the caret vertically in a multiline draft.
 - Durable command-context collection and restoration are wired. Repository detection, Git/project feature collection, transition ranking, semantic retrieval, and an optional local model remain future prediction phases. Finalized visual blocks and terminal scrollback intentionally remain session-only.
 - Replacing zsh with `exec`, removing the integration hooks, or redefining them can prevent the completion marker and leave a block running until interruption, shell exit, or restart.
 - Warm-shell autocomplete depends on zsh's socket, ZLE, PTY, and completion modules. If integration is unavailable, a custom completion exceeds the deadline or caps, or its response cannot be decoded, Pane uses its less context-aware local fallback.
 - Completion workers inherit live shell state by forking from the active zsh, but they run in a short-lived child. Side effects produced only while computing a completion are discarded rather than applied back to the authoritative shell.
-- Automatic mode selection is heuristic. Process-group changes and termios polling can lag by up to one polling interval, and manual mode switching remains authoritative until the foreground state changes.
+- Automatic input classification combines alternate-screen, process-group, termios, and bounded process-name signals. Process-group and termios changes can lag by up to one polling interval; manual Full Terminal selection remains authoritative until the user leaves it.
 - There are no tabs, generated AI predictions, synchronization, remote-session management, or search/export.
 - OSC 52 clipboard reads are enabled for terminal compatibility. A production release should add an explicit permission policy for untrusted remote programs.
 
@@ -251,7 +253,7 @@ Terminal delegate state is equality-guarded. Buffer-change notifications, visibi
 - PTY stderr preservation and nonzero exit-status reporting in both Terminal and finalized Blocks views
 - Stable hover geometry and a compact content-sized one-to-three-line composer
 - One persistent PTY-backed interactive login zsh with normal Oh My Zsh startup
-- Manual Blocks/Terminal input routing plus bounded foreground-process, raw-termios, and alternate-screen switching
+- Block-first input routing with embedded authoritative direct/secure input, plus an explicit Full Terminal layout
 - ECHO-driven secure-input routing that bypasses the composer, suppresses autocomplete, and resumes only at a verified shell prompt boundary
 - Centralized secret sanitization plus ephemeral and durable SQLite runtime-state stores with migrations, bounded retention, scoped deletion, and defense-in-depth write sanitization
 - Live sanitized command collection, bounded restart restoration into prediction history, memory fallback, and Settings controls for storage categories and deletion
@@ -261,12 +263,12 @@ Terminal delegate state is equality-guarded. Buffer-change notifications, visibi
 
 ### Verification
 
-Verification is revision-specific; these results are from the current checkout after warm-zsh autocomplete, the icon-identity fix, and the stderr-descriptor fix:
+Verification is revision-specific; these results are from the current checkout after the block-first authoritative-terminal routing work:
 
-- SwiftPM: **100 of 100 tests passed**, including protocol framing, candidate mapping, selectable autocomplete, idle-zsh secure-mode suppression, real child-process and shell-built-in no-echo leakage tests, live PTY-to-SQLite restart restoration, persistence-disabled disk checks, live-history disable behavior, storage-category controls, SQLite retention, a raw database-file secret scan, read-only mirror chrome, persistent PTY behavior, Control-C routing, alternate-buffer isolation, stderr-only output with a nonzero exit status, and warm-shell completion capture.
+- SwiftPM: **111 of 111 tests passed**, including compact authoritative presentation for normal-buffer choices and agent interfaces, expanded alternate-screen presentation, alternate-screen override of transient secure classification, stable authoritative host identity, direct-terminal command capture, raw/secure input routing, suspended-draft restoration, protocol framing, selectable autocomplete, no-echo leakage checks, PTY-to-SQLite restoration, read-only mirror chrome, persistent PTY behavior, Control-C routing, alternate-buffer isolation, stderr-only output with a nonzero exit status, and warm-shell completion capture.
 - Native Xcode build: **succeeded** for the `Pane` Debug scheme on macOS with SwiftTerm 1.14.0.
-- Runtime: the generated `Pane.app` was registered and launched as a bundle. The app uses `com.gilbertkrantz.Pane`, contains the compiled `AppIcon.icns`, applies it to current and future window miniatures, and the corrected window-preview icon was visually confirmed.
-- Generated app: `/Users/chandraw/Documents/Webe's Term/Build/Pane.app`.
+- Runtime: the generated `Pane.app` was registered, launched as a bundle, and remained running after startup. Interactive visual behavior was not reverified in this pass.
+- Generated app: `/tmp/PaneDerivedData/Build/Products/Debug/Pane.app`.
 
 ### Verification limits
 
