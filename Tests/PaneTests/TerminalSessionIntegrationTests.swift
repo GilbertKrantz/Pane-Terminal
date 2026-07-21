@@ -1,0 +1,811 @@
+import AppKit
+import Darwin
+import SwiftUI
+import XCTest
+@preconcurrency import SwiftTerm
+@testable import Pane
+
+final class TerminalSessionIntegrationTests: XCTestCase {
+    @MainActor
+    func testHiddenPrimaryTerminalStillEmitsProtocolReplies() {
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        var response = Data()
+        terminalView.onTerminalResponse = { response.append(contentsOf: $0) }
+
+        terminalView.feed(text: "\u{001B}[6n")
+
+        XCTAssertFalse(response.isEmpty)
+        XCTAssertTrue(response.starts(with: [0x1B, 0x5B]))
+        XCTAssertEqual(response.last, 0x52)
+    }
+
+    @MainActor
+    func testBlocksComposerHasAFullWidthEditableTextView() async throws {
+        NSWindow.allowsAutomaticWindowTabbing = false
+        let configuration = ShellConfiguration.loginZsh(
+            processEnvironment: [
+                "HOME": "/tmp",
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
+            ],
+            homeDirectory: URL(fileURLWithPath: "/tmp")
+        )
+        let session = TerminalSession(shellConfiguration: configuration)
+        let hostingView = NSHostingView(rootView: ContentView(session: session))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            session.shutdown()
+        }
+
+        hostingView.layoutSubtreeIfNeeded()
+        try await Task.sleep(nanoseconds: 150_000_000)
+        hostingView.layoutSubtreeIfNeeded()
+
+        let textView = try XCTUnwrap(findTextView(in: hostingView))
+        XCTAssertTrue(textView.isEditable)
+        XCTAssertTrue(textView.isSelectable)
+        XCTAssertGreaterThan(textView.bounds.width, 400)
+        XCTAssertTrue(window.makeFirstResponder(textView))
+
+        textView.insertText("printf composer-ok", replacementRange: textView.selectedRange())
+        await Task.yield()
+
+        XCTAssertEqual(textView.string, "printf composer-ok")
+        XCTAssertEqual(session.commandDraft, "printf composer-ok")
+    }
+
+    @MainActor
+    func testComposerControlCInterruptsForegroundCommand() async throws {
+        NSWindow.allowsAutomaticWindowTabbing = false
+        let session = makeTestSession()
+        let hostingView = NSHostingView(rootView: ContentView(session: session))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            session.shutdown()
+        }
+
+        try await waitUntil("composer and shell to mount", timeout: 5) {
+            hostingView.layoutSubtreeIfNeeded()
+            return self.findTextView(in: hostingView) != nil && session.isShellRunning
+        }
+
+        let command = "caffeinate"
+        session.submit(command: command)
+        try await waitUntil("caffeinate to become active", timeout: 5) {
+            guard let block = session.activeCommandBlock else { return false }
+            return block.command == command && block.state == .running
+        }
+
+        session.commandDraft = "draft must remain"
+        let textView = try XCTUnwrap(findTextView(in: hostingView))
+        XCTAssertTrue(window.makeFirstResponder(textView))
+        let controlC = try XCTUnwrap(
+            NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: .control,
+                timestamp: 0,
+                windowNumber: window.windowNumber,
+                context: nil,
+                characters: "\u{3}",
+                charactersIgnoringModifiers: "c",
+                isARepeat: false,
+                keyCode: 8
+            )
+        )
+        // Send through NSApplication, not directly to the text view, so the
+        // test covers the same key-equivalent/responder path as real typing.
+        NSApplication.shared.sendEvent(controlC)
+
+        try await waitUntil("Control-C to interrupt caffeinate", timeout: 5) {
+            guard let block = session.blocks.first(where: { $0.command == command }) else {
+                return false
+            }
+            if case .interrupted(exitCode: 130) = block.state {
+                return !session.isCommandActive
+            }
+            return false
+        }
+        XCTAssertEqual(session.commandDraft, "draft must remain")
+    }
+
+    @MainActor
+    func testAlternateScreenAutomaticallyEntersAndLeavesTerminalMode() async throws {
+        let configuration = ShellConfiguration.loginZsh(
+            processEnvironment: [
+                "HOME": "/tmp",
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
+            ],
+            homeDirectory: URL(fileURLWithPath: "/tmp")
+        )
+        let session = TerminalSession(shellConfiguration: configuration)
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        XCTAssertEqual(session.mode, .blocks)
+        XCTAssertFalse(session.isAlternateScreenActive)
+
+        for mode in [47, 1047, 1049] {
+            terminalView.feed(text: "\u{001B}[?\(mode)h")
+
+            XCTAssertTrue(terminalView.terminal.isCurrentBufferAlternate)
+            try await waitUntil("session to observe DEC mode \(mode) entering") {
+                session.isAlternateScreenActive && session.mode == .terminal
+            }
+
+            terminalView.feed(text: "\u{001B}[?\(mode)l")
+
+            XCTAssertFalse(terminalView.terminal.isCurrentBufferAlternate)
+            try await waitUntil("session to observe DEC mode \(mode) leaving") {
+                !session.isAlternateScreenActive && session.mode == .blocks
+            }
+        }
+
+        terminalView.feed(text: "\u{001B}[?1048h")
+        await Task.yield()
+        XCTAssertFalse(session.isAlternateScreenActive)
+        XCTAssertEqual(session.mode, .blocks)
+    }
+
+    @MainActor
+    func testManualModeChoiceOverridesAlternateScreenAutoReturn() async throws {
+        let configuration = ShellConfiguration.loginZsh(
+            processEnvironment: [
+                "HOME": "/tmp",
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
+            ],
+            homeDirectory: URL(fileURLWithPath: "/tmp")
+        )
+        let session = TerminalSession(shellConfiguration: configuration)
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        terminalView.feed(text: "\u{001B}[?1049h")
+        try await waitUntil("automatic Terminal mode after entering alternate screen") {
+            session.isAlternateScreenActive && session.mode == .terminal
+        }
+
+        session.setMode(.blocks)
+        session.setMode(.terminal)
+        terminalView.feed(text: "\u{001B}[?1049l")
+
+        try await waitUntil("alternate-screen exit after manual mode override") {
+            !session.isAlternateScreenActive
+        }
+        XCTAssertEqual(session.mode, .terminal)
+    }
+
+    @MainActor
+    func testDEC1049UsesAnIsolatedAlternateBufferAndRestoresNormalBuffer() {
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+
+        terminalView.feed(text: "normal-buffer-marker")
+        let normalBeforeSwitch = bufferText(in: terminalView, kind: .normal)
+        XCTAssertTrue(normalBeforeSwitch.contains("normal-buffer-marker"))
+
+        terminalView.feed(text: "\u{001B}[?1049h")
+
+        XCTAssertTrue(terminalView.terminal.isCurrentBufferAlternate)
+        XCTAssertFalse(bufferText(in: terminalView, kind: .active).contains("normal-buffer-marker"))
+        XCTAssertEqual(bufferText(in: terminalView, kind: .normal), normalBeforeSwitch)
+
+        terminalView.feed(text: "alternate-frame-marker")
+
+        let alternateFrame = bufferText(in: terminalView, kind: .active)
+        XCTAssertTrue(alternateFrame.contains("alternate-frame-marker"))
+        XCTAssertFalse(alternateFrame.contains("normal-buffer-marker"))
+        XCTAssertFalse(bufferText(in: terminalView, kind: .normal).contains("alternate-frame-marker"))
+
+        terminalView.feed(text: "\u{001B}[?1049l")
+
+        XCTAssertFalse(terminalView.terminal.isCurrentBufferAlternate)
+        let restoredNormalBuffer = bufferText(in: terminalView, kind: .active)
+        XCTAssertEqual(restoredNormalBuffer, normalBeforeSwitch)
+        XCTAssertTrue(restoredNormalBuffer.contains("normal-buffer-marker"))
+        XCTAssertFalse(restoredNormalBuffer.contains("alternate-frame-marker"))
+    }
+
+    @MainActor
+    func testRapidAlternateScreenExitReturnsKeyboardFocusToComposer() async throws {
+        NSWindow.allowsAutomaticWindowTabbing = false
+        let configuration = ShellConfiguration.loginZsh(
+            processEnvironment: [
+                "HOME": "/tmp",
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
+            ],
+            homeDirectory: URL(fileURLWithPath: "/tmp")
+        )
+        let session = TerminalSession(shellConfiguration: configuration)
+        let hostingView = NSHostingView(rootView: ContentView(session: session))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            session.shutdown()
+        }
+
+        hostingView.layoutSubtreeIfNeeded()
+        try await waitUntil("terminal and composer to mount") {
+            hostingView.layoutSubtreeIfNeeded()
+            return self.findTerminalView(in: hostingView) != nil
+                && self.findTextView(in: hostingView) != nil
+        }
+
+        let initialComposer = try XCTUnwrap(findTextView(in: hostingView))
+        XCTAssertTrue(window.makeFirstResponder(initialComposer))
+        let terminalView = try XCTUnwrap(findTerminalView(in: hostingView))
+
+        terminalView.feed(text: "\u{001B}[?1049h")
+        try await waitUntil("deferred alternate-screen entry") {
+            session.isAlternateScreenActive && session.mode == .terminal
+        }
+
+        // Exit as soon as the deferred entry notification is observed. This
+        // intentionally races the representable's queued focus hand-off.
+        terminalView.feed(text: "\u{001B}[?1049l")
+        try await waitUntil("deferred alternate-screen exit") {
+            !session.isAlternateScreenActive && session.mode == .blocks
+        }
+
+        try await waitUntil("keyboard focus to return to the composer") {
+            hostingView.layoutSubtreeIfNeeded()
+            guard let composer = self.findTextView(in: hostingView) else { return false }
+            return window.firstResponder === composer
+        }
+
+        XCTAssertFalse(terminalView.terminal.isCurrentBufferAlternate)
+        XCTAssertTrue(window.firstResponder is NSTextView)
+
+        // A true back-to-back enter/leave is coalesced before either state is
+        // published. The stale queued entry must not steal focus afterward.
+        terminalView.feed(text: "\u{001B}[?1049h")
+        terminalView.feed(text: "\u{001B}[?1049l")
+        await drainMainQueue(turns: 2)
+        hostingView.layoutSubtreeIfNeeded()
+
+        let composerAfterCoalescedSwitch = try XCTUnwrap(findTextView(in: hostingView))
+        XCTAssertFalse(session.isAlternateScreenActive)
+        XCTAssertEqual(session.mode, .blocks)
+        XCTAssertTrue(window.firstResponder === composerAfterCoalescedSwitch)
+    }
+
+    @MainActor
+    func testInteractiveLoginShellLoadsZshrcUsedByOhMyZsh() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Pane-Zshrc-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        try "export PANE_ZSHRC=loaded\n".write(
+            to: directory.appendingPathComponent(".zshrc"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let configuration = ShellConfiguration.loginZsh(
+            processEnvironment: [
+                "HOME": directory.path,
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+                "ZDOTDIR": directory.path
+            ],
+            homeDirectory: directory
+        )
+        let session = TerminalSession(shellConfiguration: configuration)
+        let terminalView = TerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 400))
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        session.commandDraft = "printf 'PANE_ZSHRC=%s\\n' \"$PANE_ZSHRC\""
+        session.submitDraft()
+
+        let output = try await waitFor(
+            "PANE_ZSHRC=loaded",
+            in: terminalView,
+            timeout: 5
+        )
+        XCTAssertTrue(
+            output.contains("PANE_ZSHRC=loaded"),
+            "Expected interactive zsh to load $ZDOTDIR/.zshrc:\n\(output)"
+        )
+    }
+
+    @MainActor
+    func testCommandsShareOnePersistentPTYBackedShell() async throws {
+        let configuration = ShellConfiguration.loginZsh(
+            processEnvironment: [
+                "HOME": "/tmp",
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
+            ],
+            homeDirectory: URL(fileURLWithPath: "/tmp")
+        )
+        let session = TerminalSession(shellConfiguration: configuration)
+        let terminalView = TerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 400))
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        XCTAssertTrue(session.isShellRunning)
+        session.commandDraft = "cd /"
+        session.submitDraft()
+        try await waitUntil("cd command to complete") {
+            session.blocks.contains { block in
+                guard block.command == "cd /" else { return false }
+                if case .completed = block.state { return true }
+                return false
+            }
+        }
+
+        session.commandDraft = "printf 'PANE_CWD=%s\\n' \"$PWD\""
+        session.submitDraft()
+
+        var renderedOutput = try await waitFor(
+            "PANE_CWD=/",
+            in: terminalView,
+            timeout: 5
+        )
+
+        XCTAssertTrue(
+            renderedOutput.contains("PANE_CWD=/"),
+            "Expected persistent working directory in terminal output:\n\(renderedOutput)"
+        )
+
+        session.setMode(.terminal)
+        let rawCommand = Array("printf 'PANE_RAW_OK\\n'\r".utf8)
+        terminalView.send(data: rawCommand[...])
+
+        renderedOutput = try await waitFor(
+            "PANE_RAW_OK",
+            in: terminalView,
+            timeout: 5
+        )
+
+        XCTAssertTrue(
+            renderedOutput.contains("PANE_RAW_OK"),
+            "Expected raw-mode bytes to reach the PTY:\n\(renderedOutput)"
+        )
+
+        let block = try await waitForCompletedBlock(
+            containing: "PANE_CWD=/",
+            in: session,
+            timeout: 5
+        )
+        XCTAssertEqual(block.command, "printf 'PANE_CWD=%s\\n' \"$PWD\"")
+        XCTAssertTrue(block.succeeded)
+        XCTAssertEqual(session.currentDirectory, "/")
+    }
+
+    @MainActor
+    func testActiveBlockStreamsThroughReadOnlyTerminalThenFreezesOneSnapshot() async throws {
+        let configuration = ShellConfiguration.loginZsh(
+            processEnvironment: [
+                "HOME": "/tmp",
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
+            ],
+            homeDirectory: URL(fileURLWithPath: "/tmp")
+        )
+        let session = TerminalSession(shellConfiguration: configuration)
+        let primary = TerminalView(frame: NSRect(x: 0, y: 0, width: 800, height: 400))
+        let live = LiveCommandTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 220)
+        )
+        session.attach(terminalView: primary)
+        defer { session.shutdown() }
+
+        let command =
+            "printf 'PANE_PROGRESS_01%%\\rPANE_PROGRESS_42%%\\rPANE_%s\\n' " +
+            "PROGRESS_DONE; sleep 0.5"
+        session.submit(command: command)
+
+        try await waitUntil("command to become active") {
+            session.blockTimeline.activeBlockID != nil
+        }
+        let blockID = try XCTUnwrap(session.blockTimeline.activeBlockID)
+        session.attachLiveCommandTerminalView(live, blockID: blockID)
+        // Reattaching the same mirror must not replay buffered bytes twice.
+        session.attachLiveCommandTerminalView(live, blockID: blockID)
+
+        try await waitUntil("live terminal to render progress") {
+            self.bufferText(in: live, kind: .active).contains("PANE_PROGRESS_DONE")
+        }
+
+        let runningBlock = try XCTUnwrap(session.blockTimeline.block(id: blockID))
+        XCTAssertEqual(runningBlock.output, "")
+        XCTAssertTrue(primary.terminalDelegate === session)
+        XCTAssertNil(live.terminalDelegate)
+        XCTAssertEqual(
+            occurrenceCount(of: "PANE_PROGRESS_DONE", in: bufferText(in: live, kind: .active)),
+            1
+        )
+
+        try await waitUntil("active command to complete") {
+            guard let block = session.blockTimeline.block(id: blockID) else { return false }
+            if case .completed = block.state { return true }
+            return false
+        }
+
+        let completedBlock = try XCTUnwrap(session.blockTimeline.block(id: blockID))
+        XCTAssertEqual(completedBlock.output, "PANE_PROGRESS_DONE")
+        XCTAssertEqual(
+            occurrenceCount(
+                of: "PANE_PROGRESS_DONE",
+                in: bufferText(in: primary, kind: .active)
+            ),
+            1
+        )
+    }
+
+    @MainActor
+    func testMultilineDraftProducesOneCompletedBlock() async throws {
+        let session = makeTestSession()
+        let terminalView = TerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        let command = "printf 'PANE_MULTI_ONE\\n'\nprintf 'PANE_MULTI_TWO\\n'"
+        session.submit(command: command)
+
+        try await waitUntil("multiline command to complete as one block", timeout: 5) {
+            session.blocks.contains { block in
+                guard block.command == command else { return false }
+                if case .completed = block.state { return true }
+                return false
+            }
+        }
+
+        let matchingBlocks = session.blocks.filter { $0.command == command }
+        let block = try XCTUnwrap(matchingBlocks.first)
+        XCTAssertEqual(matchingBlocks.count, 1)
+        XCTAssertTrue(block.output.contains("PANE_MULTI_ONE"))
+        XCTAssertTrue(block.output.contains("PANE_MULTI_TWO"))
+    }
+
+    @MainActor
+    func testIncompleteCommandContinuesInComposerAndCompletesOneBlock() async throws {
+        let session = makeTestSession()
+        let terminalView = TerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        session.submit(command: "if true; then")
+        try await waitUntil("shell continuation prompt", timeout: 5) {
+            guard let block = session.activeCommandBlock else { return false }
+            return block.command == "if true; then" && block.state == .queued
+        }
+
+        session.commandDraft = "printf 'PANE_CONTINUATION_OK\\n'"
+        session.submitDraft()
+        session.commandDraft = "fi"
+        session.submitDraft()
+
+        let expectedCommand = "if true; then\nprintf 'PANE_CONTINUATION_OK\\n'\nfi"
+        try await waitUntil("continued command to complete", timeout: 5) {
+            session.blocks.contains { block in
+                guard block.command == expectedCommand else { return false }
+                if case .completed = block.state { return true }
+                return false
+            }
+        }
+
+        let block = try XCTUnwrap(session.blocks.first { $0.command == expectedCommand })
+        XCTAssertTrue(block.output.contains("PANE_CONTINUATION_OK"))
+        XCTAssertEqual(session.history.commands.last, expectedCommand)
+    }
+
+    @MainActor
+    func testCancellingContinuationUnwedgesNextCommand() async throws {
+        let session = makeTestSession()
+        let terminalView = TerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        let incompleteCommand = "if true; then"
+        session.submit(command: incompleteCommand)
+        try await waitUntil("incomplete command to await input", timeout: 5) {
+            session.activeCommandBlock?.command == incompleteCommand
+        }
+
+        session.sendInterrupt()
+        try await waitUntil("incomplete command cancellation", timeout: 5) {
+            guard let block = session.blocks.first(where: { $0.command == incompleteCommand }) else {
+                return false
+            }
+            if case .interrupted = block.state {
+                return !session.isCommandActive
+            }
+            return false
+        }
+
+        let recoveryCommand = "printf 'PANE_AFTER_CANCEL_OK\\n'"
+        session.submit(command: recoveryCommand)
+        try await waitUntil("command after cancellation to complete", timeout: 5) {
+            session.blocks.contains { block in
+                guard block.command == recoveryCommand,
+                      block.output.contains("PANE_AFTER_CANCEL_OK") else { return false }
+                if case .completed = block.state { return true }
+                return false
+            }
+        }
+    }
+
+    @MainActor
+    func testLiveMirrorDetachDoesNotLoseEarlierOutput() async throws {
+        let session = makeTestSession()
+        let primary = TerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        let firstMirror = LiveCommandTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 220)
+        )
+        let secondMirror = LiveCommandTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 220)
+        )
+        session.attach(terminalView: primary)
+        defer { session.shutdown() }
+
+        session.submit(
+            command: "printf 'PANE_EARLY\\n'; sleep 0.25; printf 'PANE_LATE\\n'"
+        )
+        try await waitUntil("command to start", timeout: 5) {
+            session.blockTimeline.activeBlockID != nil
+        }
+        let blockID = try XCTUnwrap(session.blockTimeline.activeBlockID)
+        session.attachLiveCommandTerminalView(firstMirror, blockID: blockID)
+
+        try await waitUntil("early mirror output", timeout: 5) {
+            self.bufferText(in: firstMirror, kind: .active).contains("PANE_EARLY")
+        }
+        session.detachLiveCommandTerminalView(firstMirror, blockID: blockID)
+        session.attachLiveCommandTerminalView(secondMirror, blockID: blockID)
+
+        try await waitUntil("reattached mirror to restore early output", timeout: 5) {
+            self.bufferText(in: secondMirror, kind: .active).contains("PANE_EARLY")
+        }
+        try await waitUntil("command to finish after mirror transition", timeout: 5) {
+            guard let block = session.blockTimeline.block(id: blockID) else { return false }
+            if case .completed = block.state { return true }
+            return false
+        }
+
+        let completed = try XCTUnwrap(session.blockTimeline.block(id: blockID))
+        XCTAssertTrue(completed.output.contains("PANE_EARLY"))
+        XCTAssertTrue(completed.output.contains("PANE_LATE"))
+    }
+
+    func testRawWaitStatusIsNormalizedForDisplay() {
+        XCTAssertEqual(TerminalSession.normalizedExitCode(fromWaitStatus: 0), 0)
+        XCTAssertEqual(TerminalSession.normalizedExitCode(fromWaitStatus: 7 << 8), 7)
+        XCTAssertEqual(TerminalSession.normalizedExitCode(fromWaitStatus: SIGTERM), 143)
+        XCTAssertNil(TerminalSession.normalizedExitCode(fromWaitStatus: nil))
+    }
+
+    @MainActor
+    func testAutocompleteCapturesCompletionDefinedInTheWarmShell() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Pane-WarmCompletion-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        try "autoload -Uz compinit\ncompinit -C\n".write(
+            to: directory.appendingPathComponent(".zshrc"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let configuration = ShellConfiguration.loginZsh(
+            processEnvironment: [
+                "HOME": directory.path,
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+                "ZDOTDIR": directory.path
+            ],
+            homeDirectory: directory
+        )
+        let session = TerminalSession(shellConfiguration: configuration)
+        let terminalView = TerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        // This variable and compdef are created after the persistent shell is
+        // running. A separately initialized helper zsh cannot observe them.
+        let installRuntimeCompletion = #"typeset -g PANE_WARM_FLAG='from-warm-state'; _pane_warm_completion() { _arguments "--${PANE_WARM_FLAG}[Defined in the active Pane shell]" }; compdef _pane_warm_completion pane-warm-fixture"#
+        session.submit(command: installRuntimeCompletion)
+
+        try await waitUntil("runtime completion definition to finish", timeout: 8) {
+            session.blocks.contains { block in
+                guard block.command == installRuntimeCompletion else { return false }
+                if case .completed = block.state { return true }
+                return false
+            }
+        }
+
+        let draft = "pane-warm-fixture --f"
+        let suggestions = await session.autocompleteSuggestions(
+            for: draft,
+            cursorUTF16Offset: (draft as NSString).length
+        )
+
+        let warmSuggestion = try XCTUnwrap(
+            suggestions.first(where: { $0.replacementText == "--from-warm-state" }),
+            "Expected zsh compsys to use the live shell's runtime compdef and parameter"
+        )
+        XCTAssertEqual(warmSuggestion.source, .zsh)
+        XCTAssertEqual(warmSuggestion.detail, "Defined in the active Pane shell")
+    }
+
+    @MainActor
+    private func waitFor(
+        _ marker: String,
+        in terminalView: TerminalView,
+        timeout: TimeInterval
+    ) async throws -> String {
+        let deadline = Date().addingTimeInterval(timeout)
+        var output = ""
+
+        while Date() < deadline {
+            output = String(
+                data: terminalView.terminal.getBufferAsData(),
+                encoding: .utf8
+            ) ?? ""
+            if output.contains(marker) {
+                return output
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        return output
+    }
+
+    @MainActor
+    private func makeTestSession() -> TerminalSession {
+        TerminalSession(
+            shellConfiguration: .loginZsh(
+                processEnvironment: [
+                    "HOME": "/tmp",
+                    "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
+                ],
+                homeDirectory: URL(fileURLWithPath: "/tmp")
+            )
+        )
+    }
+
+    @MainActor
+    private func waitForCompletedBlock(
+        containing marker: String,
+        in session: TerminalSession,
+        timeout: TimeInterval
+    ) async throws -> CommandBlock {
+        let deadline = Date().addingTimeInterval(timeout)
+
+        while Date() < deadline {
+            if let block = session.blocks.first(where: { block in
+                guard block.output.contains(marker) else { return false }
+                if case .completed = block.state { return true }
+                return false
+            }) {
+                return block
+            }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        XCTFail("Timed out waiting for completed block containing \(marker)")
+        throw CocoaError(.coderReadCorrupt)
+    }
+
+    @MainActor
+    private func waitUntil(
+        _ description: String,
+        timeout: TimeInterval = 2,
+        condition: @escaping @MainActor () -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+
+        while Date() < deadline {
+            if condition() {
+                return
+            }
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        XCTFail("Timed out waiting for \(description)")
+        throw CocoaError(.coderReadCorrupt)
+    }
+
+    @MainActor
+    private func bufferText(
+        in terminalView: TerminalView,
+        kind: Terminal.BufferKind
+    ) -> String {
+        String(
+            data: terminalView.terminal.getBufferAsData(kind: kind),
+            encoding: .utf8
+        ) ?? ""
+    }
+
+    private func occurrenceCount(of needle: String, in text: String) -> Int {
+        guard !needle.isEmpty else { return 0 }
+        return text.components(separatedBy: needle).count - 1
+    }
+
+    @MainActor
+    private func drainMainQueue(turns: Int) async {
+        for _ in 0..<turns {
+            await withCheckedContinuation {
+                (continuation: CheckedContinuation<Void, Never>) in
+                DispatchQueue.main.async {
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private func findTextView(in view: NSView) -> NSTextView? {
+        if let textView = view as? NSTextView {
+            return textView
+        }
+
+        for subview in view.subviews {
+            if let textView = findTextView(in: subview) {
+                return textView
+            }
+        }
+        return nil
+    }
+
+    @MainActor
+    private func findTerminalView(in view: NSView) -> PaneTerminalView? {
+        if let terminalView = view as? PaneTerminalView {
+            return terminalView
+        }
+
+        for subview in view.subviews {
+            if let terminalView = findTerminalView(in: subview) {
+                return terminalView
+            }
+        }
+        return nil
+    }
+}
