@@ -45,6 +45,53 @@ struct CommandAutocompleteEdit: Equatable, Sendable {
     let cursorUTF16Offset: Int
 }
 
+/// Keyboard selection state for a transient completion list. Selection is
+/// kept separate from the draft so Tab can move through candidates without
+/// modifying the command until the user confirms one with Return or a click.
+struct CommandAutocompleteSelection: Equatable, Sendable {
+    private(set) var highlightedSuggestionID: String?
+
+    mutating func move(
+        by offset: Int,
+        through suggestions: [CommandAutocompleteSuggestion]
+    ) -> Bool {
+        guard !suggestions.isEmpty, offset != 0 else {
+            highlightedSuggestionID = nil
+            return false
+        }
+
+        let currentIndex = highlightedSuggestionID.flatMap { highlightedID in
+            suggestions.firstIndex { $0.id == highlightedID }
+        }
+        let nextIndex: Int
+        if let currentIndex {
+            nextIndex = (currentIndex + offset).modulo(suggestions.count)
+        } else {
+            nextIndex = offset > 0 ? 0 : suggestions.count - 1
+        }
+        highlightedSuggestionID = suggestions[nextIndex].id
+        return true
+    }
+
+    func selected(
+        from suggestions: [CommandAutocompleteSuggestion]
+    ) -> CommandAutocompleteSuggestion? {
+        guard let highlightedSuggestionID else { return nil }
+        return suggestions.first { $0.id == highlightedSuggestionID }
+    }
+
+    mutating func reset() {
+        highlightedSuggestionID = nil
+    }
+}
+
+private extension Int {
+    func modulo(_ divisor: Int) -> Int {
+        let remainder = self % divisor
+        return remainder >= 0 ? remainder : remainder + divisor
+    }
+}
+
 /// A synchronous, side-effect-free completion coordinator apart from local
 /// directory reads. It never launches a shell or writes to the terminal.
 struct CommandAutocomplete {

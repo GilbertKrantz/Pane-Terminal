@@ -468,6 +468,37 @@ final class TerminalSessionIntegrationTests: XCTestCase {
     }
 
     @MainActor
+    func testCompletedBlockPreservesStderrAndNonzeroExitCode() async throws {
+        let session = makeTestSession()
+        let terminalView = TerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        let marker = "PANE_STDERR_ONLY_7E94D9"
+        let command = "print -u2 -- \(marker); (exit 23)"
+        session.submit(command: command)
+
+        try await waitUntil("stderr-only command to finish", timeout: 5) {
+            guard let block = session.blocks.first(where: { $0.command == command }) else {
+                return false
+            }
+            if case .completed(exitCode: 23) = block.state {
+                return true
+            }
+            return false
+        }
+
+        let block = try XCTUnwrap(session.blocks.first { $0.command == command })
+        XCTAssertEqual(block.state, .completed(exitCode: 23))
+        XCTAssertEqual(
+            block.output.trimmingCharacters(in: .whitespacesAndNewlines),
+            marker
+        )
+    }
+
+    @MainActor
     func testMultilineDraftProducesOneCompletedBlock() async throws {
         let session = makeTestSession()
         let terminalView = TerminalView(

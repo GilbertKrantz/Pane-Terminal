@@ -214,6 +214,39 @@ final class CommandAutocompleteTests: XCTestCase {
         XCTAssertTrue(suggestions[2].isDirectory)
     }
 
+    func testKeyboardSelectionCyclesWithoutChangingSuggestionOrder() {
+        let suggestions = [
+            CommandAutocompleteSuggestion(text: "checkout", source: .zsh),
+            CommandAutocompleteSuggestion(text: "cherry-pick", source: .zsh),
+            CommandAutocompleteSuggestion(text: "clean", source: .zsh)
+        ]
+        var selection = CommandAutocompleteSelection()
+
+        XCTAssertTrue(selection.move(by: 1, through: suggestions))
+        XCTAssertEqual(selection.selected(from: suggestions)?.text, "checkout")
+        XCTAssertTrue(selection.move(by: 1, through: suggestions))
+        XCTAssertEqual(selection.selected(from: suggestions)?.text, "cherry-pick")
+        XCTAssertTrue(selection.move(by: 1, through: suggestions))
+        XCTAssertEqual(selection.selected(from: suggestions)?.text, "clean")
+        XCTAssertTrue(selection.move(by: 1, through: suggestions))
+        XCTAssertEqual(selection.selected(from: suggestions)?.text, "checkout")
+    }
+
+    func testKeyboardSelectionMovesBackwardAndResetsForEmptyResults() {
+        let suggestions = [
+            CommandAutocompleteSuggestion(text: "main", source: .zsh),
+            CommandAutocompleteSuggestion(text: "master", source: .zsh)
+        ]
+        var selection = CommandAutocompleteSelection()
+
+        XCTAssertTrue(selection.move(by: -1, through: suggestions))
+        XCTAssertEqual(selection.selected(from: suggestions)?.text, "master")
+        XCTAssertTrue(selection.move(by: -1, through: suggestions))
+        XCTAssertEqual(selection.selected(from: suggestions)?.text, "main")
+        XCTAssertFalse(selection.move(by: 1, through: []))
+        XCTAssertNil(selection.highlightedSuggestionID)
+    }
+
     func testCapturedSuggestionsAreDeduplicatedAndCappedWithoutReordering() {
         let candidates = (0..<20).map { index in
             ZshCompletionCandidate(

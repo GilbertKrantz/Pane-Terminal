@@ -30,6 +30,8 @@ struct PaneApp: App {
 private final class AppDelegate: NSObject, NSApplicationDelegate {
     static weak var sharedSession: TerminalSession?
     private var terminalControlKeyMonitor: Any?
+    private var windowIconObserver: NSObjectProtocol?
+    private var applicationIcon: NSImage?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         terminalControlKeyMonitor = NSEvent.addLocalMonitorForEvents(
@@ -62,7 +64,28 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             let icon = NSImage(contentsOf: iconURL)
         else { return }
 
+        icon.isTemplate = false
+        applicationIcon = icon
         NSApplication.shared.applicationIconImage = icon
+        applyIcon(to: NSApplication.shared.windows)
+
+        // SwiftUI can create the scene window after application launch. Apply
+        // the same compiled icon whenever a Pane window becomes main so Dock
+        // miniatures, App Expose, and window previews never use AppKit's
+        // generic application placeholder.
+        windowIconObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeMainNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            MainActor.assumeIsolated {
+                guard let window = notification.object as? NSWindow else { return }
+                self?.applyIcon(to: [window])
+            }
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.applyIcon(to: NSApplication.shared.windows)
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -74,7 +97,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             NSEvent.removeMonitor(terminalControlKeyMonitor)
             self.terminalControlKeyMonitor = nil
         }
+        if let windowIconObserver {
+            NotificationCenter.default.removeObserver(windowIconObserver)
+            self.windowIconObserver = nil
+        }
         Self.sharedSession?.terminateForApplicationExit()
+    }
+
+    private func applyIcon(to windows: [NSWindow]) {
+        guard let applicationIcon else { return }
+        for window in windows where window.miniwindowImage !== applicationIcon {
+            window.miniwindowImage = applicationIcon
+        }
     }
 }
 

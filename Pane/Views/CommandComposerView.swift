@@ -8,6 +8,7 @@ struct CommandComposerView: View {
     @State private var editorHeight: CGFloat = 24
     @State private var caretUTF16Offset = 0
     @State private var autocompleteSuggestions: [CommandAutocompleteSuggestion] = []
+    @State private var autocompleteSelection = CommandAutocompleteSelection()
     @State private var suggestionsQuery: AutocompleteQuery?
     @State private var dismissedQuery: AutocompleteQuery?
     @State private var selectionRequest: ComposerSelectionRequest?
@@ -82,6 +83,7 @@ struct CommandComposerView: View {
             if !visibleSuggestions.isEmpty {
                 AutocompleteSuggestionsRow(
                     suggestions: visibleSuggestions,
+                    highlightedSuggestionID: autocompleteSelection.highlightedSuggestionID,
                     onAccept: acceptSuggestion
                 )
                 .padding(.bottom, 4)
@@ -126,9 +128,8 @@ struct CommandComposerView: View {
             onEndOfFile: { session.sendEndOfFile() },
             onHistoryPrevious: historyPreviousAction,
             onHistoryNext: historyNextAction,
-            onAcceptAutocomplete: { draft, offset in
-                autocompleteEdit(draft: draft, cursorUTF16Offset: offset)
-            },
+            onCycleAutocomplete: cycleAutocomplete,
+            onConfirmAutocomplete: confirmAutocomplete,
             onDismissAutocomplete: { dismissAutocomplete() }
         )
     }
@@ -190,7 +191,7 @@ struct CommandComposerView: View {
         if presentedCommandBlock != nil {
             return "The shell is waiting for the rest of this command. Return sends the next line."
         }
-        return "Return runs the command. Shift-Return inserts a newline. Tab completes. Up and Down browse history."
+        return "Return runs the command. Shift-Return inserts a newline. Tab and Shift-Tab select completions; Return accepts the selection. Up and Down browse history."
     }
 
     @MainActor
@@ -201,6 +202,7 @@ struct CommandComposerView: View {
             if suggestionsQuery != nil || !autocompleteSuggestions.isEmpty {
                 suggestionsQuery = nil
                 autocompleteSuggestions = []
+                autocompleteSelection.reset()
             }
             return
         }
@@ -220,13 +222,21 @@ struct CommandComposerView: View {
 
         if suggestionsQuery != query {
             suggestionsQuery = query
+            autocompleteSelection.reset()
         }
         if autocompleteSuggestions != suggestions {
             autocompleteSuggestions = suggestions
+            if autocompleteSelection.selected(from: suggestions) == nil {
+                autocompleteSelection.reset()
+            }
         }
     }
 
-    private func autocompleteEdit(
+    private func cycleAutocomplete(by offset: Int) -> Bool {
+        autocompleteSelection.move(by: offset, through: visibleSuggestions)
+    }
+
+    private func confirmAutocomplete(
         draft: String,
         cursorUTF16Offset: Int
     ) -> CommandAutocompleteEdit? {
@@ -239,7 +249,13 @@ struct CommandComposerView: View {
               query.hasCurrentToken,
               suggestionsQuery == query,
               dismissedQuery != query,
-              let suggestion = autocompleteSuggestions.first else { return nil }
+              let suggestion = autocompleteSelection.selected(
+                from: autocompleteSuggestions
+              ) else { return nil }
+
+        autocompleteSelection.reset()
+        autocompleteSuggestions = []
+        suggestionsQuery = nil
 
         return session.autocompleteEdit(
             for: suggestion,
@@ -254,6 +270,7 @@ struct CommandComposerView: View {
         if dismissedQuery != query {
             dismissedQuery = query
         }
+        autocompleteSelection.reset()
         return true
     }
 
@@ -270,6 +287,7 @@ struct CommandComposerView: View {
             session.commandDraft = edit.draft
         }
         selectionRequest = ComposerSelectionRequest(offset: edit.cursorUTF16Offset)
+        autocompleteSelection.reset()
         autocompleteSuggestions = []
         suggestionsQuery = nil
     }
@@ -363,15 +381,28 @@ private struct ActiveCommandSurface: View {
 
 private struct AutocompleteSuggestionsRow: View {
     let suggestions: [CommandAutocompleteSuggestion]
+    let highlightedSuggestionID: String?
     let onAccept: (CommandAutocompleteSuggestion) -> Void
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 2) {
-                ForEach(suggestions) { suggestion in
-                    AutocompleteSuggestionButton(suggestion: suggestion) {
-                        onAccept(suggestion)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    ForEach(suggestions) { suggestion in
+                        AutocompleteSuggestionButton(
+                            suggestion: suggestion,
+                            isHighlighted: suggestion.id == highlightedSuggestionID
+                        ) {
+                            onAccept(suggestion)
+                        }
+                        .id(suggestion.id)
                     }
+                }
+            }
+            .onChange(of: highlightedSuggestionID) { _, suggestionID in
+                guard let suggestionID else { return }
+                withAnimation(.easeOut(duration: 0.1)) {
+                    proxy.scrollTo(suggestionID, anchor: .center)
                 }
             }
         }
@@ -382,6 +413,7 @@ private struct AutocompleteSuggestionsRow: View {
 
 private struct AutocompleteSuggestionButton: View {
     let suggestion: CommandAutocompleteSuggestion
+    let isHighlighted: Bool
     let action: () -> Void
     @State private var isHovering = false
 
@@ -408,16 +440,21 @@ private struct AutocompleteSuggestionButton: View {
             .padding(.vertical, 4)
             .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
             .background {
-                if isHovering {
+                if isHighlighted || isHovering {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color(nsColor: .quaternaryLabelColor))
+                        .fill(
+                            isHighlighted
+                                ? PaneTheme.selectedBlockBackground
+                                : Color(nsColor: .quaternaryLabelColor)
+                        )
                 }
             }
         }
         .buttonStyle(.plain)
         .focusable(false)
         .onHover { isHovering = $0 }
-        .help("Complete \(suggestion.text)")
+        .help(isHighlighted ? "Press Return to complete \(suggestion.text)" : "Complete \(suggestion.text)")
+        .accessibilityValue(isHighlighted ? "Selected" : "")
     }
 
     private var symbolName: String {
@@ -450,7 +487,8 @@ private struct ComposerTextView: NSViewRepresentable {
     let onEndOfFile: () -> Void
     let onHistoryPrevious: (() -> Void)?
     let onHistoryNext: (() -> Void)?
-    let onAcceptAutocomplete: (_ draft: String, _ cursorUTF16Offset: Int) -> CommandAutocompleteEdit?
+    let onCycleAutocomplete: (_ offset: Int) -> Bool
+    let onConfirmAutocomplete: (_ draft: String, _ cursorUTF16Offset: Int) -> CommandAutocompleteEdit?
     let onDismissAutocomplete: () -> Bool
 
     func makeCoordinator() -> Coordinator {
@@ -503,7 +541,8 @@ private struct ComposerTextView: NSViewRepresentable {
         textView.onEndOfFile = onEndOfFile
         textView.onHistoryPrevious = onHistoryPrevious
         textView.onHistoryNext = onHistoryNext
-        textView.onAcceptAutocomplete = onAcceptAutocomplete
+        textView.onCycleAutocomplete = onCycleAutocomplete
+        textView.onConfirmAutocomplete = onConfirmAutocomplete
         textView.onDismissAutocomplete = onDismissAutocomplete
         scrollView.documentView = textView
         context.coordinator.isMounted = true
@@ -531,7 +570,8 @@ private struct ComposerTextView: NSViewRepresentable {
         textView.onEndOfFile = onEndOfFile
         textView.onHistoryPrevious = onHistoryPrevious
         textView.onHistoryNext = onHistoryNext
-        textView.onAcceptAutocomplete = onAcceptAutocomplete
+        textView.onCycleAutocomplete = onCycleAutocomplete
+        textView.onConfirmAutocomplete = onConfirmAutocomplete
         textView.onDismissAutocomplete = onDismissAutocomplete
 
         if textView.string != text {
@@ -555,7 +595,8 @@ private struct ComposerTextView: NSViewRepresentable {
             textView.onEndOfFile = nil
             textView.onHistoryPrevious = nil
             textView.onHistoryNext = nil
-            textView.onAcceptAutocomplete = nil
+            textView.onCycleAutocomplete = nil
+            textView.onConfirmAutocomplete = nil
             textView.onDismissAutocomplete = nil
         }
     }
@@ -762,7 +803,8 @@ private final class ComposerNSTextView: NSTextView {
     var onEndOfFile: (() -> Void)?
     var onHistoryPrevious: (() -> Void)?
     var onHistoryNext: (() -> Void)?
-    var onAcceptAutocomplete: ((_ draft: String, _ cursorUTF16Offset: Int) -> CommandAutocompleteEdit?)?
+    var onCycleAutocomplete: ((_ offset: Int) -> Bool)?
+    var onConfirmAutocomplete: ((_ draft: String, _ cursorUTF16Offset: Int) -> CommandAutocompleteEdit?)?
     var onDismissAutocomplete: (() -> Bool)?
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -786,17 +828,17 @@ private final class ComposerNSTextView: NSTextView {
         case 36, 76:
             if event.modifierFlags.contains(.shift) {
                 insertNewline(nil)
+            } else if let edit = confirmedAutocompleteEdit() {
+                applyAutocompleteEdit(edit)
             } else {
                 onSubmit?()
             }
-        case 48 where event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty:
-            let caret = min(
-                max(0, selectedRange().location),
-                (string as NSString).length
-            )
-            if let edit = onAcceptAutocomplete?(string, caret) {
-                applyAutocompleteEdit(edit)
-            } else {
+        case 48:
+            let modifiers = event.modifierFlags.intersection([
+                .command, .option, .control, .shift
+            ])
+            let direction = modifiers.isEmpty ? 1 : (modifiers == .shift ? -1 : 0)
+            if direction == 0 || onCycleAutocomplete?(direction) != true {
                 super.keyDown(with: event)
             }
         case 53:
@@ -849,6 +891,14 @@ private final class ComposerNSTextView: NSTextView {
         let selection = NSRange(location: caret, length: 0)
         setSelectedRange(selection)
         scrollRangeToVisible(selection)
+    }
+
+    private func confirmedAutocompleteEdit() -> CommandAutocompleteEdit? {
+        let caret = min(
+            max(0, selectedRange().location),
+            (string as NSString).length
+        )
+        return onConfirmAutocomplete?(string, caret)
     }
 }
 

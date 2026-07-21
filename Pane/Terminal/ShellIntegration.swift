@@ -289,8 +289,8 @@ function __pane_completion_child() {
 
   # zsocket descriptors are inherited across fork. The capture child never
   # serves clients, and closing its copies prevents descriptor/socket leaks.
-  exec {__pane_completion_listener_fd}>&- 2>/dev/null
-  exec {__pane_completion_active_client_fd}>&- 2>/dev/null
+  { exec {__pane_completion_listener_fd}>&- } 2>/dev/null
+  { exec {__pane_completion_active_client_fd}>&- } 2>/dev/null
 
   if (( ! $+functions[_main_complete] )); then
     autoload -Uz compinit
@@ -427,7 +427,17 @@ function __pane_completion_socket_handler() {
   emulate -L zsh
   setopt extendedglob
   local -i __pane_listen_fd=$1
-  [[ -z $2 ]] || return 1
+  if [[ -n $2 ]]; then
+    zle -F $__pane_listen_fd 2>/dev/null
+    { exec {__pane_listen_fd}>&- } 2>/dev/null
+    if (( ${+__pane_completion_listener_fd} )) \
+        && (( __pane_completion_listener_fd == __pane_listen_fd )); then
+      unset __pane_completion_listener_fd
+    fi
+    [[ -n $__pane_completion_socket_path ]] \
+      && /bin/rm -f -- "$__pane_completion_socket_path" 2>/dev/null
+    return 0
+  fi
   zsocket -a -t $__pane_listen_fd 2>/dev/null || return 0
   local -i __pane_client_fd=$REPLY
   typeset -gi __pane_completion_active_client_fd=$__pane_client_fd
@@ -507,7 +517,7 @@ function __pane_completion_socket_handler() {
   fi
 
   __pane_completion_send_response $__pane_client_fd "$__pane_id" "$__pane_status" "$__pane_payload"
-  exec {__pane_client_fd}>&- 2>/dev/null
+  { exec {__pane_client_fd}>&- } 2>/dev/null
   unset __pane_completion_active_client_fd
   return 0
 }
@@ -529,7 +539,9 @@ function __pane_completion_install_socket() {
 function __pane_completion_close_socket() {
   if (( ${+__pane_completion_listener_fd} )); then
     zle -F $__pane_completion_listener_fd 2>/dev/null
-    exec {__pane_completion_listener_fd}>&- 2>/dev/null
+    # Keep the stderr redirection outside `exec`: an `exec` with no command
+    # applies its own redirections permanently to the user's warm shell.
+    { exec {__pane_completion_listener_fd}>&- } 2>/dev/null
     unset __pane_completion_listener_fd
   fi
   # The path lives in an app-created mode-0700 directory and is unique to this

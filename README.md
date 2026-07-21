@@ -65,6 +65,8 @@ The resulting app is `DerivedData/Build/Products/Debug/Pane.app` inside the chec
 open "$PWD/DerivedData/Build/Products/Debug/Pane.app"
 ```
 
+The latest verified Debug bundle from this implementation pass was also copied to `/Users/chandraw/Documents/Webe's Term/Build/Pane.app` for direct use. It has the stable bundle identifier `com.gilbertkrantz.Pane`; `Build/` is ignored because it is a generated product.
+
 SwiftPM deliberately exposes no GUI executable. Run `Pane.app` from Xcode or with `open`; do not launch `Pane.app/Contents/MacOS/Pane` directly. The bundle supplies the application identity, icon resources, and AppKit lifecycle. `Assets.xcassets/AppIcon.appiconset` contains the complete macOS icon set, and the app also assigns the compiled `AppIcon.icns` at launch so the Dock, App Expose, and window previews use the Pane icon.
 
 ## Architecture
@@ -88,7 +90,8 @@ Pane/
 │   ├── ShellConfiguration.swift
 │   ├── ShellIntegration.swift
 │   ├── TerminalSession.swift
-│   └── TerminalViewRepresentable.swift
+│   ├── TerminalViewRepresentable.swift
+│   └── WarmZshCompletionClient.swift
 └── Views/
     ├── BlocksView.swift
     ├── CommandBlockView.swift
@@ -131,9 +134,9 @@ Terminal text, block text, and composer input share the same optical 24-point le
 
 | Shortcut | Action |
 | --- | --- |
-| **Return** | Run an idle draft, or send one line to the active command |
+| **Return** | Accept the highlighted autocomplete suggestion; otherwise run an idle draft or send one line to the active command |
 | **Shift-Return** | Insert a composer newline |
-| **Tab** | Accept the first visible autocomplete suggestion; otherwise use native text behavior |
+| **Tab / Shift-Tab** | Select the next / previous visible autocomplete suggestion without changing the draft |
 | **Escape** | Dismiss visible autocomplete suggestions; otherwise use normal text behavior |
 | **Up / Down** | Navigate session command history while no command is active |
 | **Command-Shift-I** | Toggle Blocks / Terminal mode |
@@ -157,7 +160,7 @@ If zsh requests more syntax before `preexec`—for example, after `if true; then
 
 The finalized timeline is bottom-anchored: a short history rests next to the composer, a newly finalized block scrolls to the bottom, and older content overflows upward. Hovering or selecting a block reveals copy output, rerun, collapse/expand, and overflow actions in a permanently reserved header slot, so disclosure changes opacity without moving block content. The overflow menu contains copy command, edit in composer, and delete.
 
-Autocomplete appears only while the shell is idle and the caret follows a non-whitespace token. After a 110 ms debounce, Pane asks the active zsh for context-sensitive `compsys` candidates and shows up to 12 deduplicated results. Tab accepts the first suggestion, Escape dismisses the current set, and any visible suggestion can be clicked.
+Autocomplete appears only while the shell is idle and the caret follows a non-whitespace token. After a 110 ms debounce, Pane asks the active zsh for context-sensitive `compsys` candidates and shows up to 12 deduplicated results. Tab and Shift-Tab move the highlight forward and backward without changing the draft, Return accepts the highlighted result, Escape dismisses the current set, and any visible suggestion can be clicked.
 
 The persistent PTY shell remains authoritative. Pane creates a private Unix-domain socket for each shell generation and sends completion requests over that socket, never through the main PTY. A regular `zle -F` handler in the warm shell accepts a bounded request and forks a short-lived `zpty` completion worker from that process. The worker therefore starts with the active shell's current directory, parameters and environment, aliases, functions, options, and loaded completion definitions instead of reconstructing session state in a cold sidecar shell. It runs zsh's own completion system and returns bounded, encoded candidates over the socket without changing the visible command line, history, terminal buffer, or PTY stream.
 
@@ -230,6 +233,7 @@ Terminal delegate state is equality-guarded. Buffer-change notifications, visibi
 - One-block multiline submission, shell-continuation collection, and active-command-only routing for Control-C and Control-D
 - Bottom-anchored finalized timeline with selection, status, duration, output, copy, rerun, edit, collapse, and delete actions
 - Warm-zsh `compsys` autocomplete over a private per-shell socket, with bounded local fallback
+- PTY stderr preservation and nonzero exit-status reporting in both Terminal and finalized Blocks views
 - Stable hover geometry and a content-sized one-to-six-line composer
 - One persistent PTY-backed interactive login zsh with normal Oh My Zsh startup
 - Manual Blocks/Terminal input routing and protocol-driven alternate-screen switching
@@ -239,10 +243,12 @@ Terminal delegate state is equality-guarded. Buffer-change notifications, visibi
 
 ### Verification
 
-Verification is revision-specific; command output from the current checkout is authoritative. The warm-zsh capture revision is awaiting a fresh test, native build, and runtime pass. The previously recorded 60-of-60 SwiftPM result predates this completion architecture and is not presented as verification of it.
+Verification is revision-specific; these results are from the current checkout after warm-zsh autocomplete, the icon-identity fix, and the stderr-descriptor fix:
 
-- SwiftPM: pending for the warm-zsh capture revision.
-- Native app and warm-shell completion smoke test: pending for the warm-zsh capture revision.
+- SwiftPM: **69 of 69 tests passed**, including protocol framing, candidate mapping, forward/reverse autocomplete selection, persistent PTY behavior, Control-C routing, alternate-buffer isolation, stderr-only output with a nonzero exit status, and a live integration test that defines a parameter and `compdef` after the shell has started and then captures that warm-only completion.
+- Native Xcode build: **succeeded** for the `Pane` Debug scheme on macOS with SwiftTerm 1.14.0.
+- Runtime: the generated `Pane.app` was registered and launched as a bundle. The app uses `com.gilbertkrantz.Pane`, contains the compiled `AppIcon.icns`, applies it to current and future window miniatures, and the corrected window-preview icon was visually confirmed.
+- Generated app: `/Users/chandraw/Documents/Webe's Term/Build/Pane.app`.
 
 ### Verification limits
 
@@ -253,7 +259,7 @@ Verification is revision-specific; command output from the current checkout is a
 Recommended local visual smoke test:
 
 1. Open `Pane.xcodeproj`, run the `Pane` scheme, and execute `pwd`, `cd /tmp`, and `pwd` in Blocks mode.
-2. Type a partial command or path; confirm suggestions are bounded, Tab accepts the first, and Escape dismisses them.
+2. Type a partial command or path; confirm suggestions are bounded, Tab and Shift-Tab move the highlight, Return accepts it, and Escape dismisses the list.
 3. Submit a Shift-Return multiline draft; confirm all lines complete as one block.
 4. Submit an incomplete shell construct, add its continuation lines in the composer, and confirm it remains one block; repeat and cancel it with Control-C.
 5. Run a command that emits output over several seconds; confirm its mirror grows from one through ten rows, then scrolls, accepts line input, and becomes one finalized block only when it ends.
