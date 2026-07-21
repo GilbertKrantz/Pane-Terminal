@@ -192,17 +192,28 @@ final class LiveCommandTerminalView: TerminalView {
 
     override func layout() {
         super.layout()
+        hidePresentationScroller()
         onGeometryReady?()
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        hidePresentationScroller()
         onGeometryReady?()
     }
 
     override func send(source: Terminal, data: ArraySlice<UInt8>) {
         // Suppress emulator-generated replies as well as keyboard input. The
         // primary terminal sends the one authoritative response to the PTY.
+    }
+
+    /// The live mirror is deliberately non-interactive, so SwiftTerm's own
+    /// scroller would be a prominent control that cannot be used. The primary
+    /// terminal keeps its native overlay scroller.
+    private func hidePresentationScroller() {
+        for case let scroller as NSScroller in subviews where !scroller.isHidden {
+            scroller.isHidden = true
+        }
     }
 }
 
@@ -221,6 +232,7 @@ struct LiveCommandTerminalViewRepresentable: NSViewRepresentable {
         )
         terminalView.autoresizingMask = [.width, .height]
         terminalView.changeScrollback(10_000)
+        terminalView.scrollerStyle = .overlay
         terminalView.optionAsMetaKey = false
         terminalView.allowMouseReporting = false
         terminalView.caretViewTracksFocus = true

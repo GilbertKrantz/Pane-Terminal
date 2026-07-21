@@ -232,6 +232,21 @@ final class CommandAutocompleteTests: XCTestCase {
         XCTAssertEqual(selection.selected(from: suggestions)?.text, "checkout")
     }
 
+    func testSingleSuggestionRequiresTwoTabsBeforeAccepting() {
+        let suggestion = CommandAutocompleteSuggestion(text: "status", source: .zsh)
+        let suggestions = [suggestion]
+        var selection = CommandAutocompleteSelection()
+
+        XCTAssertNil(selection.selected(from: suggestions))
+        XCTAssertEqual(selection.handleTab(by: 1, through: suggestions), .cycle)
+        XCTAssertEqual(selection.selected(from: suggestions)?.text, "status")
+        XCTAssertEqual(
+            selection.handleTab(by: 1, through: suggestions),
+            .accept(suggestion)
+        )
+        XCTAssertNil(selection.selected(from: suggestions))
+    }
+
     func testKeyboardSelectionMovesBackwardAndResetsForEmptyResults() {
         let suggestions = [
             CommandAutocompleteSuggestion(text: "main", source: .zsh),

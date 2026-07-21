@@ -19,3 +19,52 @@ final class InputModeTests: XCTestCase {
         XCTAssertEqual(InputMode.terminal.shortTitle, "Terminal")
     }
 }
+
+extension InputModeTests {
+    func testForegroundSnapshotRecognizesInteractivePrograms() {
+        let snapshot = ForegroundProcessSnapshot(
+            processGroupID: 42,
+            shellProcessGroupID: 7,
+            processName: "ssh",
+            isRawInput: false
+        )
+
+        XCTAssertTrue(snapshot.isKnownInteractiveProgram)
+        XCTAssertEqual(snapshot.terminalModeAttribution, .foregroundProcess("ssh"))
+    }
+
+    func testForegroundSnapshotUsesRawTermiosAsTerminalSignal() {
+        let snapshot = ForegroundProcessSnapshot(
+            processGroupID: 42,
+            shellProcessGroupID: 7,
+            processName: "remote-app",
+            isRawInput: true
+        )
+
+        XCTAssertEqual(snapshot.terminalModeAttribution, .rawTermios("remote-app"))
+    }
+
+    func testForegroundSnapshotRecognizesShellForeground() {
+        let snapshot = ForegroundProcessSnapshot(
+            processGroupID: 42,
+            shellProcessGroupID: 42,
+            processName: "zsh",
+            isRawInput: true
+        )
+
+        XCTAssertTrue(snapshot.isShellForeground)
+        XCTAssertTrue(snapshot.isRawInput)
+        XCTAssertNil(snapshot.terminalModeAttribution)
+    }
+
+    func testModeAttributionExplanationsAreUserFacing() {
+        XCTAssertEqual(
+            InputModeAttribution.foregroundProcess("ssh").explanation,
+            "ssh is running"
+        )
+        XCTAssertEqual(
+            InputModeAttribution.rawTermios("python").explanation,
+            "python requested raw input"
+        )
+    }
+}

@@ -45,11 +45,33 @@ struct CommandAutocompleteEdit: Equatable, Sendable {
     let cursorUTF16Offset: Int
 }
 
+enum CommandAutocompleteTabAction: Equatable, Sendable {
+    case cycle
+    case accept(CommandAutocompleteSuggestion)
+}
+
 /// Keyboard selection state for a transient completion list. Selection is
 /// kept separate from the draft so Tab can move through candidates without
 /// modifying the command until the user confirms one with Return or a click.
 struct CommandAutocompleteSelection: Equatable, Sendable {
     private(set) var highlightedSuggestionID: String?
+
+    mutating func handleTab(
+        by offset: Int,
+        through suggestions: [CommandAutocompleteSuggestion]
+    ) -> CommandAutocompleteTabAction? {
+        guard !suggestions.isEmpty, offset != 0 else { return nil }
+
+        if suggestions.count == 1,
+           selected(from: suggestions) == suggestions[0] {
+            let suggestion = suggestions[0]
+            reset()
+            return .accept(suggestion)
+        }
+
+        _ = move(by: offset, through: suggestions)
+        return .cycle
+    }
 
     mutating func move(
         by offset: Int,

@@ -93,6 +93,7 @@ final class TerminalSession: NSObject, ObservableObject {
     @Published private(set) var currentDirectory: String?
     @Published private(set) var blockTimeline = CommandBlockTimeline()
     @Published private(set) var isAlternateScreenActive = false
+    @Published private(set) var modeAttribution: InputModeAttribution = .manual
     @Published private(set) var activeCommandVisibleLineCount = 1
     @Published var selectedBlockID: UUID?
     @Published var commandDraft = ""
@@ -120,6 +121,8 @@ final class TerminalSession: NSObject, ObservableObject {
     private var isShellIntegrationReady = false
     private var commandAwaitingStartID: UUID?
     private var shouldReturnToBlocksAfterAlternateScreen = false
+    private var foregroundProcessTimer: Timer?
+    private var lastForegroundSnapshot: ForegroundProcessSnapshot?
 
     var blocks: [CommandBlock] {
         blockTimeline.blocks
@@ -263,6 +266,7 @@ final class TerminalSession: NSObject, ObservableObject {
         isShellRunning = newProcess.running
 
         if newProcess.running {
+            startForegroundProcessMonitoring()
             let installationCommand: String
             if let completionEndpoint {
                 installationCommand = ShellIntegration.installationCommand(
@@ -296,6 +300,7 @@ final class TerminalSession: NSObject, ObservableObject {
         isShellIntegrationReady = false
         terminateAndReap(oldProcess)
         invalidateCompletionEndpoint()
+        stopForegroundProcessMonitoring()
         leaveAlternateScreenIfNeeded()
         terminalView?.feed(text: "\r\n[Restarting shell]\r\n")
         startShell()
@@ -315,6 +320,7 @@ final class TerminalSession: NSObject, ObservableObject {
         isShellIntegrationReady = false
         terminateAndReap(oldProcess)
         invalidateCompletionEndpoint()
+        stopForegroundProcessMonitoring()
         zshCompletionClient.shutdown()
     }
 
@@ -332,6 +338,7 @@ final class TerminalSession: NSObject, ObservableObject {
         isShellIntegrationReady = false
         terminateAndReap(oldProcess)
         invalidateCompletionEndpoint()
+        stopForegroundProcessMonitoring()
         zshCompletionClient.shutdown()
     }
 
@@ -458,12 +465,14 @@ final class TerminalSession: NSObject, ObservableObject {
 
     func toggleMode() {
         shouldReturnToBlocksAfterAlternateScreen = false
+        modeAttribution = .manual
         mode.toggle()
     }
 
     func setMode(_ newMode: InputMode) {
         guard mode != newMode else { return }
         shouldReturnToBlocksAfterAlternateScreen = false
+        modeAttribution = .manual
         mode = newMode
     }
 
@@ -502,6 +511,7 @@ final class TerminalSession: NSObject, ObservableObject {
     func editBlock(id: UUID) {
         guard let block = blockTimeline.block(id: id) else { return }
         commandDraft = block.command
+        modeAttribution = .manual
         mode = .blocks
     }
 
@@ -662,6 +672,7 @@ final class TerminalSession: NSObject, ObservableObject {
         isShellIntegrationReady = false
         commandAwaitingStartID = nil
         invalidateCompletionEndpoint()
+        stopForegroundProcessMonitoring()
         shellExitStatus = exitCode
         leaveAlternateScreenIfNeeded()
         terminalView?.feed(
@@ -863,16 +874,114 @@ final class TerminalSession: NSObject, ObservableObject {
         if isActive {
             if mode == .blocks {
                 shouldReturnToBlocksAfterAlternateScreen = true
+                modeAttribution = .alternateScreen
                 mode = .terminal
             } else {
                 shouldReturnToBlocksAfterAlternateScreen = false
             }
         } else {
             if shouldReturnToBlocksAfterAlternateScreen, mode == .terminal {
+                modeAttribution = .manual
                 mode = .blocks
+                // Re-evaluate immediately after the protocol-owned mode ends.
+                // The same foreground process may still require raw input.
+                lastForegroundSnapshot = nil
             }
             shouldReturnToBlocksAfterAlternateScreen = false
         }
+    }
+
+    private func startForegroundProcessMonitoring() {
+        foregroundProcessTimer?.invalidate()
+        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.refreshForegroundProcessMode()
+            }
+        }
+        foregroundProcessTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        refreshForegroundProcessMode()
+    }
+
+    private func stopForegroundProcessMonitoring() {
+        foregroundProcessTimer?.invalidate()
+        foregroundProcessTimer = nil
+        lastForegroundSnapshot = nil
+        if modeAttribution != .manual {
+            modeAttribution = .manual
+        }
+    }
+
+    private func refreshForegroundProcessMode() {
+        guard isShellRunning, !isAlternateScreenActive else { return }
+        guard let snapshot = foregroundProcessSnapshot() else { return }
+        guard snapshot != lastForegroundSnapshot else { return }
+        lastForegroundSnapshot = snapshot
+
+        if let attribution = snapshot.terminalModeAttribution {
+            if mode != .terminal || modeAttribution != attribution {
+                modeAttribution = attribution
+                mode = .terminal
+            }
+        } else if snapshot.isShellForeground, modeAttribution != .manual {
+            modeAttribution = .manual
+            mode = .blocks
+        }
+    }
+
+    private func foregroundProcessSnapshot() -> ForegroundProcessSnapshot? {
+        guard let process, process.childfd >= 0 else { return nil }
+        let foregroundPGID = tcgetpgrp(process.childfd)
+        guard foregroundPGID > 0 else { return nil }
+
+        var termiosState = termios()
+        let hasTermios = tcgetattr(process.childfd, &termiosState) == 0
+        let localFlags = hasTermios ? termiosState.c_lflag : 0
+        let isRawInput = hasTermios
+            && (localFlags & tcflag_t(ICANON) == 0 || localFlags & tcflag_t(ECHO) == 0)
+        let shellPGID = process.shellPid > 0 ? getpgid(process.shellPid) : -1
+
+        return ForegroundProcessSnapshot(
+            processGroupID: foregroundPGID,
+            shellProcessGroupID: shellPGID > 0 ? shellPGID : nil,
+            processName: Self.processName(forProcessGroupID: foregroundPGID),
+            isRawInput: isRawInput
+        )
+    }
+
+    nonisolated private static func processName(forProcessGroupID pgid: pid_t) -> String? {
+        if let groupLeaderName = processName(forPID: pgid) {
+            return groupLeaderName
+        }
+
+        let requiredBytes = proc_listpgrppids(pgid, nil, 0)
+        guard requiredBytes > 0 else { return nil }
+
+        let pidSize = MemoryLayout<pid_t>.stride
+        var groupPIDs = [pid_t](
+            repeating: 0,
+            count: (Int(requiredBytes) + pidSize - 1) / pidSize
+        )
+        let copiedBytes = groupPIDs.withUnsafeMutableBytes { buffer in
+            proc_listpgrppids(pgid, buffer.baseAddress, Int32(buffer.count))
+        }
+        guard copiedBytes > 0 else { return nil }
+
+        for pid in groupPIDs.prefix(Int(copiedBytes) / pidSize) where pid > 0 {
+            if let name = processName(forPID: pid) {
+                return name
+            }
+        }
+        return nil
+    }
+
+    nonisolated private static func processName(forPID pid: pid_t) -> String? {
+        var nameBuffer = [CChar](repeating: 0, count: 256)
+        guard proc_name(pid, &nameBuffer, UInt32(nameBuffer.count)) > 0 else {
+            return nil
+        }
+        let name = String(cString: nameBuffer)
+        return name.isEmpty ? nil : name
     }
 
     private func leaveAlternateScreenIfNeeded() {

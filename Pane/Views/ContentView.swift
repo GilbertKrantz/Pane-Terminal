@@ -115,6 +115,16 @@ struct ContentView: View {
         return .secondary
     }
 
+    private var terminalModeExplanation: String {
+        if session.isAlternateScreenActive {
+            return "The foreground terminal app owns this screen."
+        }
+        if session.modeAttribution != .manual {
+            return "Terminal mode because \(session.modeAttribution.explanation)."
+        }
+        return "Keys and mouse events go directly to the foreground process."
+    }
+
     private var terminalModeBar: some View {
         HStack(spacing: 8) {
             Image(systemName: session.isAlternateScreenActive ? "rectangle.inset.filled" : "keyboard")
@@ -123,11 +133,7 @@ struct ContentView: View {
             Text(session.isAlternateScreenActive ? "Alternate screen" : "Direct terminal input")
                 .font(.caption.weight(.medium))
 
-            Text(
-                session.isAlternateScreenActive
-                    ? "The foreground terminal app owns this screen."
-                    : "Keys and mouse events go directly to the foreground process."
-            )
+            Text(terminalModeExplanation)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

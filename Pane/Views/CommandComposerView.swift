@@ -53,7 +53,7 @@ struct CommandComposerView: View {
     }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
 
         composerContent
             .padding(PaneMetrics.composerInnerInset)
@@ -62,12 +62,12 @@ struct CommandComposerView: View {
             .overlay {
                 shape.strokeBorder(
                     isFocused ? Color(nsColor: .keyboardFocusIndicatorColor) : PaneTheme.separator,
-                    lineWidth: isFocused || colorSchemeContrast == .increased ? 1.5 : 1
+                    lineWidth: isFocused || colorSchemeContrast == .increased ? 1.25 : 0.75
                 )
             }
             .padding(.horizontal, PaneMetrics.composerOuterInset)
-            .padding(.top, 8)
-            .padding(.bottom, 12)
+            .padding(.top, 6)
+            .padding(.bottom, 10)
             .task(id: autocompleteQuery) {
                 await refreshAutocomplete(for: autocompleteQuery)
             }
@@ -94,13 +94,13 @@ struct CommandComposerView: View {
     }
 
     private var editorRow: some View {
-        HStack(alignment: .center, spacing: 8) {
+        HStack(alignment: .center, spacing: 10) {
             ZStack(alignment: .topLeading) {
                 if session.commandDraft.isEmpty {
                     Text(editorPlaceholder)
                         .font(.callout)
                         .foregroundStyle(.tertiary)
-                        .padding(.top, 2)
+                        .padding(.top, 1)
                         .allowsHitTesting(false)
                 }
 
@@ -108,6 +108,7 @@ struct CommandComposerView: View {
                     .frame(height: editorHeight)
                     .help(editorHelp)
             }
+            .frame(minHeight: 40, maxHeight: 44, alignment: .center)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             submitButton
@@ -128,7 +129,7 @@ struct CommandComposerView: View {
             onEndOfFile: { session.sendEndOfFile() },
             onHistoryPrevious: historyPreviousAction,
             onHistoryNext: historyNextAction,
-            onCycleAutocomplete: cycleAutocomplete,
+            onHandleTab: handleTabAutocomplete,
             onConfirmAutocomplete: confirmAutocomplete,
             onDismissAutocomplete: { dismissAutocomplete() }
         )
@@ -140,12 +141,10 @@ struct CommandComposerView: View {
         } label: {
             Image(systemName: presentedCommandBlock != nil ? "return" : "arrow.up")
                 .font(.system(size: 12, weight: .semibold))
-                .frame(width: 16, height: 16)
+                .frame(width: 15, height: 15)
         }
-        .buttonStyle(.borderedProminent)
-        .buttonBorderShape(.circle)
-        .controlSize(.small)
-        .frame(width: 30, height: 30)
+        .buttonStyle(ComposerSubmitButtonStyle())
+        .frame(width: 28, height: 28)
         .disabled(!canSubmit)
         .keyboardShortcut(.return, modifiers: [])
         .help(presentedCommandBlock != nil ? "Send input (Return)" : "Execute command (Return)")
@@ -232,8 +231,26 @@ struct CommandComposerView: View {
         }
     }
 
-    private func cycleAutocomplete(by offset: Int) -> Bool {
-        autocompleteSelection.move(by: offset, through: visibleSuggestions)
+    private func handleTabAutocomplete(by offset: Int) -> ComposerTabAutocompleteResult? {
+        let suggestions = visibleSuggestions
+        guard let action = autocompleteSelection.handleTab(
+            by: offset,
+            through: suggestions
+        ) else { return nil }
+
+        switch action {
+        case .cycle:
+            return .cycle
+        case .accept(let suggestion):
+            autocompleteSuggestions = []
+            suggestionsQuery = nil
+            let query = autocompleteQuery
+            return .accept(session.autocompleteEdit(
+                for: suggestion,
+                in: query.draft,
+                cursorUTF16Offset: query.caretUTF16Offset
+            ))
+        }
     }
 
     private func confirmAutocomplete(
@@ -310,6 +327,11 @@ private struct AutocompleteQuery: Equatable {
     }
 }
 
+private enum ComposerTabAutocompleteResult {
+    case accept(CommandAutocompleteEdit)
+    case cycle
+}
+
 private struct ComposerSelectionRequest: Equatable {
     let id = UUID()
     let offset: Int
@@ -326,7 +348,7 @@ private struct ActiveCommandSurface: View {
                     .controlSize(.small)
 
                 Text(block.command.replacingOccurrences(of: "\n", with: " "))
-                    .font(.system(.caption, design: .monospaced, weight: .medium))
+                    .font(.caption.weight(.semibold))
                     .lineLimit(1)
                     .truncationMode(.middle)
 
@@ -339,17 +361,26 @@ private struct ActiveCommandSurface: View {
                         .monospacedDigit()
                 }
             }
+            .frame(minHeight: 28)
+            .padding(.horizontal, 2)
             .accessibilityElement(children: .combine)
             .accessibilityLabel(
                 isRunning ? "Running \(block.command)" : "Starting \(block.command)"
             )
 
-            if isRunning {
+            if isRunning, session.isAlternateScreenActive {
+                Label("Interactive terminal session active", systemImage: "rectangle.inset.filled")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 52, alignment: .center)
+                    .accessibilityLabel("Interactive terminal session active in Terminal mode")
+            } else if isRunning {
                 LiveCommandTerminalViewRepresentable(session: session, blockID: block.id)
                     // NSViewRepresentable coordinators retain their immutable
                     // block ID. Explicit identity prevents SwiftUI from
                     // recycling a completed block's terminal for its successor.
                     .id(block.id)
+                    .padding(EdgeInsets(top: 12, leading: 14, bottom: 12, trailing: 14))
                     .frame(height: liveTerminalHeight)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
@@ -363,19 +394,51 @@ private struct ActiveCommandSurface: View {
     }
 
     private var liveTerminalHeight: CGFloat {
+        if session.isAlternateScreenActive { return 52 }
         // One command-output row stays compact; the surface grows upward only
         // as output arrives, then scrolls inside its ten-row ceiling.
-        CGFloat(min(max(session.activeCommandVisibleLineCount, 1), 10)) * 17 + 8
+        return CGFloat(min(max(session.activeCommandVisibleLineCount, 1), 10)) * 17 + 24
     }
 
     private func statusText(at date: Date) -> String {
         guard let startedAt = block.startedAt else { return "Starting…" }
         let elapsed = max(0, date.timeIntervalSince(startedAt))
         if elapsed < 1 { return "Running" }
-        if elapsed < 60 { return "Running · \(Int(elapsed)) s" }
-        let minutes = Int(elapsed) / 60
-        let seconds = Int(elapsed) % 60
-        return String(format: "Running · %d:%02d", minutes, seconds)
+        if elapsed < 60 { return "Running for \(Int(elapsed))s" }
+        let totalSeconds = Int(elapsed)
+        let hours = totalSeconds / 3_600
+        let minutes = (totalSeconds % 3_600) / 60
+        if hours > 0 {
+            return "Active · \(hours)h \(minutes)m"
+        }
+        return "Active · \(minutes)m"
+    }
+}
+
+private struct ComposerSubmitButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(isEnabled ? .primary : .tertiary)
+            .background {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(background(isPressed: configuration.isPressed))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(PaneTheme.separator.opacity(isEnabled ? 0.65 : 0.35), lineWidth: 0.75)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .onHover { isHovered = $0 }
+    }
+
+    private func background(isPressed: Bool) -> Color {
+        guard isEnabled else { return Color(nsColor: .controlBackgroundColor).opacity(0.35) }
+        if isPressed { return PaneTheme.selectedBlockBackground }
+        if isHovered { return Color.accentColor.opacity(0.16) }
+        return Color(nsColor: .controlBackgroundColor).opacity(0.78)
     }
 }
 
@@ -487,7 +550,7 @@ private struct ComposerTextView: NSViewRepresentable {
     let onEndOfFile: () -> Void
     let onHistoryPrevious: (() -> Void)?
     let onHistoryNext: (() -> Void)?
-    let onCycleAutocomplete: (_ offset: Int) -> Bool
+    let onHandleTab: (_ offset: Int) -> ComposerTabAutocompleteResult?
     let onConfirmAutocomplete: (_ draft: String, _ cursorUTF16Offset: Int) -> CommandAutocompleteEdit?
     let onDismissAutocomplete: () -> Bool
 
@@ -541,7 +604,7 @@ private struct ComposerTextView: NSViewRepresentable {
         textView.onEndOfFile = onEndOfFile
         textView.onHistoryPrevious = onHistoryPrevious
         textView.onHistoryNext = onHistoryNext
-        textView.onCycleAutocomplete = onCycleAutocomplete
+        textView.onHandleTab = onHandleTab
         textView.onConfirmAutocomplete = onConfirmAutocomplete
         textView.onDismissAutocomplete = onDismissAutocomplete
         scrollView.documentView = textView
@@ -570,7 +633,7 @@ private struct ComposerTextView: NSViewRepresentable {
         textView.onEndOfFile = onEndOfFile
         textView.onHistoryPrevious = onHistoryPrevious
         textView.onHistoryNext = onHistoryNext
-        textView.onCycleAutocomplete = onCycleAutocomplete
+        textView.onHandleTab = onHandleTab
         textView.onConfirmAutocomplete = onConfirmAutocomplete
         textView.onDismissAutocomplete = onDismissAutocomplete
 
@@ -595,7 +658,7 @@ private struct ComposerTextView: NSViewRepresentable {
             textView.onEndOfFile = nil
             textView.onHistoryPrevious = nil
             textView.onHistoryNext = nil
-            textView.onCycleAutocomplete = nil
+            textView.onHandleTab = nil
             textView.onConfirmAutocomplete = nil
             textView.onDismissAutocomplete = nil
         }
@@ -766,7 +829,7 @@ private struct ComposerTextView: NSViewRepresentable {
             let verticalInsets = textView.textContainerInset.height * 2
             let rawHeight = ceil(max(lineHeight, laidOutHeight) + verticalInsets)
             let minimumHeight = ceil(lineHeight + verticalInsets)
-            let maximumHeight = ceil((lineHeight * 6) + verticalInsets)
+            let maximumHeight = ceil((lineHeight * 3) + verticalInsets)
             let targetHeight = min(max(rawHeight, minimumHeight), maximumHeight)
 
             let needsScroller = rawHeight > maximumHeight
@@ -803,7 +866,7 @@ private final class ComposerNSTextView: NSTextView {
     var onEndOfFile: (() -> Void)?
     var onHistoryPrevious: (() -> Void)?
     var onHistoryNext: (() -> Void)?
-    var onCycleAutocomplete: ((_ offset: Int) -> Bool)?
+    var onHandleTab: ((_ offset: Int) -> ComposerTabAutocompleteResult?)?
     var onConfirmAutocomplete: ((_ draft: String, _ cursorUTF16Offset: Int) -> CommandAutocompleteEdit?)?
     var onDismissAutocomplete: (() -> Bool)?
 
@@ -838,7 +901,16 @@ private final class ComposerNSTextView: NSTextView {
                 .command, .option, .control, .shift
             ])
             let direction = modifiers.isEmpty ? 1 : (modifiers == .shift ? -1 : 0)
-            if direction == 0 || onCycleAutocomplete?(direction) != true {
+            if direction == 0 {
+                super.keyDown(with: event)
+            } else if let result = onHandleTab?(direction) {
+                switch result {
+                case .accept(let edit):
+                    applyAutocompleteEdit(edit)
+                case .cycle:
+                    break
+                }
+            } else {
                 super.keyDown(with: event)
             }
         case 53:

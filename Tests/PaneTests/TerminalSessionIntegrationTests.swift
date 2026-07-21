@@ -7,6 +7,19 @@ import XCTest
 
 final class TerminalSessionIntegrationTests: XCTestCase {
     @MainActor
+    func testReadOnlyLiveMirrorHidesItsNoninteractiveScroller() throws {
+        let terminalView = LiveCommandTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 120)
+        )
+
+        terminalView.layoutSubtreeIfNeeded()
+
+        let scrollers = terminalView.subviews.compactMap { $0 as? NSScroller }
+        XCTAssertFalse(scrollers.isEmpty)
+        XCTAssertTrue(scrollers.allSatisfy(\.isHidden))
+    }
+
+    @MainActor
     func testHiddenPrimaryTerminalStillEmitsProtocolReplies() {
         let terminalView = PaneTerminalView(
             frame: NSRect(x: 0, y: 0, width: 800, height: 400)
@@ -196,6 +209,100 @@ final class TerminalSessionIntegrationTests: XCTestCase {
             !session.isAlternateScreenActive
         }
         XCTAssertEqual(session.mode, .terminal)
+    }
+
+    @MainActor
+    func testForegroundMonitorKeepsPaneShellInBlocksMode() async throws {
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        try await waitUntil("idle shell to start", timeout: 5) {
+            session.isShellRunning
+        }
+        try await Task.sleep(nanoseconds: 600_000_000)
+
+        XCTAssertEqual(session.mode, .blocks)
+        XCTAssertEqual(session.modeAttribution, .manual)
+    }
+
+    @MainActor
+    func testKnownForegroundProgramAutomaticallyUsesTerminalMode() async throws {
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        let command = "tail -f /dev/null"
+        session.submit(command: command)
+
+        try await waitUntil("tail to trigger Terminal mode", timeout: 8) {
+            session.mode == .terminal
+                && session.modeAttribution == .foregroundProcess("tail")
+        }
+
+        session.sendInterrupt()
+        try await waitUntil("shell foreground to restore Blocks mode", timeout: 8) {
+            session.mode == .blocks && !session.isCommandActive
+        }
+    }
+
+    @MainActor
+    func testTerminalModePassesLiteralTabByteToPTY() async throws {
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        session.submit(command: ":")
+        try await waitUntil("shell integration to become ready", timeout: 8) {
+            session.blocks.contains { block in
+                guard block.command == ":" else { return false }
+                if case .completed = block.state { return true }
+                return false
+            }
+        }
+
+        session.setMode(.terminal)
+        let readCommand = #"printf 'PANE_TAB_READY\n'; read -k 1 pane_char; printf '\nPANE_TAB=%d\n' "'$pane_char""#
+        terminalView.send(data: Array("\(readCommand)\r".utf8)[...])
+        _ = try await waitFor("PANE_TAB_READY", in: terminalView, timeout: 5)
+
+        terminalView.send(data: [0x09][...])
+        let output = try await waitFor("PANE_TAB=9", in: terminalView, timeout: 5)
+
+        XCTAssertTrue(output.contains("PANE_TAB=9"), output)
+    }
+
+    @MainActor
+    func testRawTermiosAutomaticallyUsesTerminalMode() async throws {
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        let command = #"/bin/sh -c 'trap "stty echo icanon; exit 130" INT TERM; stty -echo -icanon; sleep 30'"#
+        session.submit(command: command)
+
+        try await waitUntil("raw termios to trigger Terminal mode", timeout: 8) {
+            guard session.mode == .terminal else { return false }
+            if case .rawTermios = session.modeAttribution { return true }
+            return false
+        }
+
+        session.sendInterrupt()
+        try await waitUntil("canonical shell input to restore Blocks mode", timeout: 8) {
+            session.mode == .blocks && !session.isCommandActive
+        }
     }
 
     @MainActor

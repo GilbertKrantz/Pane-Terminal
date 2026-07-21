@@ -47,9 +47,9 @@ Pane aligns content by its text, not by the outside edge of every shape:
 
 - Terminal text: 24-point leading and trailing inset.
 - Block text: 12-point block-list inset plus 12-point block internal inset, yielding the same 24-point text column.
-- Composer input: 16-point outer inset plus 8-point internal inset, also yielding 24 points.
+- Composer input: 18-point outer inset plus 6-point internal inset, also yielding 24 points.
 - Main content top inset: 8 points.
-- Composer separation: 8 points above and 12 points below, keeping it close to the terminal without touching the window edge.
+- Composer separation: 6 points above and 10 points below, keeping it close to the terminal without touching the window edge.
 
 These values form one alignment system while allowing the block and composer shapes to use different optical edges.
 
@@ -100,25 +100,25 @@ Search, export, and share are intentionally not presented because they are not i
 
 The composer is one coherent native control platter:
 
-- One continuous 14-point rounded shape.
+- One continuous 12-point rounded shape.
 - One `.regularMaterial` background clipped to that shape.
-- One matching outline on the exact same shape.
+- One light matching outline on the exact same shape, strengthened for focus and increased contrast.
 - No dark card behind the material.
 - No separate material around the text editor.
 - No separate material around the execute button.
 
 The embedded `NSTextView` draws no background and therefore remains inside the continuous material. It uses the native text system for selection, undo, input methods, focus, copy, and paste.
 
-When idle, the composer contains suggestions, the draft editor, and an `arrow.up` execute action. While a command is active, it adds a compact command-and-duration header plus a read-only SwiftTerm mirror above the editor; the action changes to `return` and the editor sends line-oriented stdin. The mirror begins at one 17-point output row plus its inset, grows upward only as newline-delimited output arrives, and scrolls within a ten-row ceiling. The active surface disappears only when the command completes, is interrupted, or the shell terminates, at which point its output is finalized into the timeline.
+When idle, the composer contains suggestions, the draft editor, and an `arrow.up` execute action. While a command is active, it adds a vertically centered command-and-human-duration header plus a read-only SwiftTerm mirror above the editor; the action changes to `return` and the editor sends line-oriented stdin. The mirror has 12–14 points of internal padding, begins at one 17-point output row plus its inset, and grows upward only as newline-delimited output arrives through a ten-row ceiling. Its unusable embedded scroller is hidden; the authoritative Terminal-mode view retains a native overlay scroller. Alternate-screen activation switches to that authoritative view and uses a quiet interactive-session status during the transition instead of presenting an empty mirror. The active surface disappears only when the command completes, is interrupted, or the shell terminates, at which point its output is finalized into the timeline.
 
-The editor begins at one line, grows with wrapping and explicit newlines through six visible lines, then enables an overlay scroller. Its height publication is deferred from AppKit layout and emitted only when the measured value changes materially.
+The editor begins at one line in a 40-point row, grows with wrapping and explicit newlines through three visible lines, then enables an overlay scroller. Its height publication is deferred from AppKit layout and emitted only when the measured value changes materially.
 
 The idle execute action:
 
 - uses the SF Symbol `arrow.up`
-- is a 30-point circular bordered-prominent control
+- is a 28-point neutral rounded-square control with subtle hover and press feedback
 - is vertically centered within the composer `HStack`
-- receives the same eight-point internal inset as the editor
+- receives the same six-point internal inset as the editor
 - stays inside the shared material group
 - is disabled and visually reduced when the command is empty or the shell is stopped
 - supplements Return rather than replacing keyboard execution
@@ -187,8 +187,8 @@ These constraints prevent feedback loops and keep high-frequency terminal frames
 
 ## Scope and current limits
 
-Pane intentionally excludes tabs, AI completion, synchronization, collaboration, remote-session management, automatic process-name detection, settings, search, export, and share. Autocomplete is shell-semantic through zsh `compsys`, but remains bounded by a short timeout and size caps; its deterministic local prefix engine is a failure fallback rather than the primary source.
+Pane intentionally excludes tabs, AI completion, synchronization, collaboration, remote-session management, settings, search, export, and share. Automatic mode selection uses a deliberately bounded set of foreground process names plus PTY termios and alternate-screen signals; it is not a general process classifier. Autocomplete is shell-semantic through zsh `compsys`, but remains bounded by a short timeout and size caps; its deterministic local prefix engine is a failure fallback rather than the primary source.
 
-The active mirror is read-only, and the Blocks editor sends complete lines rather than raw keystrokes. Active-only Control-C and Control-D are deliberate exceptions that route `ETX` and `EOT` directly from the composer; other control sequences, arrows, Escape, Tab, mouse events, terminal replies, password privacy, and character-at-a-time input belong in Terminal mode. Automatic switching covers alternate-screen protocols 47, 1047, and 1049 only; prompts, REPLs, SSH sessions, and other foreground programs may require a manual switch. Commands typed directly in Terminal mode do not become blocks.
+The active mirror is read-only, and the Blocks editor sends complete lines rather than raw keystrokes. Active-only Control-C and Control-D are deliberate exceptions that route `ETX` and `EOT` directly from the composer; other control sequences, arrows, Escape, Tab, mouse events, terminal replies, password privacy, and character-at-a-time input belong in Terminal mode. Pane switches automatically for alternate-screen protocols 47, 1047, and 1049, recognized foreground programs, and raw PTY termios. Programs that expose none of those signals still require the manual mode control, which remains authoritative until foreground state changes. Commands typed directly in Terminal mode do not become blocks.
 
 Finalized blocks are plain-text snapshots rather than interactive ANSI terminal fragments. Cursor-addressed output and full-screen applications can differ in the mirror and belong in the authoritative Terminal mode. Visual behavior across macOS 14 and 15 fallbacks, macOS 26 Liquid Glass, accessibility appearances, and window sizes still requires a local human pass when automated control is unavailable without macOS Accessibility and Screen Recording permission.

@@ -22,7 +22,7 @@ enum PaneMetrics {
     static let contentTextColumn: CGFloat = 24
     static let blockOuterInset: CGFloat = 12
     static let blockInnerInset: CGFloat = 12
-    static let composerOuterInset: CGFloat = 16
-    static let composerInnerInset: CGFloat = 8
+    static let composerOuterInset: CGFloat = 18
+    static let composerInnerInset: CGFloat = 6
     static let composerTextInset: CGFloat = 0
 }
