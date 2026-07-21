@@ -4,8 +4,9 @@ import SwiftUI
 struct CommandComposerView: View {
     @ObservedObject var session: TerminalSession
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var isFocused = false
-    @State private var editorHeight: CGFloat = 24
+    @State private var editorHeight: CGFloat = 32
     @State private var caretUTF16Offset = 0
     @State private var autocompleteSuggestions: [CommandAutocompleteSuggestion] = []
     @State private var autocompleteSelection = CommandAutocompleteSelection()
@@ -54,24 +55,32 @@ struct CommandComposerView: View {
     }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
 
         composerContent
             .padding(PaneMetrics.composerInnerInset)
-            .background(.regularMaterial, in: shape)
+            .background(composerBackground(in: shape))
             .clipShape(shape)
             .overlay {
                 shape.strokeBorder(
-                    isFocused ? Color(nsColor: .keyboardFocusIndicatorColor) : PaneTheme.separator,
-                    lineWidth: isFocused || colorSchemeContrast == .increased ? 1.25 : 0.75
+                    isFocused ? Color.accentColor.opacity(0.65) : PaneTheme.separator.opacity(0.7),
+                    lineWidth: isFocused || colorSchemeContrast == .increased ? 1 : 0.5
                 )
             }
             .padding(.horizontal, PaneMetrics.composerOuterInset)
-            .padding(.top, 6)
-            .padding(.bottom, 10)
+            .padding(.vertical, PaneMetrics.composerOuterVerticalInset)
             .task(id: autocompleteQuery) {
                 await refreshAutocomplete(for: autocompleteQuery)
             }
+    }
+
+    @ViewBuilder
+    private func composerBackground(in shape: RoundedRectangle) -> some View {
+        if reduceTransparency {
+            PaneTheme.blockBackground.clipShape(shape)
+        } else {
+            shape.fill(.regularMaterial)
+        }
     }
 
     private var composerContent: some View {
@@ -108,7 +117,8 @@ struct CommandComposerView: View {
                     Text(editorPlaceholder)
                         .font(.callout)
                         .foregroundStyle(.tertiary)
-                        .padding(.top, 1)
+                        .padding(.top, PaneMetrics.composerVerticalTextInset + 1)
+                        .padding(.leading, PaneMetrics.composerHorizontalTextInset)
                         .allowsHitTesting(false)
                 }
 
@@ -124,7 +134,7 @@ struct CommandComposerView: View {
                         .help(editorHelp)
                 }
             }
-            .frame(minHeight: 40, maxHeight: 44, alignment: .center)
+            .frame(minHeight: 32, maxHeight: 66, alignment: .center)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             submitButton
@@ -163,7 +173,8 @@ struct CommandComposerView: View {
                 .frame(width: 15, height: 15)
         }
         .buttonStyle(ComposerSubmitButtonStyle())
-        .frame(width: 28, height: 28)
+        .frame(width: 24, height: 24)
+        .padding(.trailing, PaneMetrics.composerTrailingControlReserve)
         .disabled(session.isSecureInputActive || !canSubmit)
         .keyboardShortcut(.return, modifiers: [])
         .help(presentedCommandBlock != nil ? "Send input (Return)" : "Execute command (Return)")
@@ -215,7 +226,7 @@ struct CommandComposerView: View {
         if presentedCommandBlock != nil {
             return "The shell is waiting for the rest of this command. Return sends the next line."
         }
-        return "Return runs the command. Shift-Return inserts a newline. Tab and Shift-Tab select completions; Return accepts the selection. Up and Down browse history."
+        return "Return runs the command. Shift-Return inserts a newline. Tab selects completions."
     }
 
     @MainActor
@@ -491,28 +502,32 @@ private struct ActiveCommandSurface: View {
 
 private struct ComposerSubmitButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.controlActiveState) private var controlActiveState
     @State private var isHovered = false
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(isEnabled ? .primary : .tertiary)
+            .foregroundStyle(isEnabled ? .primary : .secondary)
             .background {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(background(isPressed: configuration.isPressed))
+                Circle().fill(background(isPressed: configuration.isPressed))
             }
             .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(PaneTheme.separator.opacity(isEnabled ? 0.65 : 0.35), lineWidth: 0.75)
+                Circle().strokeBorder(focusOrSeparator, lineWidth: controlActiveState == .key ? 1 : 0.5)
             }
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .opacity(isEnabled ? 1 : 0.35)
+            .contentShape(Circle())
             .onHover { isHovered = $0 }
     }
 
     private func background(isPressed: Bool) -> Color {
-        guard isEnabled else { return Color(nsColor: .controlBackgroundColor).opacity(0.35) }
-        if isPressed { return PaneTheme.selectedBlockBackground }
-        if isHovered { return Color.accentColor.opacity(0.16) }
-        return Color(nsColor: .controlBackgroundColor).opacity(0.78)
+        guard isEnabled else { return Color.primary.opacity(0.05) }
+        if isPressed { return PaneTheme.subtleControlPressedFill }
+        if isHovered { return PaneTheme.subtleControlHoverFill }
+        return PaneTheme.subtleControlFill
+    }
+
+    private var focusOrSeparator: Color {
+        controlActiveState == .key ? Color.accentColor.opacity(0.55) : Color.primary.opacity(0.10)
     }
 }
 
@@ -651,8 +666,8 @@ private struct ComposerTextView: NSViewRepresentable {
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
         textView.textContainerInset = NSSize(
-            width: PaneMetrics.composerTextInset,
-            height: 2
+            width: PaneMetrics.composerHorizontalTextInset,
+            height: PaneMetrics.composerVerticalTextInset
         )
         textView.drawsBackground = false
         textView.allowsUndo = true
@@ -896,17 +911,27 @@ private struct ComposerTextView: NSViewRepresentable {
 
             let font = textView.font ?? .monospacedSystemFont(ofSize: 13, weight: .regular)
             let lineHeight = layoutManager.defaultLineHeight(for: font)
-            let laidOutHeight = max(
-                layoutManager.usedRect(for: textContainer).maxY,
-                layoutManager.extraLineFragmentRect.maxY
-            )
-            let verticalInsets = textView.textContainerInset.height * 2
-            let rawHeight = ceil(max(lineHeight, laidOutHeight) + verticalInsets)
-            let minimumHeight = ceil(lineHeight + verticalInsets)
-            let maximumHeight = ceil((lineHeight * 3) + verticalInsets)
-            let targetHeight = min(max(rawHeight, minimumHeight), maximumHeight)
+            let glyphRange = layoutManager.glyphRange(for: textContainer)
+            var visualLineCount = 0
+            if glyphRange.length > 0 {
+                layoutManager.enumerateLineFragments(
+                    forGlyphRange: glyphRange
+                ) { _, _, _, _, _ in
+                    visualLineCount += 1
+                }
+            }
+            visualLineCount = max(1, visualLineCount)
+            if !textView.string.isEmpty,
+               textView.string.last?.isNewline == true {
+                visualLineCount += 1
+            }
 
-            let needsScroller = rawHeight > maximumHeight
+            let verticalInsets = textView.textContainerInset.height * 2
+            let rawHeight = ceil((CGFloat(visualLineCount) * lineHeight) + verticalInsets)
+            let visibleLineCount = min(visualLineCount, 3)
+            let targetHeight = CGFloat(32 + ((visibleLineCount - 1) * 17))
+
+            let needsScroller = visualLineCount > 3
             if scrollView.hasVerticalScroller != needsScroller {
                 scrollView.hasVerticalScroller = needsScroller
             }

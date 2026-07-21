@@ -11,6 +11,39 @@ struct ContentView: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            workspaceContent
+
+            if session.mode == .blocks && !session.shouldPresentExpandedAuthoritativeTerminal {
+                Divider()
+                    .overlay(PaneTheme.separator.opacity(0.65))
+
+                CommandComposerView(session: session)
+            } else if session.mode == .terminal {
+                Divider()
+                    .overlay(PaneTheme.separator.opacity(0.65))
+
+                terminalModeBar
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(PaneTheme.contentSurface)
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(PaneTheme.separator.opacity(0.55), lineWidth: 0.5)
+                .padding(1)
+        }
+        .animation(nil, value: session.mode)
+        .task {
+            session.ensureAuthoritativeTerminalIsRunning()
+        }
+        .toolbarBackground(PaneTheme.contentSurface, for: .windowToolbar)
+        .toolbarBackground(.visible, for: .windowToolbar)
+        .toolbar { terminalToolbar }
+    }
+
+    @ViewBuilder
+    private var workspaceContent: some View {
         ZStack {
             if session.mode == .blocks {
                 if session.shouldPresentExpandedAuthoritativeTerminal,
@@ -32,21 +65,6 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(PaneTheme.contentSurface)
-        .animation(nil, value: session.mode)
-        .task {
-            session.ensureAuthoritativeTerminalIsRunning()
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if session.mode == .blocks && !session.shouldPresentExpandedAuthoritativeTerminal {
-                CommandComposerView(session: session)
-            } else {
-                if session.mode == .terminal {
-                    terminalModeBar
-                }
-            }
-        }
-        .toolbar { terminalToolbar }
     }
 
     @ToolbarContentBuilder
@@ -56,7 +74,7 @@ struct ContentView: View {
                 shellStatus
                     .fixedSize(horizontal: true, vertical: false)
 
-                ModeSwitcher(selection: modeBinding)
+                ModeMenu(selection: modeBinding)
 
                 terminalActionsMenu
                     .frame(width: 30, height: 30)
@@ -71,7 +89,7 @@ struct ContentView: View {
                 shellStatus
                     .fixedSize(horizontal: true, vertical: false)
 
-                ModeSwitcher(selection: modeBinding)
+                ModeMenu(selection: modeBinding)
 
                 terminalActionsMenu
             }
@@ -112,7 +130,13 @@ struct ContentView: View {
             }
         } label: {
             Image(systemName: "ellipsis")
-                .frame(width: 24, height: 24)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.primary)
+                .frame(width: 30, height: 30)
+                .background(PaneTheme.subtleControlFill, in: Circle())
+                .overlay {
+                    Circle().stroke(.primary.opacity(0.10), lineWidth: 0.5)
+                }
                 .contentShape(Circle())
         }
         .menuIndicator(.hidden)
@@ -178,80 +202,67 @@ struct ContentView: View {
             .buttonStyle(.bordered)
         }
         .padding(8)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(PaneTheme.separator, lineWidth: 1)
-        }
+        .background(.bar)
         .padding(.horizontal, PaneMetrics.composerOuterInset)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
+        .padding(.vertical, 6)
     }
 }
 
-private struct ModeSwitcher: View {
+private struct ModeMenu: View {
     @Binding var selection: InputMode
-    @Namespace private var selectionAnimation
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     var body: some View {
-        if #available(macOS 26.0, *) {
-            liquidGlassSwitcher
-        } else {
+        Menu {
+            // Picker-in-Menu uses AppKit's native selected-item checkmark, which
+            // matches macOS menu conventions better than a custom sliding toggle.
             Picker("Input mode", selection: $selection) {
                 ForEach(InputMode.allCases, id: \.self) { mode in
-                    Text(mode.shortTitle).tag(mode)
+                    Text(mode.title)
+                        .tag(mode)
+                        .accessibilityLabel(mode.title)
+                        .accessibilityValue(selection == mode ? "Selected" : "Not selected")
                 }
             }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .controlSize(.small)
-            .frame(width: 150)
-            .help("Switch between structured Blocks and direct Terminal input")
-        }
-    }
+            .pickerStyle(.inline)
+        } label: {
+            HStack(spacing: 6) {
+                Text(selection.shortTitle)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1)
 
-    @available(macOS 26.0, *)
-    private var liquidGlassSwitcher: some View {
-        HStack(spacing: 0) {
-            ForEach(InputMode.allCases, id: \.self) { mode in
-                Button {
-                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.24)) {
-                        selection = mode
-                    }
-                } label: {
-                    Text(mode.shortTitle)
-                        .font(.callout.weight(selection == mode ? .semibold : .medium))
-                        .foregroundStyle(selection == mode ? .primary : .secondary)
-                        .frame(width: 76, height: 26)
-                        .background {
-                            if selection == mode {
-                                Capsule()
-                                    .fill(selectionFill)
-                                    .matchedGeometryEffect(
-                                        id: "selected-mode",
-                                        in: selectionAnimation
-                                    )
-                            }
-                        }
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(mode.title)
-                .accessibilityValue(selection == mode ? "Selected" : "Not selected")
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .imageScale(.small)
             }
+            .frame(minWidth: 108, minHeight: 26)
+            .contentShape(Capsule())
         }
-        .padding(3)
-        .glassEffect(.regular.interactive(), in: Capsule())
+        .menuIndicator(.hidden)
+        .menuStyle(.borderlessButton)
+        .modifier(ModeMenuGlassChrome())
         .help("Switch between structured Blocks and direct Terminal input")
-        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Input mode")
+        .accessibilityValue(selection.title)
     }
+}
 
-    private var selectionFill: Color {
-        if colorSchemeContrast == .increased {
-            return Color(nsColor: .selectedContentBackgroundColor)
+private struct ModeMenuGlassChrome: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content
+                .padding(.horizontal, 10)
+                .padding(.vertical, 3)
+                .glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            content
+                .padding(.horizontal, 10)
+                .padding(.vertical, 3)
+                .background(.regularMaterial, in: Capsule())
+                .overlay {
+                    Capsule()
+                        .strokeBorder(PaneTheme.separator, lineWidth: 1)
+                }
         }
-        return PaneTheme.selectedBlockBackground
     }
 }

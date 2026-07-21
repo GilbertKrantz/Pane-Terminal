@@ -21,7 +21,7 @@ struct BlocksView: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 8) {
+                LazyVStack(spacing: 4) {
                     ForEach(finalizedBlocks) { block in
                         CommandBlockView(
                             block: block,
@@ -32,8 +32,8 @@ struct BlocksView: View {
                     }
                 }
                 .padding(.horizontal, PaneMetrics.blockOuterInset)
-                .padding(.top, 8)
-                .padding(.bottom, 10)
+                .padding(.top, 6)
+                .padding(.bottom, 8)
             }
             // Keep the newest command next to the pinned composer. When the
             // timeline exceeds the viewport, older blocks overflow upward.

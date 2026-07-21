@@ -4,6 +4,7 @@ struct CommandBlockView: View {
     let block: CommandBlock
     let isSelected: Bool
     @ObservedObject var session: TerminalSession
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @State private var isHovered = false
 
     var body: some View {
@@ -15,18 +16,18 @@ struct CommandBlockView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
 
-                Spacer(minLength: 12)
+                statusLabel
+
+                Spacer(minLength: 16)
 
                 contextualToolbar
                     // The slot is always reserved so hovering a block never
                     // changes the command or status layout.
                     .frame(width: 116, alignment: .trailing)
-                    .opacity(showsContextualToolbar ? 1 : 0)
+                    .opacity(contextualToolbarOpacity)
                     .allowsHitTesting(showsContextualToolbar)
                     .accessibilityHidden(!showsContextualToolbar)
-                    .animation(.easeOut(duration: 0.12), value: showsContextualToolbar)
-
-                statusLabel
+                    .animation(.easeOut(duration: 0.12), value: contextualToolbarOpacity)
             }
 
             Text(block.command)
@@ -45,12 +46,15 @@ struct CommandBlockView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, PaneMetrics.blockInnerInset)
-        .padding(.vertical, 11)
+        .padding(.vertical, 9)
         .background(blockSurface, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay {
             if isSelected {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color(nsColor: .keyboardFocusIndicatorColor), lineWidth: 1)
+                    .strokeBorder(
+                        PaneTheme.separator.opacity(colorSchemeContrast == .increased ? 1 : 0.75),
+                        lineWidth: colorSchemeContrast == .increased ? 1 : 0.5
+                    )
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -62,13 +66,23 @@ struct CommandBlockView: View {
     }
 
     private var blockSurface: Color {
-        if isSelected { return PaneTheme.selectedBlockBackground }
+        if isSelected {
+            return PaneTheme.selectedBlockBackground.opacity(
+                colorSchemeContrast == .increased ? 1 : 0.55
+            )
+        }
         if isHovered { return PaneTheme.blockBackground }
         return .clear
     }
 
     private var showsContextualToolbar: Bool {
         isSelected || isHovered
+    }
+
+    private var contextualToolbarOpacity: Double {
+        if isHovered { return 1 }
+        if isSelected { return 0.5 }
+        return 0
     }
 
     private var displayDirectory: String {
