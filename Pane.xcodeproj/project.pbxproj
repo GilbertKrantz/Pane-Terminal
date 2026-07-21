@@ -38,6 +38,14 @@
 		10000000000000000000001D /* CommandAutocomplete.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000021 /* CommandAutocomplete.swift */; };
 		10000000000000000000001E /* CommandAutocompleteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000022 /* CommandAutocompleteTests.swift */; };
 		10000000000000000000001F /* WarmZshCompletionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000023 /* WarmZshCompletionClient.swift */; };
+		100000000000000000000024 /* TerminalSecurityState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000024 /* TerminalSecurityState.swift */; };
+		100000000000000000000025 /* SensitiveDataSanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000025 /* SensitiveDataSanitizer.swift */; };
+		100000000000000000000026 /* RuntimeState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000026 /* RuntimeState.swift */; };
+		100000000000000000000027 /* PredictionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000027 /* PredictionTypes.swift */; };
+		100000000000000000000028 /* InMemoryRuntimeStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000028 /* InMemoryRuntimeStateStore.swift */; };
+		100000000000000000000029 /* SensitiveDataSanitizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000029 /* SensitiveDataSanitizerTests.swift */; };
+		10000000000000000000002A /* RuntimeStateStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002A /* RuntimeStateStoreTests.swift */; };
+		10000000000000000000002B /* SQLiteRuntimeStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002B /* SQLiteRuntimeStateStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -86,6 +94,14 @@
 		200000000000000000000021 /* CommandAutocomplete.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandAutocomplete.swift; sourceTree = "<group>"; };
 		200000000000000000000022 /* CommandAutocompleteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandAutocompleteTests.swift; sourceTree = "<group>"; };
 		200000000000000000000023 /* WarmZshCompletionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WarmZshCompletionClient.swift; sourceTree = "<group>"; };
+		200000000000000000000024 /* TerminalSecurityState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSecurityState.swift; sourceTree = "<group>"; };
+		200000000000000000000025 /* SensitiveDataSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensitiveDataSanitizer.swift; sourceTree = "<group>"; };
+		200000000000000000000026 /* RuntimeState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeState.swift; sourceTree = "<group>"; };
+		200000000000000000000027 /* PredictionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PredictionTypes.swift; sourceTree = "<group>"; };
+		200000000000000000000028 /* InMemoryRuntimeStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InMemoryRuntimeStateStore.swift; sourceTree = "<group>"; };
+		200000000000000000000029 /* SensitiveDataSanitizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensitiveDataSanitizerTests.swift; sourceTree = "<group>"; };
+		20000000000000000000002A /* RuntimeStateStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeStateStoreTests.swift; sourceTree = "<group>"; };
+		20000000000000000000002B /* SQLiteRuntimeStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SQLiteRuntimeStateStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -146,6 +162,12 @@
 				200000000000000000000003 /* CommandHistory.swift */,
 				200000000000000000000015 /* CommandBlock.swift */,
 				200000000000000000000021 /* CommandAutocomplete.swift */,
+				200000000000000000000024 /* TerminalSecurityState.swift */,
+				200000000000000000000025 /* SensitiveDataSanitizer.swift */,
+				200000000000000000000026 /* RuntimeState.swift */,
+				200000000000000000000027 /* PredictionTypes.swift */,
+				200000000000000000000028 /* InMemoryRuntimeStateStore.swift */,
+				20000000000000000000002B /* SQLiteRuntimeStateStore.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -199,6 +221,8 @@
 				20000000000000000000001D /* CommandBlockTimelineTests.swift */,
 				20000000000000000000001F /* AlternateScreenTranscriptFilterTests.swift */,
 				200000000000000000000022 /* CommandAutocompleteTests.swift */,
+				200000000000000000000029 /* SensitiveDataSanitizerTests.swift */,
+				20000000000000000000002A /* RuntimeStateStoreTests.swift */,
 			);
 			path = PaneTests;
 			sourceTree = "<group>";
@@ -336,6 +360,12 @@
 				10000000000000000000001A /* AlternateScreenTranscriptFilter.swift in Sources */,
 				10000000000000000000001D /* CommandAutocomplete.swift in Sources */,
 				10000000000000000000001F /* WarmZshCompletionClient.swift in Sources */,
+				100000000000000000000024 /* TerminalSecurityState.swift in Sources */,
+				100000000000000000000025 /* SensitiveDataSanitizer.swift in Sources */,
+				100000000000000000000026 /* RuntimeState.swift in Sources */,
+				100000000000000000000027 /* PredictionTypes.swift in Sources */,
+				100000000000000000000028 /* InMemoryRuntimeStateStore.swift in Sources */,
+				10000000000000000000002B /* SQLiteRuntimeStateStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -353,6 +383,8 @@
 				100000000000000000000019 /* CommandBlockTimelineTests.swift in Sources */,
 				10000000000000000000001B /* AlternateScreenTranscriptFilterTests.swift in Sources */,
 				10000000000000000000001E /* CommandAutocompleteTests.swift in Sources */,
+				100000000000000000000029 /* SensitiveDataSanitizerTests.swift in Sources */,
+				10000000000000000000002A /* RuntimeStateStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

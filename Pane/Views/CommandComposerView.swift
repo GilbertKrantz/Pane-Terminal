@@ -32,7 +32,8 @@ struct CommandComposerView: View {
 
     private var visibleSuggestions: [CommandAutocompleteSuggestion] {
         let query = autocompleteQuery
-        guard !query.isCommandActive,
+        guard !session.isSecureInputActive,
+              !query.isCommandActive,
               query.hasCurrentToken,
               suggestionsQuery == query,
               dismissedQuery != query else { return [] }
@@ -80,7 +81,10 @@ struct CommandComposerView: View {
                     .padding(.bottom, 6)
             }
 
-            if !visibleSuggestions.isEmpty {
+            if session.isSecureInputActive {
+                SecureInputIndicator()
+                    .padding(.bottom, 4)
+            } else if !visibleSuggestions.isEmpty {
                 AutocompleteSuggestionsRow(
                     suggestions: visibleSuggestions,
                     highlightedSuggestionID: autocompleteSelection.highlightedSuggestionID,
@@ -96,7 +100,9 @@ struct CommandComposerView: View {
     private var editorRow: some View {
         HStack(alignment: .center, spacing: 10) {
             ZStack(alignment: .topLeading) {
-                if session.commandDraft.isEmpty {
+                if session.isSecureInputActive {
+                    EmptyView()
+                } else if session.commandDraft.isEmpty {
                     Text(editorPlaceholder)
                         .font(.callout)
                         .foregroundStyle(.tertiary)
@@ -104,9 +110,17 @@ struct CommandComposerView: View {
                         .allowsHitTesting(false)
                 }
 
-                composerTextView
-                    .frame(height: editorHeight)
-                    .help(editorHelp)
+                if session.isSecureInputActive {
+                    Text("Password input — characters are hidden")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 1)
+                        .accessibilityLabel("Password input characters are hidden")
+                } else {
+                    composerTextView
+                        .frame(height: editorHeight)
+                        .help(editorHelp)
+                }
             }
             .frame(minHeight: 40, maxHeight: 44, alignment: .center)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -137,6 +151,7 @@ struct CommandComposerView: View {
 
     private var submitButton: some View {
         Button {
+            guard !session.isSecureInputActive else { return }
             session.submitDraft()
         } label: {
             Image(systemName: presentedCommandBlock != nil ? "return" : "arrow.up")
@@ -145,7 +160,7 @@ struct CommandComposerView: View {
         }
         .buttonStyle(ComposerSubmitButtonStyle())
         .frame(width: 28, height: 28)
-        .disabled(!canSubmit)
+        .disabled(session.isSecureInputActive || !canSubmit)
         .keyboardShortcut(.return, modifiers: [])
         .help(presentedCommandBlock != nil ? "Send input (Return)" : "Execute command (Return)")
     }
@@ -168,6 +183,9 @@ struct CommandComposerView: View {
     }
 
     private var editorPlaceholder: String {
+        if session.isSecureInputActive {
+            return "Password input — characters are hidden"
+        }
         if isAwaitingContinuation {
             return "Continue the command…"
         }
@@ -181,6 +199,9 @@ struct CommandComposerView: View {
     }
 
     private var editorHelp: String {
+        if session.isSecureInputActive {
+            return "Password input — characters are hidden"
+        }
         if isAwaitingContinuation {
             return "The shell is waiting for the rest of this command. Return sends the next line."
         }
@@ -195,7 +216,8 @@ struct CommandComposerView: View {
 
     @MainActor
     private func refreshAutocomplete(for query: AutocompleteQuery) async {
-        guard !query.isCommandActive,
+        guard !session.isSecureInputActive,
+              !query.isCommandActive,
               query.hasCurrentToken,
               dismissedQuery != query else {
             if suggestionsQuery != nil || !autocompleteSuggestions.isEmpty {
@@ -262,7 +284,8 @@ struct CommandComposerView: View {
             caretUTF16Offset: cursorUTF16Offset,
             isCommandActive: session.isCommandActive
         )
-        guard !query.isCommandActive,
+        guard !session.isSecureInputActive,
+              !query.isCommandActive,
               query.hasCurrentToken,
               suggestionsQuery == query,
               dismissedQuery != query,
@@ -307,6 +330,16 @@ struct CommandComposerView: View {
         autocompleteSelection.reset()
         autocompleteSuggestions = []
         suggestionsQuery = nil
+    }
+}
+
+
+private struct SecureInputIndicator: View {
+    var body: some View {
+        Label("Password input — characters are hidden", systemImage: "lock.fill")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Secure input is active. Password input characters are hidden.")
     }
 }
 

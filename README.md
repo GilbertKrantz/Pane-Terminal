@@ -81,7 +81,13 @@ Pane/
 │   ├── CommandAutocomplete.swift
 │   ├── CommandBlock.swift
 │   ├── CommandHistory.swift
-│   └── InputMode.swift
+│   ├── InMemoryRuntimeStateStore.swift
+│   ├── InputMode.swift
+│   ├── PredictionTypes.swift
+│   ├── RuntimeState.swift
+│   ├── SensitiveDataSanitizer.swift
+│   ├── SQLiteRuntimeStateStore.swift
+│   └── TerminalSecurityState.swift
 ├── Terminal/
 │   ├── AlternateScreenTranscriptFilter.swift
 │   ├── BlockOutputSanitizer.swift
@@ -112,6 +118,9 @@ Tests/
 - `CommandBlockTimeline` manages queued, running, completed, and interrupted blocks.
 - `CommandAutocomplete` presents at most 12 deduplicated candidates captured from the active zsh completion system. A bounded local history, command, executable, and filesystem engine remains available when warm-shell capture is unavailable.
 - `CommandComposerView` wraps a native `NSTextView`; it grows from one through three visible lines, then scrolls. While a command is active, it also hosts a read-only SwiftTerm mirror and changes the editor into line-oriented stdin.
+- `TerminalSecurityState` follows PTY ECHO state. Disabled echo during an active command switches keyboard handling to SwiftTerm's direct byte path, removes the composer and autocomplete from the input path, and returns to normal only at Pane's verified shell prompt boundary. Idle zsh line-editor termios changes are explicitly treated as normal prompt editing.
+- `SensitiveDataSanitizer` is the shared command, output, error, and allowlisted-environment redaction boundary.
+- `SQLiteRuntimeStateStore` provides WAL-backed, schema-versioned storage with age, count, and size retention plus session/workspace deletion. It sanitizes content again at the write boundary; `InMemoryRuntimeStateStore` is the disk-free fallback.
 
 PTY bytes have two deliberately separate destinations:
 
@@ -211,9 +220,9 @@ Terminal delegate state is equality-guarded. Buffer-change notifications, visibi
 - Commands typed directly in Terminal mode are not converted into structured blocks because they have no composer submission record.
 - While a command is active, Return sends one line of stdin and Shift-Return only edits that line. Active-only Control-C and Control-D are routed directly to the PTY, but other control sequences, arrows, Escape, Tab, mouse reporting, and raw input require Terminal mode.
 - Foreground-process recognition is intentionally bounded, and a program can retain canonical/echo input without using a recognized name. Manually switch to Terminal mode when an interactive program exposes none of Pane's signals.
-- Passwords entered in the composer are visible. Enter Terminal mode before responding to a password prompt.
+- Secure-input detection is driven primarily by PTY ECHO state and therefore follows programs that correctly disable echo. A misbehaving program that reads a secret while leaving ECHO enabled provides no authoritative terminal signal; manually enter Terminal mode for such programs.
 - Up and Down navigate command history rather than moving the caret vertically in a multiline draft.
-- History and finalized blocks are memory-only. The active raw-output fallback retains only its newest 4 MiB and each SwiftTerm view has 10,000 lines of scrollback, but accumulated finalized block text can still consume substantial memory.
+- The durable SQLite store and runtime/prediction data contracts are implemented and tested, but the application session collector, settings UI, repository/project feature collection, and prediction coordinator are not wired yet. Current command history and finalized blocks therefore remain memory-only in the running app.
 - Replacing zsh with `exec`, removing the integration hooks, or redefining them can prevent the completion marker and leave a block running until interruption, shell exit, or restart.
 - Warm-shell autocomplete depends on zsh's socket, ZLE, PTY, and completion modules. If integration is unavailable, a custom completion exceeds the deadline or caps, or its response cannot be decoded, Pane uses its less context-aware local fallback.
 - Completion workers inherit live shell state by forking from the active zsh, but they run in a short-lived child. Side effects produced only while computing a completion are discarded rather than applied back to the authoritative shell.
@@ -237,6 +246,8 @@ Terminal delegate state is equality-guarded. Buffer-change notifications, visibi
 - Stable hover geometry and a compact content-sized one-to-three-line composer
 - One persistent PTY-backed interactive login zsh with normal Oh My Zsh startup
 - Manual Blocks/Terminal input routing plus bounded foreground-process, raw-termios, and alternate-screen switching
+- ECHO-driven secure-input routing that bypasses the composer, suppresses autocomplete, and resumes only at a verified shell prompt boundary
+- Centralized secret sanitization plus ephemeral and durable SQLite runtime-state stores with migrations, bounded retention, scoped deletion, and defense-in-depth write sanitization
 - Isolated DEC 1049 alternate buffer with restoration of the unchanged normal buffer
 - Alternate-screen transcript suppression, split-sequence handling, and manual mode override
 - Resize, scrollback, copy/paste, mouse input, Meta input, clear, restart, shell-exit handling, and cleanup
@@ -245,7 +256,7 @@ Terminal delegate state is equality-guarded. Buffer-change notifications, visibi
 
 Verification is revision-specific; these results are from the current checkout after warm-zsh autocomplete, the icon-identity fix, and the stderr-descriptor fix:
 
-- SwiftPM: **79 of 79 tests passed**, including protocol framing, candidate mapping, selectable autocomplete, automatic input-mode signals, read-only mirror chrome, persistent PTY behavior, Control-C routing, alternate-buffer isolation, stderr-only output with a nonzero exit status, and a live integration test that defines a parameter and `compdef` after the shell has started and then captures that warm-only completion.
+- SwiftPM: **93 of 93 tests passed**, including protocol framing, candidate mapping, selectable autocomplete, idle-zsh secure-mode suppression, real child-process and shell-built-in no-echo leakage tests, SQLite restart restoration and retention, a raw database-file secret scan, read-only mirror chrome, persistent PTY behavior, Control-C routing, alternate-buffer isolation, stderr-only output with a nonzero exit status, and a live integration test that defines a parameter and `compdef` after the shell has started and then captures that warm-only completion.
 - Native Xcode build: **succeeded** for the `Pane` Debug scheme on macOS with SwiftTerm 1.14.0.
 - Runtime: the generated `Pane.app` was registered and launched as a bundle. The app uses `com.gilbertkrantz.Pane`, contains the compiled `AppIcon.icns`, applies it to current and future window miniatures, and the corrected window-preview icon was visually confirmed.
 - Generated app: `/Users/chandraw/Documents/Webe's Term/Build/Pane.app`.

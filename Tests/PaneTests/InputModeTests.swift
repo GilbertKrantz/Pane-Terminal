@@ -26,7 +26,8 @@ extension InputModeTests {
             processGroupID: 42,
             shellProcessGroupID: 7,
             processName: "ssh",
-            isRawInput: false
+            isRawInput: false,
+            echoEnabled: true
         )
 
         XCTAssertTrue(snapshot.isKnownInteractiveProgram)
@@ -38,7 +39,8 @@ extension InputModeTests {
             processGroupID: 42,
             shellProcessGroupID: 7,
             processName: "remote-app",
-            isRawInput: true
+            isRawInput: true,
+            echoEnabled: false
         )
 
         XCTAssertEqual(snapshot.terminalModeAttribution, .rawTermios("remote-app"))
@@ -49,12 +51,40 @@ extension InputModeTests {
             processGroupID: 42,
             shellProcessGroupID: 42,
             processName: "zsh",
-            isRawInput: true
+            isRawInput: true,
+            echoEnabled: false
         )
 
         XCTAssertTrue(snapshot.isShellForeground)
         XCTAssertTrue(snapshot.isRawInput)
         XCTAssertNil(snapshot.terminalModeAttribution)
+    }
+
+
+    func testTerminalSecurityStateReflectsDisabledEcho() {
+        let state = TerminalSecurityState(
+            inputMode: .secure,
+            echoEnabled: false,
+            detectedAt: Date(),
+            source: .terminalEchoState
+        )
+
+        XCTAssertEqual(state.inputMode, .secure)
+        XCTAssertFalse(state.echoEnabled)
+        XCTAssertEqual(state.source, .terminalEchoState)
+    }
+
+    func testForegroundSnapshotCarriesEchoStateForSecureInputDetection() {
+        let snapshot = ForegroundProcessSnapshot(
+            processGroupID: 42,
+            shellProcessGroupID: 7,
+            processName: "sudo",
+            isRawInput: true,
+            echoEnabled: false
+        )
+
+        XCTAssertFalse(snapshot.echoEnabled)
+        XCTAssertEqual(snapshot.terminalModeAttribution, .rawTermios("sudo"))
     }
 
     func testModeAttributionExplanationsAreUserFacing() {

@@ -227,6 +227,7 @@ final class TerminalSessionIntegrationTests: XCTestCase {
 
         XCTAssertEqual(session.mode, .blocks)
         XCTAssertEqual(session.modeAttribution, .manual)
+        XCTAssertFalse(session.isSecureInputActive)
     }
 
     @MainActor
@@ -303,6 +304,102 @@ final class TerminalSessionIntegrationTests: XCTestCase {
         try await waitUntil("canonical shell input to restore Blocks mode", timeout: 8) {
             session.mode == .blocks && !session.isCommandActive
         }
+    }
+
+    @MainActor
+    func testNoEchoInputBypassesDraftHistoryAutocompleteAndRenderedOutput() async throws {
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        let command = #"/bin/sh -c 'stty -echo; printf "PANE_SECURE_READY\n"; IFS= read -r pane_secret; stty echo; printf "\nPANE_SECURE_DONE\n"'"#
+        session.submit(command: command)
+
+        try await waitUntil("disabled echo to enter secure input", timeout: 8) {
+            session.isSecureInputActive && session.mode == .terminal
+        }
+        let readyOutput = try await waitFor(
+            "PANE_SECURE_READY",
+            in: terminalView,
+            timeout: 5
+        )
+        XCTAssertTrue(readyOutput.contains("PANE_SECURE_READY"), readyOutput)
+        let suggestions = await session.autocompleteSuggestions(
+            for: "git",
+            cursorUTF16Offset: 3
+        )
+        XCTAssertTrue(suggestions.isEmpty)
+        XCTAssertTrue(session.commandDraft.isEmpty)
+
+        let seededSecret = "pane-secure-secret-123456"
+        terminalView.send(data: Array("\(seededSecret)\n".utf8)[...])
+
+        let completedOutput = try await waitFor(
+            "PANE_SECURE_DONE",
+            in: terminalView,
+            timeout: 5
+        )
+        XCTAssertTrue(completedOutput.contains("PANE_SECURE_DONE"), completedOutput)
+
+        try await waitUntil("secure input to end", timeout: 8) {
+            !session.isSecureInputActive
+        }
+        try await waitUntil("secure command block to finish", timeout: 8) {
+            !session.isCommandActive
+        }
+        try await waitUntil("Blocks mode to resume after secure input", timeout: 8) {
+            session.mode == .blocks
+        }
+
+        let block = try XCTUnwrap(session.blocks.first { $0.command == command })
+        let terminalText = bufferText(in: terminalView, kind: .active)
+        XCTAssertFalse(block.output.contains(seededSecret))
+        XCTAssertFalse(terminalText.contains(seededSecret))
+        XCTAssertFalse(session.commandDraft.contains(seededSecret))
+        XCTAssertFalse(session.history.commands.contains { $0.contains(seededSecret) })
+    }
+
+    @MainActor
+    func testShellBuiltinReadSilentEntersSecureModeWithoutLeakingInput() async throws {
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        let command = #"printf 'PANE_READ_S_READY\n'; read -s pane_secret; printf '\nPANE_READ_S_DONE\n'"#
+        session.submit(command: command)
+        let readyOutput = try await waitFor(
+            "PANE_READ_S_READY",
+            in: terminalView,
+            timeout: 5
+        )
+        XCTAssertTrue(readyOutput.contains("PANE_READ_S_READY"), readyOutput)
+        try await waitUntil("read -s to enter secure input", timeout: 8) {
+            session.isSecureInputActive
+        }
+
+        let seededSecret = "pane-zsh-read-secret-987654"
+        terminalView.send(data: Array("\(seededSecret)\n".utf8)[...])
+        let completedOutput = try await waitFor(
+            "PANE_READ_S_DONE",
+            in: terminalView,
+            timeout: 5
+        )
+        XCTAssertTrue(completedOutput.contains("PANE_READ_S_DONE"), completedOutput)
+        try await waitUntil("normal prompt after read -s", timeout: 8) {
+            !session.isSecureInputActive && !session.isCommandActive
+        }
+
+        let block = try XCTUnwrap(session.blocks.first { $0.command == command })
+        XCTAssertFalse(block.output.contains(seededSecret))
+        XCTAssertFalse(bufferText(in: terminalView, kind: .active).contains(seededSecret))
+        XCTAssertFalse(session.commandDraft.contains(seededSecret))
+        XCTAssertFalse(session.history.commands.contains { $0.contains(seededSecret) })
     }
 
     @MainActor

@@ -50,6 +50,7 @@ struct ForegroundProcessSnapshot: Equatable, Sendable {
     let shellProcessGroupID: pid_t?
     let processName: String?
     let isRawInput: Bool
+    let echoEnabled: Bool
 
     var isShellForeground: Bool {
         processGroupID == shellProcessGroupID

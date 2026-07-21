@@ -94,6 +94,7 @@ final class TerminalSession: NSObject, ObservableObject {
     @Published private(set) var blockTimeline = CommandBlockTimeline()
     @Published private(set) var isAlternateScreenActive = false
     @Published private(set) var modeAttribution: InputModeAttribution = .manual
+    @Published private(set) var terminalSecurityState: TerminalSecurityState = .normal
     @Published private(set) var activeCommandVisibleLineCount = 1
     @Published var selectedBlockID: UUID?
     @Published var commandDraft = ""
@@ -143,6 +144,10 @@ final class TerminalSession: NSObject, ObservableObject {
         }
         guard let commandAwaitingStartID else { return nil }
         return blockTimeline.block(id: commandAwaitingStartID)
+    }
+
+    var isSecureInputActive: Bool {
+        terminalSecurityState.inputMode == .secure
     }
 
     var activeProcessLabel: String {
@@ -398,7 +403,8 @@ final class TerminalSession: NSObject, ObservableObject {
         for draft: String,
         cursorUTF16Offset: Int
     ) async -> [CommandAutocompleteSuggestion] {
-        guard mode == .blocks,
+        guard terminalSecurityState.inputMode == .normal,
+              mode == .blocks,
               isShellRunning,
               isShellIntegrationReady,
               !isCommandActive,
@@ -424,7 +430,8 @@ final class TerminalSession: NSObject, ObservableObject {
               processGeneration == generation,
               zshCompletionEndpoint == endpoint,
               !isCommandActive,
-              !isAlternateScreenActive else {
+              !isAlternateScreenActive,
+              terminalSecurityState.inputMode == .normal else {
             return []
         }
 
@@ -584,6 +591,7 @@ final class TerminalSession: NSObject, ObservableObject {
                 }
 
             case .commandFinished(let exitCode, let workingDirectory):
+                handleNormalPromptBoundary()
                 if currentDirectory != workingDirectory {
                     currentDirectory = workingDirectory
                 }
@@ -907,6 +915,7 @@ final class TerminalSession: NSObject, ObservableObject {
         foregroundProcessTimer?.invalidate()
         foregroundProcessTimer = nil
         lastForegroundSnapshot = nil
+        updateSecurityState(echoEnabled: true, source: .terminalEchoState)
         if modeAttribution != .manual {
             modeAttribution = .manual
         }
@@ -915,6 +924,18 @@ final class TerminalSession: NSObject, ObservableObject {
     private func refreshForegroundProcessMode() {
         guard isShellRunning, !isAlternateScreenActive else { return }
         guard let snapshot = foregroundProcessSnapshot() else { return }
+
+        // zsh's idle ZLE can temporarily disable ECHO while it owns the
+        // foreground process group. That is ordinary prompt editing, not a
+        // password request. Once preexec has started a tracked command, an
+        // ECHO-off shell foreground is meaningful again (for example read -s).
+        let isIdleShellLineEditor = snapshot.isShellForeground
+            && blockTimeline.activeBlockID == nil
+        updateSecurityState(
+            echoEnabled: isIdleShellLineEditor ? true : snapshot.echoEnabled,
+            source: .terminalEchoState
+        )
+
         guard snapshot != lastForegroundSnapshot else { return }
         lastForegroundSnapshot = snapshot
 
@@ -929,6 +950,41 @@ final class TerminalSession: NSObject, ObservableObject {
         }
     }
 
+    private func updateSecurityState(
+        echoEnabled: Bool,
+        source: SecureInputDetectionSource
+    ) {
+        let inputMode: TerminalInputMode = echoEnabled ? .normal : .secure
+        guard terminalSecurityState.inputMode != inputMode
+            || terminalSecurityState.echoEnabled != echoEnabled else { return }
+
+        if inputMode == .secure {
+            commandDraft = ""
+            history.resetNavigation()
+        }
+        terminalSecurityState = TerminalSecurityState(
+            inputMode: inputMode,
+            echoEnabled: echoEnabled,
+            detectedAt: Date(),
+            source: source
+        )
+    }
+
+    /// Pane's precmd marker is emitted only after the foreground command has
+    /// returned to the persistent shell. It is the authoritative boundary for
+    /// leaving secure input; a termios poll can otherwise miss a short ECHO
+    /// transition or observe the shell line editor changing flags again.
+    private func handleNormalPromptBoundary() {
+        updateSecurityState(echoEnabled: true, source: .applicationSignal)
+        lastForegroundSnapshot = nil
+
+        guard !isAlternateScreenActive,
+              modeAttribution != .manual,
+              mode == .terminal else { return }
+        modeAttribution = .manual
+        mode = .blocks
+    }
+
     private func foregroundProcessSnapshot() -> ForegroundProcessSnapshot? {
         guard let process, process.childfd >= 0 else { return nil }
         let foregroundPGID = tcgetpgrp(process.childfd)
@@ -937,15 +993,17 @@ final class TerminalSession: NSObject, ObservableObject {
         var termiosState = termios()
         let hasTermios = tcgetattr(process.childfd, &termiosState) == 0
         let localFlags = hasTermios ? termiosState.c_lflag : 0
+        let echoEnabled = !hasTermios || (localFlags & tcflag_t(ECHO) != 0)
         let isRawInput = hasTermios
-            && (localFlags & tcflag_t(ICANON) == 0 || localFlags & tcflag_t(ECHO) == 0)
+            && (localFlags & tcflag_t(ICANON) == 0 || !echoEnabled)
         let shellPGID = process.shellPid > 0 ? getpgid(process.shellPid) : -1
 
         return ForegroundProcessSnapshot(
             processGroupID: foregroundPGID,
             shellProcessGroupID: shellPGID > 0 ? shellPGID : nil,
             processName: Self.processName(forProcessGroupID: foregroundPGID),
-            isRawInput: isRawInput
+            isRawInput: isRawInput,
+            echoEnabled: echoEnabled
         )
     }
 
@@ -1049,7 +1107,8 @@ extension TerminalSession: TerminalViewDelegate {
     nonisolated func send(source: TerminalView, data: ArraySlice<UInt8>) {
         let bytes = Array(data)
         MainActor.assumeIsolated {
-            guard self.terminalView === source, self.mode == .terminal else { return }
+            guard self.terminalView === source,
+                  self.mode == .terminal || self.terminalSecurityState.inputMode == .secure else { return }
             _ = self.send(bytes: bytes)
         }
     }
