@@ -1,7 +1,10 @@
 import SwiftUI
+import AppKit
 
 struct ContentView: View {
     @ObservedObject var session: TerminalSession
+    @State private var isTerminalActionsPresented = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var modeBinding: Binding<InputMode> {
         Binding(
@@ -32,6 +35,9 @@ struct ContentView: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .strokeBorder(PaneTheme.separator.opacity(0.55), lineWidth: 0.5)
                 .padding(1)
+        }
+        .overlay(alignment: .topTrailing) {
+            terminalActionsOverlay
         }
         .animation(nil, value: session.mode)
         .task {
@@ -74,7 +80,7 @@ struct ContentView: View {
                 shellStatus
                     .fixedSize(horizontal: true, vertical: false)
 
-                ModeMenu(selection: modeBinding)
+                ModeSwitcher(selection: modeBinding)
 
                 terminalActionsMenu
                     .frame(width: 30, height: 30)
@@ -89,7 +95,7 @@ struct ContentView: View {
                 shellStatus
                     .fixedSize(horizontal: true, vertical: false)
 
-                ModeMenu(selection: modeBinding)
+                ModeSwitcher(selection: modeBinding)
 
                 terminalActionsMenu
             }
@@ -97,52 +103,61 @@ struct ContentView: View {
     }
 
     private var terminalActionsMenu: some View {
-        Menu {
-            Button("Clear Blocks", systemImage: "rectangle.stack.badge.minus") {
-                session.clearBlocks()
-            }
-            Button("Clear Terminal", systemImage: "eraser") {
-                session.clearTerminal()
-            }
-
-            Divider()
-
-            Button("Direct Input", systemImage: "keyboard") {
-                session.enterDirectInput()
-            }
-            if session.isSecureInputActive {
-                Button("Exit Secure Input", systemImage: "lock.open") {
-                    session.exitSecureInput()
-                }
-            } else {
-                Button("Enter Secure Input", systemImage: "lock") {
-                    session.enterSecureInput()
-                }
-            }
-
-            Divider()
-
-            Button("Send Interrupt", systemImage: "stop.circle") {
-                session.sendInterrupt()
-            }
-            Button("Restart Shell", systemImage: "arrow.clockwise") {
-                session.restartShell()
+        Button {
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) {
+                isTerminalActionsPresented.toggle()
             }
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.primary)
                 .frame(width: 30, height: 30)
-                .background(PaneTheme.subtleControlFill, in: Circle())
+                .background(
+                    isTerminalActionsPresented
+                        ? PaneTheme.selectedBlockBackground
+                        : PaneTheme.subtleControlFill,
+                    in: Circle()
+                )
                 .overlay {
                     Circle().stroke(.primary.opacity(0.10), lineWidth: 0.5)
                 }
                 .contentShape(Circle())
         }
-        .menuIndicator(.hidden)
-        .menuStyle(.borderlessButton)
+        .buttonStyle(.plain)
         .help("Terminal actions")
         .accessibilityLabel("Terminal actions")
+        .accessibilityValue(isTerminalActionsPresented ? "Expanded" : "Collapsed")
+    }
+
+    @ViewBuilder
+    private var terminalActionsOverlay: some View {
+        if isTerminalActionsPresented {
+            ZStack(alignment: .topTrailing) {
+                Color.black.opacity(0.001)
+                    .contentShape(Rectangle())
+                    .onTapGesture { dismissTerminalActions() }
+
+                TerminalActionsMenu(session: session) {
+                    dismissTerminalActions()
+                }
+                .padding(.top, 8)
+                .padding(.trailing, 10)
+            }
+            .onExitCommand { dismissTerminalActions() }
+            .transition(terminalActionsTransition)
+        }
+    }
+
+    private var terminalActionsTransition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        return .scale(scale: 0.96, anchor: .topTrailing)
+            .combined(with: .opacity)
+    }
+
+    private func dismissTerminalActions() {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.12)) {
+            isTerminalActionsPresented = false
+        }
     }
 
     private var shellStatus: some View {
@@ -208,61 +223,176 @@ struct ContentView: View {
     }
 }
 
-private struct ModeMenu: View {
+private struct ModeSwitcher: View {
     @Binding var selection: InputMode
+    @Namespace private var selectionAnimation
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     var body: some View {
-        Menu {
-            // Picker-in-Menu uses AppKit's native selected-item checkmark, which
-            // matches macOS menu conventions better than a custom sliding toggle.
+        if #available(macOS 26.0, *) {
+            liquidGlassSwitcher
+        } else {
             Picker("Input mode", selection: $selection) {
                 ForEach(InputMode.allCases, id: \.self) { mode in
-                    Text(mode.title)
-                        .tag(mode)
-                        .accessibilityLabel(mode.title)
-                        .accessibilityValue(selection == mode ? "Selected" : "Not selected")
+                    Text(mode.shortTitle).tag(mode)
                 }
             }
-            .pickerStyle(.inline)
-        } label: {
-            HStack(spacing: 6) {
-                Text(selection.shortTitle)
-                    .font(.callout.weight(.semibold))
-                    .lineLimit(1)
-
-                Image(systemName: "chevron.down")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .imageScale(.small)
-            }
-            .frame(minWidth: 108, minHeight: 26)
-            .contentShape(Capsule())
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .controlSize(.small)
+            .frame(width: 150)
+            .help("Switch between structured Blocks and direct Terminal input")
         }
-        .menuIndicator(.hidden)
-        .menuStyle(.borderlessButton)
-        .modifier(ModeMenuGlassChrome())
+    }
+
+    @available(macOS 26.0, *)
+    private var liquidGlassSwitcher: some View {
+        HStack(spacing: 0) {
+            ForEach(InputMode.allCases, id: \.self) { mode in
+                Button {
+                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.24)) {
+                        selection = mode
+                    }
+                } label: {
+                    Text(mode.shortTitle)
+                        .font(.callout.weight(selection == mode ? .semibold : .medium))
+                        .foregroundStyle(selection == mode ? .primary : .secondary)
+                        .frame(width: 76, height: 26)
+                        .background {
+                            if selection == mode {
+                                Capsule()
+                                    .fill(selectionFill)
+                                    .matchedGeometryEffect(
+                                        id: "selected-mode",
+                                        in: selectionAnimation
+                                    )
+                            }
+                        }
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(mode.title)
+                .accessibilityValue(selection == mode ? "Selected" : "Not selected")
+            }
+        }
+        .padding(3)
+        .glassEffect(.regular.interactive(), in: Capsule())
         .help("Switch between structured Blocks and direct Terminal input")
-        .accessibilityLabel("Input mode")
-        .accessibilityValue(selection.title)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var selectionFill: Color {
+        if colorSchemeContrast == .increased {
+            return Color(nsColor: .selectedContentBackgroundColor)
+        }
+        return PaneTheme.selectedBlockBackground
     }
 }
 
-private struct ModeMenuGlassChrome: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            content
-                .padding(.horizontal, 10)
-                .padding(.vertical, 3)
-                .glassEffect(.regular.interactive(), in: Capsule())
-        } else {
-            content
-                .padding(.horizontal, 10)
-                .padding(.vertical, 3)
-                .background(.regularMaterial, in: Capsule())
-                .overlay {
-                    Capsule()
-                        .strokeBorder(PaneTheme.separator, lineWidth: 1)
+private struct TerminalActionsMenu: View {
+    @ObservedObject var session: TerminalSession
+    let dismiss: () -> Void
+
+    var body: some View {
+        VStack(spacing: 1) {
+            actionButton("Clear Blocks", systemImage: "rectangle.stack.badge.minus") {
+                session.clearBlocks()
+            }
+            actionButton("Clear Terminal", systemImage: "eraser") {
+                session.clearTerminal()
+            }
+
+            Divider().padding(.vertical, 3)
+
+            actionButton("Direct Input", systemImage: "keyboard") {
+                session.enterDirectInput()
+            }
+            actionButton(
+                session.isSecureInputActive ? "Exit Secure Input" : "Enter Secure Input",
+                systemImage: session.isSecureInputActive ? "lock.open" : "lock"
+            ) {
+                if session.isSecureInputActive {
+                    session.exitSecureInput()
+                } else {
+                    session.enterSecureInput()
                 }
+            }
+
+            Divider().padding(.vertical, 3)
+
+            actionButton("Send Interrupt", systemImage: "stop.circle") {
+                session.sendInterrupt()
+            }
+            actionButton("Restart Shell", systemImage: "arrow.clockwise") {
+                session.restartShell()
+            }
+        }
+        .padding(5)
+        .frame(width: 188)
+        .background {
+            MenuMaterialBackground()
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.75), lineWidth: 0.5)
+        }
+        .shadow(color: .black.opacity(0.32), radius: 14, y: 7)
+    }
+
+    private func actionButton(
+        _ title: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        TerminalActionButton(title: title, systemImage: systemImage) {
+            action()
+            dismiss()
         }
     }
+}
+
+private struct TerminalActionButton: View {
+    let title: String
+    let systemImage: String
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 13))
+                    .frame(width: 18)
+
+                Text(title)
+
+                Spacer(minLength: 12)
+            }
+            .font(.system(size: 13))
+            .foregroundStyle(isHovered ? Color.white : Color.primary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+            .background(
+                isHovered ? Color.accentColor : .clear,
+                in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+    }
+}
+
+private struct MenuMaterialBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .menu
+        view.blendingMode = .withinWindow
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
 }
