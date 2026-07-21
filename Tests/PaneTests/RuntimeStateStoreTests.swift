@@ -2,6 +2,177 @@ import XCTest
 @testable import Pane
 
 final class RuntimeStateStoreTests: XCTestCase {
+    @MainActor
+    func testRuntimeSettingsPersistOnlyPreferenceFlags() throws {
+        let suiteName = "Pane.RuntimeStateSettingsTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settings = RuntimeStateSettings(defaults: defaults)
+
+        settings.persistenceEnabled = false
+        settings.predictionHistoryEnabled = false
+        settings.outputSummariesEnabled = false
+        settings.filePathCollectionEnabled = false
+
+        let restored = RuntimeStateSettings(defaults: defaults)
+        XCTAssertEqual(
+            restored.configuration,
+            RuntimeStateConfiguration(
+                persistenceEnabled: false,
+                predictionHistoryEnabled: false,
+                outputSummariesEnabled: false,
+                filePathCollectionEnabled: false
+            )
+        )
+        XCTAssertFalse(defaults.dictionaryRepresentation().values.contains { value in
+            String(describing: value).contains("secret")
+        })
+    }
+
+    @MainActor
+    func testDisablingPredictionHistoryClearsLiveAutocompleteHistory() {
+        let session = TerminalSession()
+        session.submit(command: "swift test")
+        XCTAssertEqual(session.history.commands, ["swift test"])
+
+        session.applyRuntimeStateConfiguration(RuntimeStateConfiguration(
+            persistenceEnabled: true,
+            predictionHistoryEnabled: false,
+            outputSummariesEnabled: true,
+            filePathCollectionEnabled: true
+        ))
+
+        XCTAssertTrue(session.history.commands.isEmpty)
+    }
+
+    func testControllerRestoresDurableWorkspaceHistoryAcrossRecreation() async throws {
+        let directory = temporaryDirectory(named: "ControllerRestore")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databaseURL = directory.appendingPathComponent("runtime.sqlite")
+        let configuration = RuntimeStateConfiguration(
+            persistenceEnabled: true,
+            predictionHistoryEnabled: true,
+            outputSummariesEnabled: true,
+            filePathCollectionEnabled: true
+        )
+        let firstSession = RuntimeSession(
+            id: UUID(), workspaceID: "/tmp/project", repositoryID: nil,
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp/project",
+            startedAt: Date(), lastActiveAt: Date()
+        )
+        let firstController = RuntimeStateController(
+            databaseURL: databaseURL,
+            configuration: configuration
+        )
+        _ = await firstController.startSession(firstSession)
+        let diagnostic = await firstController.persistCommandEvent(PersistedCommandEvent(
+            sessionID: firstSession.id,
+            timestamp: Date(),
+            workingDirectory: "/tmp/project",
+            command: "swift test",
+            exitCode: 0,
+            durationMilliseconds: 42,
+            sanitizedOutputSummary: "all tests passed",
+            sanitizedErrorSummary: nil,
+            predictionSource: nil,
+            predictionAction: nil
+        ))
+        XCTAssertNil(diagnostic)
+
+        let secondController = RuntimeStateController(
+            databaseURL: databaseURL,
+            configuration: configuration
+        )
+        let secondSession = RuntimeSession(
+            id: UUID(), workspaceID: "/tmp/project", repositoryID: nil,
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp/project",
+            startedAt: Date(), lastActiveAt: Date()
+        )
+        let restored = await secondController.startSession(secondSession)
+
+        XCTAssertNil(restored.diagnostic)
+        XCTAssertEqual(restored.restoredContext?.commandEvents.map(\.command), ["swift test"])
+    }
+
+    func testControllerDisabledPersistenceUsesMemoryWithoutCreatingDatabase() async throws {
+        let directory = temporaryDirectory(named: "ControllerEphemeral")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databaseURL = directory.appendingPathComponent("runtime.sqlite")
+        let controller = RuntimeStateController(
+            databaseURL: databaseURL,
+            configuration: RuntimeStateConfiguration(
+                persistenceEnabled: false,
+                predictionHistoryEnabled: true,
+                outputSummariesEnabled: true,
+                filePathCollectionEnabled: true
+            )
+        )
+        let session = RuntimeSession(
+            id: UUID(), workspaceID: "/tmp", repositoryID: nil,
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp",
+            startedAt: Date(), lastActiveAt: Date()
+        )
+        _ = await controller.startSession(session)
+        _ = await controller.persistCommandEvent(PersistedCommandEvent(
+            sessionID: session.id,
+            timestamp: Date(),
+            workingDirectory: "/tmp",
+            command: "pwd",
+            exitCode: 0,
+            durationMilliseconds: 1,
+            sanitizedOutputSummary: "/tmp",
+            sanitizedErrorSummary: nil,
+            predictionSource: nil,
+            predictionAction: nil
+        ))
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: databaseURL.path))
+    }
+
+    func testControllerHonorsSummaryAndFilePathCollectionControls() async throws {
+        let directory = temporaryDirectory(named: "ControllerCategories")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databaseURL = directory.appendingPathComponent("runtime.sqlite")
+        let controller = RuntimeStateController(
+            databaseURL: databaseURL,
+            configuration: RuntimeStateConfiguration(
+                persistenceEnabled: true,
+                predictionHistoryEnabled: true,
+                outputSummariesEnabled: false,
+                filePathCollectionEnabled: false
+            )
+        )
+        let session = RuntimeSession(
+            id: UUID(), workspaceID: "/secret/project", repositoryID: nil,
+            shell: "/bin/zsh", initialWorkingDirectory: "/secret/project",
+            startedAt: Date(), lastActiveAt: Date()
+        )
+        _ = await controller.startSession(session)
+        _ = await controller.persistCommandEvent(PersistedCommandEvent(
+            sessionID: session.id,
+            timestamp: Date(),
+            workingDirectory: "/secret/project",
+            command: "swift test",
+            exitCode: 1,
+            durationMilliseconds: 10,
+            sanitizedOutputSummary: "private output",
+            sanitizedErrorSummary: "private error",
+            predictionSource: nil,
+            predictionAction: nil
+        ))
+
+        let store = try SQLiteRuntimeStateStore(databaseURL: databaseURL)
+        let context = try await store.loadRecentContext(
+            workspaceID: nil,
+            repositoryID: nil,
+            limit: 10
+        )
+        XCTAssertEqual(context.sessions.first?.initialWorkingDirectory, "")
+        XCTAssertEqual(context.commandEvents.first?.workingDirectory, "")
+        XCTAssertNil(context.commandEvents.first?.sanitizedOutputSummary)
+        XCTAssertNil(context.commandEvents.first?.sanitizedErrorSummary)
+    }
+
     func testSQLiteStoreSurvivesRecreationAndSanitizesAtStorageBoundary() async throws {
         let directory = temporaryDirectory(named: "SQLiteRestore")
         defer { try? FileManager.default.removeItem(at: directory) }

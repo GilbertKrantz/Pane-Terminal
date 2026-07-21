@@ -95,6 +95,7 @@ final class TerminalSession: NSObject, ObservableObject {
     @Published private(set) var isAlternateScreenActive = false
     @Published private(set) var modeAttribution: InputModeAttribution = .manual
     @Published private(set) var terminalSecurityState: TerminalSecurityState = .normal
+    @Published private(set) var runtimeStateDiagnostic: String?
     @Published private(set) var activeCommandVisibleLineCount = 1
     @Published var selectedBlockID: UUID?
     @Published var commandDraft = ""
@@ -117,6 +118,12 @@ final class TerminalSession: NSObject, ObservableObject {
     private let shellConfiguration: ShellConfiguration
     private let commandAutocomplete = CommandAutocomplete()
     private let zshCompletionClient = WarmZshCompletionClient()
+    private let runtimeStateController: RuntimeStateController?
+    private let runtimeSessionID = UUID()
+    private let runtimeSessionStartedAt = Date()
+    private let sensitiveDataSanitizer = SensitiveDataSanitizer()
+    private var restoredRuntimeEventKeys: Set<String> = []
+    private var runtimeStateStartTask: Task<Void, Never>?
     private var zshCompletionEndpoint: WarmZshCompletionEndpoint?
     private var isShuttingDown = false
     private var isShellIntegrationReady = false
@@ -157,8 +164,12 @@ final class TerminalSession: NSObject, ObservableObject {
         return isShellRunning ? "zsh · idle" : "Shell stopped"
     }
 
-    init(shellConfiguration: ShellConfiguration = .loginZsh()) {
+    init(
+        shellConfiguration: ShellConfiguration = .loginZsh(),
+        runtimeStateController: RuntimeStateController? = nil
+    ) {
         self.shellConfiguration = shellConfiguration
+        self.runtimeStateController = runtimeStateController
         self.currentDirectory = shellConfiguration.workingDirectory
         super.init()
     }
@@ -271,6 +282,7 @@ final class TerminalSession: NSObject, ObservableObject {
         isShellRunning = newProcess.running
 
         if newProcess.running {
+            startRuntimeStateSession()
             startForegroundProcessMonitoring()
             let installationCommand: String
             if let completionEndpoint {
@@ -361,7 +373,12 @@ final class TerminalSession: NSObject, ObservableObject {
                 continuation,
                 to: awaitingID
             ) {
-                history.replaceMostRecent(with: fullCommand)
+                let sanitized = sensitiveDataSanitizer.sanitizeCommand(fullCommand)
+                if sanitized.redactionCount == 0 {
+                    history.replaceMostRecent(with: sanitized.value)
+                } else {
+                    history.removeMostRecent()
+                }
             }
             commandDraft = ""
             return
@@ -387,7 +404,12 @@ final class TerminalSession: NSObject, ObservableObject {
         }
 
         selectedBlockID = blockID
-        history.append(command)
+        let sanitizedCommand = sensitiveDataSanitizer.sanitizeCommand(command)
+        if sanitizedCommand.redactionCount == 0 {
+            history.append(sanitizedCommand.value)
+        } else {
+            history.resetNavigation()
+        }
         commandDraft = ""
     }
 
@@ -611,12 +633,14 @@ final class TerminalSession: NSObject, ObservableObject {
                             output: output
                         )
                         selectedBlockID = activeID
+                        persistCompletedBlock(id: activeID)
                     } else {
                         if let id = blockTimeline.finishActive(
                             exitCode: exitCode,
                             output: output
                         ) {
                             selectedBlockID = id
+                            persistCompletedBlock(id: id)
                         }
                     }
                     clearActiveBlockCapture()
@@ -738,6 +762,130 @@ final class TerminalSession: NSObject, ObservableObject {
 
         guard send(bytes: CommandSerializer.serializeCommand(nextCommand.command)) else { return }
         commandAwaitingStartID = nextCommand.id
+    }
+
+    private func startRuntimeStateSession() {
+        guard let runtimeStateController else { return }
+        let directory = currentDirectory ?? shellConfiguration.workingDirectory
+        let session = RuntimeSession(
+            id: runtimeSessionID,
+            workspaceID: Self.workspaceIdentifier(for: directory),
+            repositoryID: nil,
+            shell: shellConfiguration.executable,
+            initialWorkingDirectory: directory,
+            startedAt: runtimeSessionStartedAt,
+            lastActiveAt: Date()
+        )
+
+        runtimeStateStartTask = Task { [weak self] in
+            let result = await runtimeStateController.startSession(session)
+            guard let self else { return }
+            self.runtimeStateDiagnostic = result.diagnostic
+            if let context = result.restoredContext {
+                self.restorePredictionHistory(from: context)
+            }
+        }
+    }
+
+    private func persistCompletedBlock(id: UUID) {
+        guard let runtimeStateController,
+              let block = blockTimeline.block(id: id) else { return }
+
+        let exitCode: Int?
+        switch block.state {
+        case .completed(let code):
+            exitCode = Int(code)
+        case .interrupted(let code):
+            exitCode = code.map(Int.init)
+        case .queued, .running:
+            return
+        }
+
+        let command = sensitiveDataSanitizer.sanitizeCommand(block.command).value
+        let output = sensitiveDataSanitizer.sanitizeOutput(block.output).value
+        let summary = output.isEmpty ? nil : String(output.prefix(1_000))
+        let durationMilliseconds = block.duration.map {
+            max(0, Int(($0 * 1_000).rounded()))
+        }
+        let event = PersistedCommandEvent(
+            sessionID: runtimeSessionID,
+            timestamp: block.completedAt ?? Date(),
+            workingDirectory: block.workingDirectory,
+            command: command,
+            exitCode: exitCode,
+            durationMilliseconds: durationMilliseconds,
+            sanitizedOutputSummary: exitCode == 0 ? summary : nil,
+            sanitizedErrorSummary: exitCode == 0 ? nil : summary,
+            predictionSource: nil,
+            predictionAction: nil
+        )
+
+        let startTask = runtimeStateStartTask
+        Task { [weak self] in
+            await startTask?.value
+            let diagnostic = await runtimeStateController.persistCommandEvent(event)
+            self?.runtimeStateDiagnostic = diagnostic
+        }
+    }
+
+    private func restorePredictionHistory(from context: PersistedRuntimeContext) {
+        for event in context.commandEvents.sorted(by: { $0.timestamp < $1.timestamp }) {
+            let key = "\(event.sessionID.uuidString)|\(event.timestamp.timeIntervalSince1970)|\(event.command)"
+            guard restoredRuntimeEventKeys.insert(key).inserted,
+                  !event.command.contains(SensitiveDataSanitizer.redaction) else { continue }
+            history.append(event.command)
+        }
+    }
+
+    func applyRuntimeStateConfiguration(_ configuration: RuntimeStateConfiguration) {
+        if !configuration.predictionHistoryEnabled {
+            history = CommandHistory()
+            restoredRuntimeEventKeys.removeAll()
+        }
+        guard let runtimeStateController else { return }
+        Task { [weak self] in
+            let result = await runtimeStateController.updateConfiguration(configuration)
+            guard let self else { return }
+            self.runtimeStateDiagnostic = result.diagnostic
+            if let context = result.restoredContext {
+                self.restorePredictionHistory(from: context)
+            }
+            // Re-register with the current directory so path-collection
+            // changes take effect in the active session row immediately.
+            self.startRuntimeStateSession()
+        }
+    }
+
+    func clearCurrentSessionPredictionHistory() {
+        history = CommandHistory()
+        restoredRuntimeEventKeys.removeAll()
+        guard let runtimeStateController else { return }
+        Task { [weak self] in
+            self?.runtimeStateDiagnostic = await runtimeStateController.deleteCurrentSession()
+        }
+    }
+
+    func clearCurrentWorkspacePredictionHistory() {
+        history = CommandHistory()
+        restoredRuntimeEventKeys.removeAll()
+        guard let runtimeStateController else { return }
+        Task { [weak self] in
+            self?.runtimeStateDiagnostic = await runtimeStateController.deleteCurrentWorkspace()
+        }
+    }
+
+    func clearAllPredictionHistory() {
+        history = CommandHistory()
+        restoredRuntimeEventKeys.removeAll()
+        guard let runtimeStateController else { return }
+        Task { [weak self] in
+            self?.runtimeStateDiagnostic = await runtimeStateController.deleteAllState()
+        }
+    }
+
+    nonisolated private static func workspaceIdentifier(for directory: String) -> String {
+        URL(fileURLWithPath: directory, isDirectory: true)
+            .standardizedFileURL.path
     }
 
     private func routeActiveBlockOutput(_ data: Data) {

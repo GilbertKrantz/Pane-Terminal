@@ -60,4 +60,15 @@ final class SensitiveDataSanitizerTests: XCTestCase {
         XCTAssertEqual(sanitized.value, command)
         XCTAssertEqual(sanitized.redactionCount, 0)
     }
+
+    @MainActor
+    func testTerminalSessionHistoryNeverRetainsSecretCommandArguments() {
+        let session = TerminalSession()
+        let secret = "sk-history-secret-123456"
+
+        session.submit(command: "export OPENAI_API_KEY=\(secret)")
+
+        XCTAssertFalse(session.history.commands.joined().contains(secret))
+        XCTAssertTrue(session.history.commands.isEmpty)
+    }
 }

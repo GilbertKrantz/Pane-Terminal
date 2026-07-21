@@ -28,6 +28,13 @@ struct CommandHistory: Equatable, Sendable {
         resetNavigation()
     }
 
+    mutating func removeMostRecent() {
+        if !commands.isEmpty {
+            commands.removeLast()
+        }
+        resetNavigation()
+    }
+
     mutating func previous(currentDraft: String) -> String {
         guard !commands.isEmpty else { return currentDraft }
 

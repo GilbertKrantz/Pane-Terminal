@@ -53,6 +53,7 @@ final class TerminalSessionIntegrationTests: XCTestCase {
             defer: false
         )
         window.contentView = hostingView
+        NSApplication.shared.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         defer {
             window.orderOut(nil)
@@ -88,6 +89,7 @@ final class TerminalSessionIntegrationTests: XCTestCase {
             defer: false
         )
         window.contentView = hostingView
+        NSApplication.shared.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         defer {
             window.orderOut(nil)
@@ -612,6 +614,83 @@ final class TerminalSessionIntegrationTests: XCTestCase {
     }
 
     @MainActor
+    func testCompletedCommandPersistsAndRestoresOnlyPredictionHistory() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Pane-LiveRuntimeState-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databaseURL = directory.appendingPathComponent("runtime.sqlite")
+        let runtimeConfiguration = RuntimeStateConfiguration(
+            persistenceEnabled: true,
+            predictionHistoryEnabled: true,
+            outputSummariesEnabled: true,
+            filePathCollectionEnabled: true
+        )
+        let shellConfiguration = ShellConfiguration.loginZsh(
+            processEnvironment: [
+                "HOME": "/tmp",
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
+            ],
+            homeDirectory: URL(fileURLWithPath: "/tmp")
+        )
+        let firstController = RuntimeStateController(
+            databaseURL: databaseURL,
+            configuration: runtimeConfiguration
+        )
+        let firstSession = TerminalSession(
+            shellConfiguration: shellConfiguration,
+            runtimeStateController: firstController
+        )
+        let firstTerminal = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        firstSession.attach(terminalView: firstTerminal)
+
+        let command = "printf 'PANE_PERSISTED_CONTEXT\\n'"
+        firstSession.submit(command: command)
+        try await waitUntil("command to complete before persistence", timeout: 8) {
+            firstSession.blocks.contains { block in
+                guard block.command == command else { return false }
+                if case .completed = block.state { return true }
+                return false
+            }
+        }
+
+        let inspectionStore = try SQLiteRuntimeStateStore(databaseURL: databaseURL)
+        try await waitForPersistedCommand(
+            command,
+            workspaceID: "/tmp",
+            in: inspectionStore,
+            timeout: 8
+        )
+        firstSession.shutdown()
+
+        let secondController = RuntimeStateController(
+            databaseURL: databaseURL,
+            configuration: runtimeConfiguration
+        )
+        let restoredSession = TerminalSession(
+            shellConfiguration: shellConfiguration,
+            runtimeStateController: secondController
+        )
+        let restoredTerminal = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        restoredSession.attach(terminalView: restoredTerminal)
+        defer { restoredSession.shutdown() }
+
+        try await waitUntil("prediction history to restore", timeout: 8) {
+            restoredSession.history.commands.contains(command)
+        }
+        XCTAssertTrue(restoredSession.blocks.isEmpty)
+        XCTAssertTrue(restoredSession.commandDraft.isEmpty)
+        XCTAssertFalse(restoredSession.isSecureInputActive)
+    }
+
+    @MainActor
     func testActiveBlockStreamsThroughReadOnlyTerminalThenFreezesOneSnapshot() async throws {
         let configuration = ShellConfiguration.loginZsh(
             processEnvironment: [
@@ -966,6 +1045,29 @@ final class TerminalSessionIntegrationTests: XCTestCase {
         }
 
         XCTFail("Timed out waiting for completed block containing \(marker)")
+        throw CocoaError(.coderReadCorrupt)
+    }
+
+    @MainActor
+    private func waitForPersistedCommand(
+        _ command: String,
+        workspaceID: String,
+        in store: SQLiteRuntimeStateStore,
+        timeout: TimeInterval
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            let context = try await store.loadRecentContext(
+                workspaceID: workspaceID,
+                repositoryID: nil,
+                limit: 20
+            )
+            if context.commandEvents.contains(where: { $0.command == command }) {
+                return
+            }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTFail("Timed out waiting for command to persist")
         throw CocoaError(.coderReadCorrupt)
     }
 

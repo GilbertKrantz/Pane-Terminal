@@ -5,10 +5,17 @@ import SwiftUI
 struct PaneApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var session: TerminalSession
+    @StateObject private var runtimeStateSettings: RuntimeStateSettings
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
-        let session = TerminalSession()
+        let settings = RuntimeStateSettings()
+        let controller = RuntimeStateController(
+            databaseURL: Self.runtimeStateDatabaseURL,
+            configuration: settings.configuration
+        )
+        let session = TerminalSession(runtimeStateController: controller)
+        _runtimeStateSettings = StateObject(wrappedValue: settings)
         _session = StateObject(wrappedValue: session)
         AppDelegate.sharedSession = session
     }
@@ -23,6 +30,23 @@ struct PaneApp: App {
         .commands {
             TerminalCommands(session: session)
         }
+
+        Settings {
+            RuntimeStateSettingsView(
+                settings: runtimeStateSettings,
+                session: session
+            )
+        }
+    }
+
+    private static var runtimeStateDatabaseURL: URL {
+        let applicationSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first ?? FileManager.default.homeDirectoryForCurrentUser
+        return applicationSupport
+            .appendingPathComponent("Pane", isDirectory: true)
+            .appendingPathComponent("runtime-state.sqlite")
     }
 }
 
