@@ -12,14 +12,22 @@ struct RuntimeStateSettingsView: View {
         Form {
             Section("Local session storage") {
                 configurationToggle(
-                    "Remember command and block history",
-                    isOn: $settings.predictionHistoryEnabled
+                    "Save command history",
+                    isOn: $settings.commandHistoryEnabled
+                )
+                configurationToggle(
+                    "Restore previous blocks",
+                    isOn: $settings.visibleSessionRecoveryEnabled
+                )
+                configurationToggle(
+                    "Prepare local prediction context",
+                    isOn: $settings.predictionContextEnabled
                 )
                 configurationToggle(
                     "Persist history across app restarts",
                     isOn: $settings.persistenceEnabled
                 )
-                .disabled(!settings.predictionHistoryEnabled)
+                .disabled(!settings.commandHistoryEnabled && !settings.visibleSessionRecoveryEnabled)
 
                 Text(settings.persistenceEnabled
                     ? "Allowed history is stored only in Pane's local Application Support folder. Pane does not upload commands, output, diagnostics, or crash data."
@@ -33,11 +41,11 @@ struct RuntimeStateSettingsView: View {
                 storedCategory("Block metadata", detail: "Stored locally")
                 storedCategory("Exit status and duration", detail: "Stored locally")
                 configurationToggle(
-                    "Output and error summaries",
+                    "Save output excerpts",
                     isOn: $settings.outputSummariesEnabled
                 )
                 configurationToggle(
-                    "Working-directory paths",
+                    "Restore last working directory",
                     isOn: $settings.filePathCollectionEnabled
                 )
                 storedCategory("Sanitized output excerpts", detail: settings.outputSummariesEnabled ? "Optional, enabled" : "Optional, disabled")
@@ -48,6 +56,21 @@ struct RuntimeStateSettingsView: View {
                 storedCategory("Git metadata", detail: "Not collected")
                 storedCategory("Typed or secure input", detail: "Never stored during secure input")
             }
+
+            Section("Recovery limits") {
+                Stepper("Previous sessions: \(settings.maximumRestoredSessions)", value: $settings.maximumRestoredSessions, in: 1...10)
+                    .onChange(of: settings.maximumRestoredSessions) { _, _ in applyConfiguration() }
+                Stepper("Commands: \(settings.maximumRestoredCommands)", value: $settings.maximumRestoredCommands, in: 25...1_000, step: 25)
+                    .onChange(of: settings.maximumRestoredCommands) { _, _ in applyConfiguration() }
+                Picker("Stored output", selection: $settings.maximumRestoredOutputBytes) {
+                    Text("None").tag(0)
+                    Text("512 KB").tag(512 * 1_024)
+                    Text("2 MB").tag(2 * 1_024 * 1_024)
+                    Text("8 MB").tag(8 * 1_024 * 1_024)
+                }
+                .onChange(of: settings.maximumRestoredOutputBytes) { _, _ in applyConfiguration() }
+            }
+            .disabled(!settings.visibleSessionRecoveryEnabled)
 
             Section("Manage local data") {
                 Button("Clear Current Session") {
@@ -125,5 +148,9 @@ struct RuntimeStateSettingsView: View {
             Text(detail)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private func applyConfiguration() {
+        session.applyRuntimeStateConfiguration(settings.configuration)
     }
 }

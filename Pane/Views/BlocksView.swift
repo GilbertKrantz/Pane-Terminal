@@ -10,7 +10,7 @@ struct BlocksView: View {
     private var finalizedBlocks: [CommandBlock] {
         session.visibleBlocks.filter { block in
             switch block.state {
-            case .completed, .interrupted:
+            case .completed, .interrupted, .unknown:
                 return true
             case .queued, .running:
                 return false
@@ -20,6 +20,10 @@ struct BlocksView: View {
 
     private var lastFinalizedBlockID: UUID? {
         finalizedBlocks.last?.id
+    }
+
+    private var liveBlocks: [CommandBlock] {
+        finalizedBlocks.filter { $0.origin == .live }
     }
 
     var body: some View {
@@ -43,18 +47,22 @@ struct BlocksView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 4) {
-                        ForEach(finalizedBlocks) { block in
-                            CommandBlockView(
-                                block: block,
-                                isSelected: session.selectedBlockID == block.id,
-                                session: session
-                            )
-                            .id(block.id)
-
-                            if block.id == lastVisibleRestoredBlockID,
-                               let boundary = session.sessionBoundary {
+                        ForEach(session.restoredSessionOrder, id: \.self) { sessionID in
+                            if let boundary = session.sessionBoundaries[sessionID] {
                                 SessionBoundaryView(boundary: boundary)
                             }
+                            ForEach(restoredBlocks(for: sessionID)) { block in
+                                commandBlockView(block)
+                            }
+                        }
+
+                        if !session.restoredSessionOrder.isEmpty,
+                           let boundary = session.newShellBoundary {
+                            NewShellBoundaryView(boundary: boundary)
+                        }
+
+                        ForEach(liveBlocks) { block in
+                            commandBlockView(block)
                         }
 
                         Color.clear
@@ -66,6 +74,11 @@ struct BlocksView: View {
                 }
                 .defaultScrollAnchor(.bottom)
                 .background(PaneTheme.contentSurface)
+                .onAppear {
+                    if session.consumeBlocksViewportRestoreRequest() {
+                        restoreTimelineViewport(using: proxy)
+                    }
+                }
                 .onChange(of: session.selectedBlockID) { _, selectedID in
                     guard let selectedID else { return }
                     withAnimation(.easeOut(duration: 0.16)) {
@@ -95,8 +108,39 @@ struct BlocksView: View {
         }
     }
 
-    private var lastVisibleRestoredBlockID: UUID? {
-        finalizedBlocks.last(where: { session.restoredBlockIDs.contains($0.id) })?.id
+    private func restoreTimelineViewport(using proxy: ScrollViewProxy) {
+        // BlocksView is removed while an expanded alternate-screen terminal is
+        // mounted. On re-entry, SwiftUI can briefly reuse the terminal-sized
+        // AppKit scroll geometry before the lazy timeline has laid itself out,
+        // leaving the visible rect below every block. Re-pin after the first
+        // two layout turns and once more after AppKit has committed its size.
+        DispatchQueue.main.async {
+            proxy.scrollTo(TimelineAnchor.bottom, anchor: .bottom)
+            DispatchQueue.main.async {
+                proxy.scrollTo(TimelineAnchor.bottom, anchor: .bottom)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    proxy.scrollTo(TimelineAnchor.bottom, anchor: .bottom)
+                }
+            }
+        }
+    }
+
+    private func restoredBlocks(for sessionID: UUID) -> [CommandBlock] {
+        finalizedBlocks.filter { block in
+            if case .restored(let restoredSessionID) = block.origin {
+                return restoredSessionID == sessionID
+            }
+            return false
+        }
+    }
+
+    private func commandBlockView(_ block: CommandBlock) -> some View {
+        CommandBlockView(
+            block: block,
+            isSelected: session.selectedBlockID == block.id,
+            session: session
+        )
+        .id(block.id)
     }
 }
 
@@ -144,13 +188,11 @@ private struct SessionBoundaryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Label(boundary.lifecycle == .interrupted ? "Previous session was interrupted" : "Previous session", systemImage: boundary.lifecycle == .interrupted ? "exclamationmark.triangle" : "clock.arrow.circlepath")
+            Label(boundary.lifecycle == .interrupted ? "Previous session · Interrupted" : "Previous session · Closed normally", systemImage: boundary.lifecycle == .interrupted ? "exclamationmark.triangle" : "clock.arrow.circlepath")
                 .font(.caption.weight(.semibold))
             Text("Last active \(boundary.lastActiveAt.formatted(date: .abbreviated, time: .shortened))")
                 .font(.caption).foregroundStyle(.secondary)
-            Text(boundary.usedDirectoryFallback
-                ? "Pane restarted with a fresh shell in the home directory because the previous directory was unavailable."
-                : "Pane restarted with a fresh shell in \(displayDirectory).")
+            Text("\(displayDirectory) · \(URL(fileURLWithPath: boundary.shell).lastPathComponent)")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -161,7 +203,35 @@ private struct SessionBoundaryView: View {
 
     private var displayDirectory: String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return boundary.restoredDirectory == home ? "~" : boundary.restoredDirectory.replacingOccurrences(of: home + "/", with: "~/")
+        return boundary.workingDirectory == home ? "~" : boundary.workingDirectory.replacingOccurrences(of: home + "/", with: "~/")
+    }
+}
+
+private struct NewShellBoundaryView: View {
+    let boundary: TerminalSession.NewShellBoundary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label("New shell started", systemImage: "terminal")
+                .font(.caption.weight(.semibold))
+            Text(displayDirectory)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+            if boundary.previousDirectoryUnavailable {
+                Text("Previous directory is unavailable")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(PaneTheme.subtleControlFill, in: RoundedRectangle(cornerRadius: 9))
+        .accessibilityElement(children: .combine)
+    }
+
+    private var displayDirectory: String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return boundary.workingDirectory == home ? "~" : boundary.workingDirectory.replacingOccurrences(of: home + "/", with: "~/")
     }
 }
 

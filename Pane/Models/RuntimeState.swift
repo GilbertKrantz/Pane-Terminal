@@ -58,6 +58,7 @@ struct RuntimeSession: Codable, Sendable, Equatable {
     let repositoryID: String?
     let shell: String
     let initialWorkingDirectory: String
+    let lastWorkingDirectory: String
     let startedAt: Date
     let lastActiveAt: Date
     let lifecycle: PersistedSessionLifecycle
@@ -70,17 +71,19 @@ struct RuntimeSession: Codable, Sendable, Equatable {
         repositoryID: String?,
         shell: String,
         initialWorkingDirectory: String,
+        lastWorkingDirectory: String? = nil,
         startedAt: Date,
         lastActiveAt: Date,
         lifecycle: PersistedSessionLifecycle = .active,
         paneVersion: String = "0.2",
-        schemaVersion: Int = 3
+        schemaVersion: Int = 4
     ) {
         self.id = id
         self.workspaceID = workspaceID
         self.repositoryID = repositoryID
         self.shell = shell
         self.initialWorkingDirectory = initialWorkingDirectory
+        self.lastWorkingDirectory = lastWorkingDirectory ?? initialWorkingDirectory
         self.startedAt = startedAt
         self.lastActiveAt = lastActiveAt
         self.lifecycle = lifecycle
@@ -109,6 +112,7 @@ struct PersistedCommandEvent: Codable, Sendable, Equatable {
     let predictionAction: String?
     let completion: Completion
     let isCollapsed: Bool
+    let outputKind: PersistedOutputKind
 
     init(
         blockID: UUID = UUID(),
@@ -123,7 +127,8 @@ struct PersistedCommandEvent: Codable, Sendable, Equatable {
         predictionSource: String?,
         predictionAction: String?,
         completion: Completion = .completed,
-        isCollapsed: Bool = false
+        isCollapsed: Bool = false,
+        outputKind: PersistedOutputKind = .none
     ) {
         self.blockID = blockID
         self.sessionID = sessionID
@@ -138,6 +143,7 @@ struct PersistedCommandEvent: Codable, Sendable, Equatable {
         self.predictionAction = predictionAction
         self.completion = completion
         self.isCollapsed = isCollapsed
+        self.outputKind = outputKind
     }
 }
 
@@ -170,12 +176,26 @@ struct PersistedRuntimeContext: Codable, Sendable, Equatable {
     }
 }
 
+struct RuntimeStateRestoreLimits: Sendable, Equatable {
+    var maximumSessions: Int
+    var maximumCommands: Int
+    var maximumOutputBytes: Int
+
+    static func commands(_ limit: Int) -> RuntimeStateRestoreLimits {
+        RuntimeStateRestoreLimits(
+            maximumSessions: .max,
+            maximumCommands: max(0, limit),
+            maximumOutputBytes: .max
+        )
+    }
+}
+
 protocol RuntimeStateStore: Sendable {
     func startSession(_ session: RuntimeSession) async throws
     func persistCommandEvent(_ event: PersistedCommandEvent) async throws
     func updateCommandEventCollapsed(_ blockID: UUID, isCollapsed: Bool) async throws
     func persistFeatures(_ features: [RuntimeFeature]) async throws
-    func loadRecentContext(workspaceID: String?, repositoryID: String?, limit: Int) async throws -> PersistedRuntimeContext
+    func loadRecentContext(workspaceID: String?, repositoryID: String?, limits: RuntimeStateRestoreLimits) async throws -> PersistedRuntimeContext
     func deleteSession(_ sessionID: UUID) async throws
     func deleteWorkspace(_ workspaceID: String) async throws
     func deleteAllState() async throws
@@ -185,4 +205,19 @@ protocol RuntimeStateStore: Sendable {
     func updateSessionLifecycle(_ sessionID: UUID, lifecycle: PersistedSessionLifecycle, lastActiveAt: Date) async throws
     func markActiveSessionsInterrupted(excluding sessionID: UUID?) async throws -> [RuntimeSession]
     func applyRetentionPolicy() async throws
+}
+
+
+extension RuntimeStateStore {
+    func loadRecentContext(
+        workspaceID: String?,
+        repositoryID: String?,
+        limit: Int
+    ) async throws -> PersistedRuntimeContext {
+        try await loadRecentContext(
+            workspaceID: workspaceID,
+            repositoryID: repositoryID,
+            limits: .commands(limit)
+        )
+    }
 }

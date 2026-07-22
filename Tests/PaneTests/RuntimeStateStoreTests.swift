@@ -1,4 +1,5 @@
 import XCTest
+import SQLite3
 @testable import Pane
 
 final class RuntimeStateStoreTests: XCTestCase {
@@ -11,7 +12,9 @@ final class RuntimeStateStoreTests: XCTestCase {
         XCTAssertFalse(settings.outputSummariesEnabled)
 
         settings.persistenceEnabled = false
-        settings.predictionHistoryEnabled = false
+        settings.commandHistoryEnabled = false
+        settings.visibleSessionRecoveryEnabled = false
+        settings.predictionContextEnabled = false
         settings.outputSummariesEnabled = false
         settings.filePathCollectionEnabled = false
 
@@ -20,7 +23,9 @@ final class RuntimeStateStoreTests: XCTestCase {
             restored.configuration,
             RuntimeStateConfiguration(
                 persistenceEnabled: false,
-                predictionHistoryEnabled: false,
+                commandHistoryEnabled: false,
+                visibleSessionRecoveryEnabled: false,
+                predictionContextEnabled: false,
                 outputSummariesEnabled: false,
                 filePathCollectionEnabled: false
             )
@@ -31,6 +36,25 @@ final class RuntimeStateStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testRuntimeSettingsMigratesLegacyPredictionHistoryOnce() throws {
+        let suiteName = "Pane.RuntimeStateSettingsMigrationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(false, forKey: "runtimeState.predictionHistoryEnabled")
+
+        let migrated = RuntimeStateSettings(defaults: defaults)
+        XCTAssertFalse(migrated.commandHistoryEnabled)
+        XCTAssertFalse(migrated.visibleSessionRecoveryEnabled)
+        XCTAssertFalse(migrated.predictionContextEnabled)
+
+        defaults.set(true, forKey: "runtimeState.predictionHistoryEnabled")
+        let restored = RuntimeStateSettings(defaults: defaults)
+        XCTAssertFalse(restored.commandHistoryEnabled)
+        XCTAssertFalse(restored.visibleSessionRecoveryEnabled)
+        XCTAssertFalse(restored.predictionContextEnabled)
+    }
+
+    @MainActor
     func testDisablingPredictionHistoryClearsLiveAutocompleteHistory() {
         let session = TerminalSession()
         session.submit(command: "swift test")
@@ -38,11 +62,15 @@ final class RuntimeStateStoreTests: XCTestCase {
 
         session.applyRuntimeStateConfiguration(RuntimeStateConfiguration(
             persistenceEnabled: true,
-            predictionHistoryEnabled: false,
+            commandHistoryEnabled: false,
+            visibleSessionRecoveryEnabled: false,
+            predictionContextEnabled: false,
             outputSummariesEnabled: true,
             filePathCollectionEnabled: true
         ))
 
+        XCTAssertTrue(session.history.commands.isEmpty)
+        session.submit(command: "git status")
         XCTAssertTrue(session.history.commands.isEmpty)
     }
 
@@ -52,7 +80,9 @@ final class RuntimeStateStoreTests: XCTestCase {
         let databaseURL = directory.appendingPathComponent("runtime.sqlite")
         let configuration = RuntimeStateConfiguration(
             persistenceEnabled: true,
-            predictionHistoryEnabled: true,
+            commandHistoryEnabled: true,
+            visibleSessionRecoveryEnabled: true,
+            predictionContextEnabled: true,
             outputSummariesEnabled: true,
             filePathCollectionEnabled: true
         )
@@ -103,7 +133,9 @@ final class RuntimeStateStoreTests: XCTestCase {
             databaseURL: databaseURL,
             configuration: RuntimeStateConfiguration(
                 persistenceEnabled: false,
-                predictionHistoryEnabled: true,
+                commandHistoryEnabled: true,
+            visibleSessionRecoveryEnabled: true,
+            predictionContextEnabled: true,
                 outputSummariesEnabled: true,
                 filePathCollectionEnabled: true
             )
@@ -138,7 +170,9 @@ final class RuntimeStateStoreTests: XCTestCase {
             databaseURL: databaseURL,
             configuration: RuntimeStateConfiguration(
                 persistenceEnabled: true,
-                predictionHistoryEnabled: true,
+                commandHistoryEnabled: true,
+            visibleSessionRecoveryEnabled: true,
+            predictionContextEnabled: true,
                 outputSummariesEnabled: false,
                 filePathCollectionEnabled: false
             )
@@ -370,7 +404,7 @@ final class RuntimeStateStoreTests: XCTestCase {
         let context = try await store.loadRecentContext(workspaceID: nil, repositoryID: nil, limit: 10)
         XCTAssertEqual(context.sessions.first?.lifecycle, .closedCleanly)
         XCTAssertEqual(context.sessions.first?.lastActiveAt, Date(timeIntervalSince1970: 30))
-        XCTAssertEqual(context.sessions.first?.schemaVersion, 3)
+        XCTAssertEqual(context.sessions.first?.schemaVersion, 4)
     }
 
     func testActiveSessionsAreMarkedInterruptedOnRecovery() async throws {
@@ -421,6 +455,144 @@ final class RuntimeStateStoreTests: XCTestCase {
         let context = try await store.loadRecentContext(workspaceID: nil, repositoryID: nil, limit: 10)
         XCTAssertEqual(context.commandEvents.first?.blockID, blockID)
         XCTAssertTrue(context.commandEvents.first?.isCollapsed == true)
+        XCTAssertEqual(context.commandEvents.first?.outputKind, PersistedOutputKind.none)
+    }
+
+    func testRestoreLimitsPreferNewestSessionsCommandsAndOutput() async throws {
+        let store = InMemoryRuntimeStateStore()
+        let base = Date(timeIntervalSince1970: 1_000)
+        var sessions: [RuntimeSession] = []
+        for index in 0..<4 {
+            let session = RuntimeSession(
+                id: UUID(), workspaceID: nil, repositoryID: nil,
+                shell: "/bin/zsh", initialWorkingDirectory: "/tmp",
+                startedAt: base.addingTimeInterval(TimeInterval(index)),
+                lastActiveAt: base.addingTimeInterval(TimeInterval(index))
+            )
+            sessions.append(session)
+            try await store.startSession(session)
+            try await store.persistCommandEvent(PersistedCommandEvent(
+                sessionID: session.id,
+                timestamp: base.addingTimeInterval(TimeInterval(index)),
+                workingDirectory: "/tmp", command: "command-\(index)",
+                exitCode: 0, durationMilliseconds: nil,
+                sanitizedOutputSummary: "aa", sanitizedErrorSummary: nil,
+                predictionSource: nil, predictionAction: nil,
+                outputKind: .excerpt
+            ))
+        }
+
+        let context = try await store.loadRecentContext(
+            workspaceID: nil,
+            repositoryID: nil,
+            limits: RuntimeStateRestoreLimits(
+                maximumSessions: 3,
+                maximumCommands: 2,
+                maximumOutputBytes: 2
+            )
+        )
+
+        XCTAssertEqual(context.sessions.map(\.id), sessions.suffix(3).reversed().map(\.id))
+        XCTAssertEqual(context.commandEvents.map(\.command), ["command-3", "command-2"])
+        XCTAssertEqual(context.commandEvents[0].sanitizedOutputSummary, "aa")
+        XCTAssertNil(context.commandEvents[1].sanitizedOutputSummary)
+        XCTAssertEqual(context.commandEvents[1].outputKind, .none)
+    }
+
+    func testControllerReportsCommandHistoryAndVisibleRecoveryIndependently() async throws {
+        let directory = temporaryDirectory(named: "IndependentRecoverySettings")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databaseURL = directory.appendingPathComponent("runtime.sqlite")
+        let base = Date().addingTimeInterval(-100)
+        let seededSession = RuntimeSession(
+            id: UUID(), workspaceID: nil, repositoryID: nil,
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp",
+            startedAt: base, lastActiveAt: base.addingTimeInterval(1),
+            lifecycle: .closedCleanly
+        )
+        let store = try SQLiteRuntimeStateStore(databaseURL: databaseURL)
+        try await store.startSession(seededSession)
+        try await store.persistCommandEvent(PersistedCommandEvent(
+            sessionID: seededSession.id, timestamp: base.addingTimeInterval(1),
+            workingDirectory: "/tmp", command: "pwd", exitCode: 0,
+            durationMilliseconds: nil, sanitizedOutputSummary: nil,
+            sanitizedErrorSummary: nil, predictionSource: nil, predictionAction: nil
+        ))
+
+        func result(commandHistory: Bool, visibleRecovery: Bool) async -> RuntimeStateOperationResult {
+            let controller = RuntimeStateController(
+                databaseURL: databaseURL,
+                configuration: RuntimeStateConfiguration(
+                    persistenceEnabled: true,
+                    commandHistoryEnabled: commandHistory,
+                    visibleSessionRecoveryEnabled: visibleRecovery,
+                    predictionContextEnabled: false,
+                    outputSummariesEnabled: false,
+                    filePathCollectionEnabled: true
+                )
+            )
+            return await controller.startSession(RuntimeSession(
+                id: UUID(), workspaceID: nil, repositoryID: nil,
+                shell: "/bin/zsh", initialWorkingDirectory: "/tmp",
+                startedAt: Date(), lastActiveAt: Date()
+            ))
+        }
+
+        let historyOnly = await result(commandHistory: true, visibleRecovery: false)
+        XCTAssertTrue(historyOnly.restoresCommandHistory)
+        XCTAssertFalse(historyOnly.restoresVisibleBlocks)
+        XCTAssertEqual(historyOnly.restoredContext?.commandEvents.map(\.command), ["pwd"])
+
+        let recoveryOnly = await result(commandHistory: false, visibleRecovery: true)
+        XCTAssertFalse(recoveryOnly.restoresCommandHistory)
+        XCTAssertTrue(recoveryOnly.restoresVisibleBlocks)
+        XCTAssertEqual(recoveryOnly.restoredContext?.commandEvents.map(\.command), ["pwd"])
+    }
+
+    func testPartiallyMigratedVersionThreeDatabaseFinishesSchemaFourMigration() async throws {
+        let directory = temporaryDirectory(named: "PartialMigration")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databaseURL = directory.appendingPathComponent("runtime.sqlite")
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &database), SQLITE_OK)
+        let sql = """
+        CREATE TABLE runtime_sessions (
+            id TEXT PRIMARY KEY, workspace_id TEXT, repository_id TEXT, shell TEXT NOT NULL,
+            initial_working_directory TEXT NOT NULL, last_working_directory TEXT,
+            started_at INTEGER NOT NULL, last_active_at INTEGER NOT NULL,
+            lifecycle TEXT NOT NULL DEFAULT 'active', pane_version TEXT NOT NULL DEFAULT '0.1',
+            schema_version INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE TABLE command_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, block_id TEXT, session_id TEXT NOT NULL,
+            timestamp INTEGER NOT NULL, working_directory TEXT NOT NULL, command TEXT NOT NULL,
+            exit_code INTEGER, duration_ms INTEGER, sanitized_output_summary TEXT,
+            sanitized_error_summary TEXT, prediction_source TEXT, prediction_action TEXT,
+            completion_state TEXT NOT NULL DEFAULT 'completed', is_collapsed INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE runtime_features (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, timestamp INTEGER NOT NULL,
+            feature_key TEXT NOT NULL, feature_value TEXT NOT NULL
+        );
+        PRAGMA user_version = 3;
+        """
+        XCTAssertEqual(sqlite3_exec(database, sql, nil, nil, nil), SQLITE_OK)
+        sqlite3_close(database)
+
+        let store = try SQLiteRuntimeStateStore(databaseURL: databaseURL)
+        let session = RuntimeSession(
+            id: UUID(), workspaceID: nil, repositoryID: nil,
+            shell: "/bin/zsh", initialWorkingDirectory: "/initial",
+            lastWorkingDirectory: "/latest", startedAt: Date(), lastActiveAt: Date()
+        )
+        try await store.startSession(session)
+        let context = try await store.loadRecentContext(workspaceID: nil, repositoryID: nil, limit: 10)
+        XCTAssertEqual(context.sessions.first?.initialWorkingDirectory, "/initial")
+        XCTAssertEqual(context.sessions.first?.lastWorkingDirectory, "/latest")
+
+        let backups = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+            .filter { $0.contains(".backup.sqlite") }
+        XCTAssertEqual(backups.count, 1)
     }
 
     func testCorruptDatabaseIsMovedAsideWithoutStartupLoop() async throws {
@@ -432,7 +604,9 @@ final class RuntimeStateStoreTests: XCTestCase {
             databaseURL: databaseURL,
             configuration: RuntimeStateConfiguration(
                 persistenceEnabled: true,
-                predictionHistoryEnabled: true,
+                commandHistoryEnabled: true,
+            visibleSessionRecoveryEnabled: true,
+            predictionContextEnabled: true,
                 outputSummariesEnabled: false,
                 filePathCollectionEnabled: true
             )

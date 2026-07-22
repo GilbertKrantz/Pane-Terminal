@@ -818,7 +818,9 @@ final class TerminalSessionIntegrationTests: XCTestCase {
         let databaseURL = directory.appendingPathComponent("runtime.sqlite")
         let runtimeConfiguration = RuntimeStateConfiguration(
             persistenceEnabled: true,
-            predictionHistoryEnabled: true,
+            commandHistoryEnabled: true,
+            visibleSessionRecoveryEnabled: true,
+            predictionContextEnabled: true,
             outputSummariesEnabled: true,
             filePathCollectionEnabled: true
         )

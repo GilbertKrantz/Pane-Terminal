@@ -2,14 +2,33 @@ import Foundation
 
 struct RuntimeStateConfiguration: Sendable, Equatable {
     var persistenceEnabled: Bool
-    var predictionHistoryEnabled: Bool
+    var commandHistoryEnabled: Bool
+    var visibleSessionRecoveryEnabled: Bool
+    var predictionContextEnabled: Bool
     var outputSummariesEnabled: Bool
     var filePathCollectionEnabled: Bool
+    var maximumRestoredSessions: Int = 3
+    var maximumRestoredCommands: Int = 200
+    var maximumRestoredOutputBytes: Int = 2 * 1_024 * 1_024
 }
 
 struct RuntimeStateOperationResult: Sendable {
     let restoredContext: PersistedRuntimeContext?
     let diagnostic: String?
+    let restoresCommandHistory: Bool
+    let restoresVisibleBlocks: Bool
+
+    init(
+        restoredContext: PersistedRuntimeContext?,
+        diagnostic: String?,
+        restoresCommandHistory: Bool = false,
+        restoresVisibleBlocks: Bool = false
+    ) {
+        self.restoredContext = restoredContext
+        self.diagnostic = diagnostic
+        self.restoresCommandHistory = restoresCommandHistory
+        self.restoresVisibleBlocks = restoresVisibleBlocks
+    }
 }
 
 /// Owns durable and ephemeral runtime history without putting SQLite work on
@@ -45,7 +64,7 @@ actor RuntimeStateController {
         } catch {
             return RuntimeStateOperationResult(
                 restoredContext: nil,
-                diagnostic: "Ephemeral prediction history is unavailable."
+                diagnostic: "Ephemeral session history is unavailable."
             )
         }
 
@@ -54,26 +73,30 @@ actor RuntimeStateController {
                 restoredContext: try? await ephemeralStore.loadRecentContext(
                     workspaceID: currentSession.workspaceID,
                     repositoryID: currentSession.repositoryID,
-                    limit: restoreLimit
+                    limits: restorationLimits(commandLimit: restoreLimit)
                 ),
-                diagnostic: nil
+                diagnostic: nil,
+                restoresCommandHistory: configuration.commandHistoryEnabled,
+                restoresVisibleBlocks: false
             )
         }
 
         do {
             let store = try durableStateStore()
             _ = try await store.markActiveSessionsInterrupted(excluding: currentSession.id)
-            var context = try await store.loadRecentContext(
+            let context = try await store.loadRecentContext(
                 workspaceID: nil,
                 repositoryID: nil,
-                limit: restoreLimit
+                limits: restorationLimits(commandLimit: restoreLimit)
             )
-            if !configuration.predictionHistoryEnabled {
-                context = PersistedRuntimeContext(sessions: context.sessions, commandEvents: [], features: [])
-            }
             try await store.startSession(currentSession)
             try await store.applyRetentionPolicy()
-            return RuntimeStateOperationResult(restoredContext: context, diagnostic: recoveryDiagnostic)
+            return RuntimeStateOperationResult(
+                restoredContext: context,
+                diagnostic: recoveryDiagnostic,
+                restoresCommandHistory: configuration.commandHistoryEnabled,
+                restoresVisibleBlocks: configuration.visibleSessionRecoveryEnabled
+            )
         } catch {
             let fallback = try? await ephemeralStore.loadRecentContext(
                 workspaceID: currentSession.workspaceID,
@@ -82,19 +105,35 @@ actor RuntimeStateController {
             )
             return RuntimeStateOperationResult(
                 restoredContext: fallback,
-                diagnostic: "Prediction history could not be opened; Pane is using memory-only history."
+                diagnostic: "Session history could not be opened; Pane is using memory-only history.",
+                restoresCommandHistory: configuration.commandHistoryEnabled,
+                restoresVisibleBlocks: false
             )
         }
     }
 
+    private func restorationLimits(commandLimit: Int) -> RuntimeStateRestoreLimits {
+        RuntimeStateRestoreLimits(
+            maximumSessions: configuration.maximumRestoredSessions,
+            maximumCommands: min(max(0, commandLimit), max(0, configuration.maximumRestoredCommands)),
+            maximumOutputBytes: configuration.maximumRestoredOutputBytes
+        )
+    }
+
+    private var storesSessionMetadata: Bool {
+        configuration.commandHistoryEnabled
+            || configuration.visibleSessionRecoveryEnabled
+            || configuration.predictionContextEnabled
+    }
+
     func persistCommandEvent(_ event: PersistedCommandEvent) async -> String? {
-        guard configuration.predictionHistoryEnabled else { return nil }
+        guard configuration.commandHistoryEnabled || configuration.visibleSessionRecoveryEnabled else { return nil }
         let event = storageSafeEvent(event)
 
         do {
             try await ephemeralStore.persistCommandEvent(event)
         } catch {
-            return "Prediction history could not be cached in memory."
+            return "Session history could not be cached in memory."
         }
 
         guard configuration.persistenceEnabled else { return nil }
@@ -106,7 +145,20 @@ actor RuntimeStateController {
             try await store.persistCommandEvent(event)
             return nil
         } catch {
-            return "Prediction history could not be saved; Pane is continuing with memory-only history."
+            return "Session history could not be saved; Pane is continuing with memory-only history."
+        }
+    }
+
+    func persistFeatures(_ features: [RuntimeFeature]) async -> String? {
+        guard configuration.predictionContextEnabled, !features.isEmpty else { return nil }
+        do {
+            try await ephemeralStore.persistFeatures(features)
+            if configuration.persistenceEnabled {
+                try await durableStateStore().persistFeatures(features)
+            }
+            return nil
+        } catch {
+            return "Local prediction context could not be saved."
         }
     }
 
@@ -117,7 +169,8 @@ actor RuntimeStateController {
             workspaceID: Self.workspaceIdentifier(for: workingDirectory),
             repositoryID: currentSession.repositoryID,
             shell: currentSession.shell,
-            initialWorkingDirectory: workingDirectory,
+            initialWorkingDirectory: currentSession.initialWorkingDirectory,
+            lastWorkingDirectory: workingDirectory,
             startedAt: currentSession.startedAt,
             lastActiveAt: date,
             lifecycle: .active,
@@ -151,10 +204,12 @@ actor RuntimeStateController {
         restoreLimit: Int = 200
     ) async -> RuntimeStateOperationResult {
         let shouldRestore = (!configuration.persistenceEnabled && newConfiguration.persistenceEnabled)
-            || (!configuration.predictionHistoryEnabled && newConfiguration.predictionHistoryEnabled)
+            || (!configuration.visibleSessionRecoveryEnabled && newConfiguration.visibleSessionRecoveryEnabled)
+            || (!configuration.commandHistoryEnabled && newConfiguration.commandHistoryEnabled)
+            || (!configuration.predictionContextEnabled && newConfiguration.predictionContextEnabled)
         configuration = newConfiguration
 
-        guard newConfiguration.predictionHistoryEnabled else {
+        guard storesSessionMetadata else {
             try? await ephemeralStore.deleteAllState()
             return RuntimeStateOperationResult(restoredContext: nil, diagnostic: nil)
         }
@@ -170,11 +225,11 @@ actor RuntimeStateController {
             try await ephemeralStore.deleteSession(currentSession.id)
             if let store = try durableStateStoreIfPresentOrEnabled() {
                 try await store.deleteSession(currentSession.id)
-                if configuration.predictionHistoryEnabled {
+                if storesSessionMetadata {
                     try await store.startSession(currentSession)
                 }
             }
-            if configuration.predictionHistoryEnabled {
+            if storesSessionMetadata {
                 try await ephemeralStore.startSession(currentSession)
             }
             return nil
@@ -191,11 +246,11 @@ actor RuntimeStateController {
             try await ephemeralStore.deleteWorkspace(workspaceID)
             if let store = try durableStateStoreIfPresentOrEnabled() {
                 try await store.deleteWorkspace(workspaceID)
-                if configuration.predictionHistoryEnabled {
+                if storesSessionMetadata {
                     try await store.startSession(currentSession)
                 }
             }
-            if configuration.predictionHistoryEnabled {
+            if storesSessionMetadata {
                 try await ephemeralStore.startSession(currentSession)
             }
             return nil
@@ -217,6 +272,7 @@ actor RuntimeStateController {
                 repositoryID: currentSession.repositoryID,
                 shell: currentSession.shell,
                 initialWorkingDirectory: currentSession.initialWorkingDirectory,
+                lastWorkingDirectory: currentSession.lastWorkingDirectory,
                 startedAt: currentSession.startedAt,
                 lastActiveAt: date,
                 lifecycle: .closedCleanly,
@@ -244,16 +300,16 @@ actor RuntimeStateController {
             try await ephemeralStore.deleteAllState()
             if let store = try durableStateStoreIfPresentOrEnabled() {
                 try await store.deleteAllState()
-                if configuration.predictionHistoryEnabled, let currentSession {
+                if storesSessionMetadata, let currentSession {
                     try await store.startSession(currentSession)
                 }
             }
-            if configuration.predictionHistoryEnabled, let currentSession {
+            if storesSessionMetadata, let currentSession {
                 try await ephemeralStore.startSession(currentSession)
             }
             return nil
         } catch {
-            return "Prediction history could not be cleared completely."
+            return "Session history could not be cleared completely."
         }
     }
 
@@ -319,7 +375,7 @@ actor RuntimeStateController {
             let formatter = DateFormatter()
             formatter.dateFormat = "yyyyMMdd-HHmmss"
             let recoveryURL = databaseURL.deletingLastPathComponent()
-                .appendingPathComponent("runtime-state-recovery-\(formatter.string(from: Date())).sqlite")
+                .appendingPathComponent("runtime-state-recovery-\(formatter.string(from: Date()))-\(UUID().uuidString).sqlite")
             try FileManager.default.moveItem(at: databaseURL, to: recoveryURL)
             let store = try SQLiteRuntimeStateStore(databaseURL: databaseURL)
             durableStore = store
@@ -345,6 +401,7 @@ actor RuntimeStateController {
                 repositoryID: session.repositoryID,
                 shell: session.shell,
                 initialWorkingDirectory: "",
+                lastWorkingDirectory: "",
                 startedAt: session.startedAt,
                 lastActiveAt: session.lastActiveAt,
                 lifecycle: session.lifecycle,
@@ -373,7 +430,8 @@ actor RuntimeStateController {
             predictionSource: event.predictionSource,
             predictionAction: event.predictionAction,
             completion: event.completion,
-            isCollapsed: event.isCollapsed
+            isCollapsed: event.isCollapsed,
+            outputKind: configuration.outputSummariesEnabled ? event.outputKind : .none
         )
     }
 

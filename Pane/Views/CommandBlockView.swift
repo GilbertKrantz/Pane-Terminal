@@ -36,6 +36,11 @@ struct CommandBlockView: View {
                 .textSelection(.enabled)
 
             if !block.isCollapsed, !block.output.isEmpty {
+                if block.outputKind == .excerpt {
+                    Text("Stored output excerpt")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
                 CommandClickableTextView(
                     text: block.output,
                     font: .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular),
@@ -121,6 +126,7 @@ struct CommandBlockView: View {
         case .running: "circle.dotted"
         case .completed(let exitCode): exitCode == 0 ? "checkmark" : "xmark"
         case .interrupted: "stop"
+        case .unknown: "questionmark.circle"
         }
     }
 
@@ -128,6 +134,7 @@ struct CommandBlockView: View {
         switch block.state {
         case .completed(let exitCode): exitCode == 0 ? .green : .red
         case .interrupted: .orange
+        case .unknown: .secondary
         case .queued, .running: .secondary
         }
     }

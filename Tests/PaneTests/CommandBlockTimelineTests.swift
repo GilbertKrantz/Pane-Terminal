@@ -58,7 +58,8 @@ final class CommandBlockTimelineTests: XCTestCase {
         let block = try XCTUnwrap(timeline.block(id: id))
         XCTAssertEqual(block.output, "13 tests passed")
         XCTAssertEqual(try XCTUnwrap(block.duration), 1.25, accuracy: 0.001)
-        XCTAssertEqual(block.statusText, "1.2 s")
+        XCTAssertEqual(block.statusText, "Succeeded")
+        XCTAssertEqual(try XCTUnwrap(block.duration), 1.25, accuracy: 0.001)
         XCTAssertTrue(block.succeeded)
     }
 
@@ -122,6 +123,22 @@ final class CommandBlockTimelineTests: XCTestCase {
         XCTAssertTrue(BlockSearchQuery(text: "pane").matches(successful))
         XCTAssertTrue(BlockSearchQuery(text: "", filter: .failed).matches(failed))
         XCTAssertFalse(BlockSearchQuery(text: "", filter: .failed).matches(successful))
+    }
+
+    func testCompletionStatusLabelsAreHonest() {
+        XCTAssertEqual(CommandBlock(command: "true", workingDirectory: "/tmp", state: .completed(exitCode: 0)).statusText, "Succeeded")
+        XCTAssertEqual(CommandBlock(command: "false", workingDirectory: "/tmp", state: .completed(exitCode: 1)).statusText, "Failed · Exit 1")
+        XCTAssertEqual(CommandBlock(command: "sleep", workingDirectory: "/tmp", state: .interrupted(exitCode: nil)).statusText, "Interrupted")
+        XCTAssertEqual(CommandBlock(command: "legacy", workingDirectory: "/tmp", state: .unknown).statusText, "Completion unknown")
+    }
+
+    func testUnknownCompletionSearchIsIndependentFromInterrupted() {
+        let unknown = CommandBlock(command: "legacy", workingDirectory: "/tmp", state: .unknown)
+        let interrupted = CommandBlock(command: "sleep", workingDirectory: "/tmp", state: .interrupted(exitCode: nil))
+
+        XCTAssertTrue(BlockSearchQuery(text: "", filter: .unknown).matches(unknown))
+        XCTAssertFalse(BlockSearchQuery(text: "", filter: .unknown).matches(interrupted))
+        XCTAssertTrue(BlockSearchQuery(text: "", filter: .interrupted).matches(interrupted))
     }
 
     func testRestoredCollapsedStateIsPreserved() throws {

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Ephemeral runtime-state cache used when durable prediction history is
+/// Ephemeral runtime-state cache used when durable session history is
 /// disabled or when the persistent store fails closed. It stores only already
 /// sanitized command events supplied by callers and never writes to disk.
 actor InMemoryRuntimeStateStore: RuntimeStateStore {
@@ -44,7 +44,8 @@ actor InMemoryRuntimeStateStore: RuntimeStateStore {
             predictionSource: event.predictionSource,
             predictionAction: event.predictionAction,
             completion: event.completion,
-            isCollapsed: isCollapsed
+            isCollapsed: isCollapsed,
+            outputKind: event.outputKind
         )
     }
 
@@ -55,19 +56,23 @@ actor InMemoryRuntimeStateStore: RuntimeStateStore {
     func loadRecentContext(
         workspaceID: String?,
         repositoryID: String?,
-        limit: Int
+        limits: RuntimeStateRestoreLimits
     ) async throws -> PersistedRuntimeContext {
         let matchingSessions = sessions.values.filter { session in
             let workspaceMatches = workspaceID == nil || session.workspaceID == workspaceID
             let repositoryMatches = repositoryID == nil || session.repositoryID == repositoryID
             return workspaceMatches && repositoryMatches
-        }
+        }.sorted { $0.lastActiveAt > $1.lastActiveAt }
+            .prefix(max(0, limits.maximumSessions))
         let sessionIDs = Set(matchingSessions.map(\.id))
-        let boundedLimit = max(0, limit)
-        let events = commandEvents
+        let boundedLimit = max(0, limits.maximumCommands)
+        let events = Self.enforcingOutputLimit(
+            Array(commandEvents
             .filter { sessionIDs.contains($0.sessionID) }
             .sorted { $0.timestamp > $1.timestamp }
-            .prefix(boundedLimit)
+            .prefix(boundedLimit)),
+            maximumBytes: limits.maximumOutputBytes
+        )
         let runtimeFeatures = features
             .filter { sessionIDs.contains($0.sessionID) }
             .sorted { $0.timestamp > $1.timestamp }
@@ -75,9 +80,32 @@ actor InMemoryRuntimeStateStore: RuntimeStateStore {
 
         return PersistedRuntimeContext(
             sessions: Array(matchingSessions),
-            commandEvents: Array(events),
+            commandEvents: events,
             features: Array(runtimeFeatures)
         )
+    }
+
+    private static func enforcingOutputLimit(
+        _ events: [PersistedCommandEvent],
+        maximumBytes: Int
+    ) -> [PersistedCommandEvent] {
+        var remaining = max(0, maximumBytes)
+        return events.map { event in
+            let byteCount = (event.sanitizedOutputSummary?.utf8.count ?? 0)
+                + (event.sanitizedErrorSummary?.utf8.count ?? 0)
+            guard byteCount <= remaining else {
+                return PersistedCommandEvent(
+                    blockID: event.blockID, sessionID: event.sessionID, timestamp: event.timestamp,
+                    workingDirectory: event.workingDirectory, command: event.command,
+                    exitCode: event.exitCode, durationMilliseconds: event.durationMilliseconds,
+                    sanitizedOutputSummary: nil, sanitizedErrorSummary: nil,
+                    predictionSource: event.predictionSource, predictionAction: event.predictionAction,
+                    completion: event.completion, isCollapsed: event.isCollapsed, outputKind: .none
+                )
+            }
+            remaining -= byteCount
+            return event
+        }
     }
 
     func deleteSession(_ sessionID: UUID) async throws {
@@ -120,7 +148,7 @@ actor InMemoryRuntimeStateStore: RuntimeStateStore {
                 exitCode: event.exitCode, durationMilliseconds: event.durationMilliseconds,
                 sanitizedOutputSummary: nil, sanitizedErrorSummary: nil,
                 predictionSource: event.predictionSource, predictionAction: event.predictionAction,
-                completion: event.completion, isCollapsed: event.isCollapsed
+                completion: event.completion, isCollapsed: event.isCollapsed, outputKind: .none
             )
         }
     }
@@ -133,6 +161,7 @@ actor InMemoryRuntimeStateStore: RuntimeStateStore {
             repositoryID: session.repositoryID,
             shell: session.shell,
             initialWorkingDirectory: session.initialWorkingDirectory,
+            lastWorkingDirectory: session.lastWorkingDirectory,
             startedAt: session.startedAt,
             lastActiveAt: lastActiveAt,
             lifecycle: lifecycle,
@@ -150,6 +179,7 @@ actor InMemoryRuntimeStateStore: RuntimeStateStore {
                 repositoryID: session.repositoryID,
                 shell: session.shell,
                 initialWorkingDirectory: session.initialWorkingDirectory,
+                lastWorkingDirectory: session.lastWorkingDirectory,
                 startedAt: session.startedAt,
                 lastActiveAt: session.lastActiveAt,
                 lifecycle: .interrupted,

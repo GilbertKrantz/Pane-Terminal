@@ -14,7 +14,10 @@ struct PaneApp: App {
             databaseURL: Self.runtimeStateDatabaseURL,
             configuration: settings.configuration
         )
-        let session = TerminalSession(runtimeStateController: controller)
+        let session = TerminalSession(
+            runtimeStateController: controller,
+            commandHistoryEnabled: settings.commandHistoryEnabled
+        )
         _runtimeStateSettings = StateObject(wrappedValue: settings)
         _session = StateObject(wrappedValue: session)
         AppDelegate.sharedSession = session
@@ -62,6 +65,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowIconObserver: NSObjectProtocol?
     private var applicationIcon: NSImage?
     private var isFinalizingTermination = false
+    private var hasRepliedToTermination = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         terminalControlKeyMonitor = NSEvent.addLocalMonitorForEvents(
@@ -127,9 +131,20 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         isFinalizingTermination = true
         Task { @MainActor in
             await session.finalizeApplicationExit()
-            sender.reply(toApplicationShouldTerminate: true)
+            replyToTerminationIfNeeded(sender)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self, weak sender] in
+            guard let self, let sender else { return }
+            session.terminateForApplicationExit()
+            self.replyToTerminationIfNeeded(sender)
         }
         return .terminateLater
+    }
+
+    private func replyToTerminationIfNeeded(_ sender: NSApplication) {
+        guard !hasRepliedToTermination else { return }
+        hasRepliedToTermination = true
+        sender.reply(toApplicationShouldTerminate: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

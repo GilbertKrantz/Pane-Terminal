@@ -1,11 +1,23 @@
 import Foundation
 
+enum CommandBlockOrigin: Equatable, Sendable {
+    case live
+    case restored(sessionID: UUID)
+}
+
+enum PersistedOutputKind: String, Codable, Sendable, Equatable {
+    case none
+    case complete
+    case excerpt
+}
+
 struct CommandBlock: Identifiable, Equatable, Sendable {
     enum ExecutionState: Equatable, Sendable {
         case queued
         case running
         case completed(exitCode: Int32)
         case interrupted(exitCode: Int32?)
+        case unknown
     }
 
     let id: UUID
@@ -18,6 +30,8 @@ struct CommandBlock: Identifiable, Equatable, Sendable {
     var output: String
     var isCollapsed: Bool
     var isRerunnable: Bool
+    var origin: CommandBlockOrigin
+    var outputKind: PersistedOutputKind
 
     init(
         id: UUID = UUID(),
@@ -29,7 +43,9 @@ struct CommandBlock: Identifiable, Equatable, Sendable {
         state: ExecutionState = .queued,
         output: String = "",
         isCollapsed: Bool = false,
-        isRerunnable: Bool = true
+        isRerunnable: Bool = true,
+        origin: CommandBlockOrigin = .live,
+        outputKind: PersistedOutputKind = .none
     ) {
         self.id = id
         self.command = command
@@ -41,6 +57,8 @@ struct CommandBlock: Identifiable, Equatable, Sendable {
         self.output = output
         self.isCollapsed = isCollapsed
         self.isRerunnable = isRerunnable
+        self.origin = origin
+        self.outputKind = outputKind
     }
 
     var duration: TimeInterval? {
@@ -62,13 +80,13 @@ struct CommandBlock: Identifiable, Equatable, Sendable {
         case .running:
             return duration.map(Self.formatDuration) ?? "Running"
         case .completed(let exitCode):
-            let durationText = duration.map(Self.formatDuration) ?? "Done"
-            return exitCode == 0 ? durationText : "Exited \(exitCode) · \(durationText)"
+            if exitCode == 0 { return "Succeeded" }
+            return "Failed · Exit \(exitCode)"
         case .interrupted(let exitCode):
-            if let exitCode {
-                return "Interrupted · \(exitCode)"
-            }
+            if let exitCode { return "Interrupted · Exit \(exitCode)" }
             return "Interrupted"
+        case .unknown:
+            return "Completion unknown"
         }
     }
 
@@ -164,7 +182,7 @@ struct CommandBlockTimeline: Equatable, Sendable {
                 blocks[index].output = activeOutput
                 blocks[index].completedAt = date
                 blocks[index].state = .interrupted(exitCode: exitCode)
-            case .completed, .interrupted:
+            case .completed, .interrupted, .unknown:
                 break
             }
         }
@@ -185,7 +203,7 @@ struct CommandBlockTimeline: Equatable, Sendable {
     mutating func setAllCompletedCollapsed(_ collapsed: Bool) {
         for index in blocks.indices {
             switch blocks[index].state {
-            case .completed, .interrupted:
+            case .completed, .interrupted, .unknown:
                 blocks[index].isCollapsed = collapsed
             case .queued, .running:
                 break
@@ -194,8 +212,11 @@ struct CommandBlockTimeline: Equatable, Sendable {
     }
 
     mutating func restore(_ restoredBlocks: [CommandBlock]) {
-        let existing = Set(blocks.map(\.id))
-        blocks.insert(contentsOf: restoredBlocks.filter { !existing.contains($0.id) }, at: 0)
+        var seen = Set(blocks.map(\.id))
+        let uniqueBlocks = restoredBlocks.filter { block in
+            seen.insert(block.id).inserted
+        }
+        blocks.insert(contentsOf: uniqueBlocks, at: 0)
     }
 
     @discardableResult
@@ -237,7 +258,7 @@ struct CommandBlockTimeline: Equatable, Sendable {
     mutating func clearFinalized() {
         blocks.removeAll { block in
             switch block.state {
-            case .completed, .interrupted:
+            case .completed, .interrupted, .unknown:
                 return true
             case .queued, .running:
                 return false
@@ -248,7 +269,7 @@ struct CommandBlockTimeline: Equatable, Sendable {
     mutating func clearFinalizedOutput() {
         for index in blocks.indices {
             switch blocks[index].state {
-            case .completed, .interrupted:
+            case .completed, .interrupted, .unknown:
                 blocks[index].output = ""
             case .queued, .running:
                 break
@@ -287,7 +308,7 @@ struct BlockSearchQuery: Equatable, Sendable {
         case .interrupted:
             if case .interrupted = block.state { statusMatches = true } else { statusMatches = false }
         case .unknown:
-            if case .interrupted(exitCode: nil) = block.state { statusMatches = true } else { statusMatches = false }
+            if case .unknown = block.state { statusMatches = true } else { statusMatches = false }
         }
         guard statusMatches else { return false }
         let needle = text.trimmingCharacters(in: .whitespacesAndNewlines)

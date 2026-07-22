@@ -87,10 +87,17 @@ private final class PTYProcessDelegateBridge: LocalProcessDelegate {
 @MainActor
 final class TerminalSession: NSObject, ObservableObject {
     struct SessionBoundary: Equatable {
+        let sessionID: UUID
         let lifecycle: PersistedSessionLifecycle
+        let startedAt: Date
         let lastActiveAt: Date
-        let restoredDirectory: String
-        let usedDirectoryFallback: Bool
+        let workingDirectory: String
+        let shell: String
+    }
+
+    struct NewShellBoundary: Equatable {
+        let workingDirectory: String
+        let previousDirectoryUnavailable: Bool
     }
 
     @Published private(set) var mode: InputMode = .blocks
@@ -109,7 +116,9 @@ final class TerminalSession: NSObject, ObservableObject {
     @Published var commandDraft = ""
     @Published var blockSearchText = ""
     @Published var blockSearchFilter: BlockSearchFilter = .all
-    @Published private(set) var sessionBoundary: SessionBoundary?
+    @Published private(set) var sessionBoundaries: [UUID: SessionBoundary] = [:]
+    @Published private(set) var restoredSessionOrder: [UUID] = []
+    @Published private(set) var newShellBoundary: NewShellBoundary?
     @Published private(set) var restoredBlockIDs: Set<UUID> = []
     @Published var isRestartConfirmationPresented = false
     @Published private(set) var lastShellRestartAt: Date?
@@ -140,13 +149,16 @@ final class TerminalSession: NSObject, ObservableObject {
     private let runtimeSessionStartedAt = Date()
     private let sensitiveDataSanitizer = SensitiveDataSanitizer()
     private var restoredRuntimeEventKeys: Set<String> = []
+    private var isCommandHistoryEnabled: Bool
     private var runtimeStateStartTask: Task<Void, Never>?
     private var isRuntimeStatePrepared: Bool
     private var zshCompletionEndpoint: WarmZshCompletionEndpoint?
     private var isShuttingDown = false
+    private var isApplicationExitFinalized = false
     private var isShellIntegrationReady = false
     private var commandAwaitingStartID: UUID?
     private var shouldReturnToBlocksAfterAlternateScreen = false
+    private var shouldRestoreBlocksViewportAfterAlternateScreen = false
     private var foregroundProcessTimer: Timer?
     private var lastForegroundSnapshot: ForegroundProcessSnapshot?
 
@@ -189,10 +201,12 @@ final class TerminalSession: NSObject, ObservableObject {
 
     init(
         shellConfiguration: ShellConfiguration = .loginZsh(),
-        runtimeStateController: RuntimeStateController? = nil
+        runtimeStateController: RuntimeStateController? = nil,
+        commandHistoryEnabled: Bool = true
     ) {
         self.shellConfiguration = shellConfiguration
         self.runtimeStateController = runtimeStateController
+        self.isCommandHistoryEnabled = commandHistoryEnabled
         self.isRuntimeStatePrepared = runtimeStateController == nil
         self.currentDirectory = shellConfiguration.workingDirectory
         super.init()
@@ -399,6 +413,10 @@ final class TerminalSession: NSObject, ObservableObject {
         isShuttingDown = true
         let activeOutput = finalizedActiveBlockOutput()
         blockTimeline.interruptUnfinished(activeOutput: activeOutput)
+        stopProcessForShutdown()
+    }
+
+    private func stopProcessForShutdown() {
         clearActiveBlockCapture()
         let oldProcess = process
         process = nil
@@ -416,25 +434,21 @@ final class TerminalSession: NSObject, ObservableObject {
     /// SwiftUI hierarchy.  Clearing the process reference first also makes a
     /// later LocalProcess callback a no-op.
     func terminateForApplicationExit() {
-        guard !isShuttingDown else { return }
+        guard !isShuttingDown || process != nil else { return }
         isShuttingDown = true
-        clearActiveBlockCapture()
-        let oldProcess = process
-        process = nil
-        processBridge = nil
-        commandAwaitingStartID = nil
-        isShellIntegrationReady = false
-        terminateAndReap(oldProcess)
-        invalidateCompletionEndpoint()
-        stopForegroundProcessMonitoring()
-        zshCompletionClient.shutdown()
+        stopProcessForShutdown()
     }
 
     func finalizeApplicationExit() async {
+        guard !isApplicationExitFinalized else { return }
+        isApplicationExitFinalized = true
         let activeID = blockTimeline.activeBlockID ?? commandAwaitingStartID
-        shutdown()
+        isShuttingDown = true
+        let activeOutput = finalizedActiveBlockOutput()
+        blockTimeline.interruptUnfinished(activeOutput: activeOutput)
         if let activeID,
            let block = blockTimeline.block(id: activeID),
+           block.origin == .live,
            block.isRerunnable,
            let runtimeStateController {
             let output = sensitiveDataSanitizer.sanitizeOutput(block.output).value
@@ -451,11 +465,13 @@ final class TerminalSession: NSObject, ObservableObject {
                 predictionSource: nil,
                 predictionAction: nil,
                 completion: .interrupted,
-                isCollapsed: block.isCollapsed
+                isCollapsed: block.isCollapsed,
+                outputKind: output.isEmpty ? .none : .excerpt
             )
             _ = await runtimeStateController.persistCommandEvent(event)
         }
         _ = await runtimeStateController?.closeCurrentSessionCleanly()
+        stopProcessForShutdown()
     }
 
     func submitDraft() {
@@ -480,9 +496,9 @@ final class TerminalSession: NSObject, ObservableObject {
                 to: awaitingID
             ) {
                 let sanitized = sensitiveDataSanitizer.sanitizeCommand(fullCommand)
-                if sanitized.redactionCount == 0 {
+                if isCommandHistoryEnabled, sanitized.redactionCount == 0 {
                     history.replaceMostRecent(with: sanitized.value)
-                } else {
+                } else if isCommandHistoryEnabled {
                     history.removeMostRecent()
                 }
             }
@@ -513,7 +529,7 @@ final class TerminalSession: NSObject, ObservableObject {
         selectedBlockID = blockID
         inputRequirement = .lineOriented
         let sanitizedCommand = sensitiveDataSanitizer.sanitizeCommand(command)
-        if sanitizedCommand.redactionCount == 0 {
+        if isCommandHistoryEnabled, sanitizedCommand.redactionCount == 0 {
             history.append(sanitizedCommand.value)
         } else {
             history.resetNavigation()
@@ -712,7 +728,7 @@ final class TerminalSession: NSObject, ObservableObject {
     func setAllCompletedBlocksCollapsed(_ collapsed: Bool) {
         let ids = blockTimeline.blocks.filter { block in
             switch block.state {
-            case .completed, .interrupted: return true
+            case .completed, .interrupted, .unknown: return true
             case .queued, .running: return false
             }
         }.map(\.id)
@@ -1057,6 +1073,7 @@ final class TerminalSession: NSObject, ObservableObject {
             repositoryID: nil,
             shell: shellConfiguration.executable,
             initialWorkingDirectory: directory,
+            lastWorkingDirectory: directory,
             startedAt: runtimeSessionStartedAt,
             lastActiveAt: Date(),
             lifecycle: .active
@@ -1067,32 +1084,59 @@ final class TerminalSession: NSObject, ObservableObject {
             guard let self else { return }
             self.runtimeStateDiagnostic = result.diagnostic
             if let context = result.restoredContext {
-                self.restoreRuntimeContext(context)
+                self.restoreRuntimeContext(
+                    context,
+                    restoreCommandHistory: result.restoresCommandHistory,
+                    restoreVisibleBlocks: result.restoresVisibleBlocks
+                )
             }
             self.isRuntimeStatePrepared = true
             self.startShell()
         }
     }
 
-    private func restoreRuntimeContext(_ context: PersistedRuntimeContext) {
-        restorePredictionHistory(from: context)
+    func restoreRuntimeContext(
+        _ context: PersistedRuntimeContext,
+        restoreCommandHistory: Bool,
+        restoreVisibleBlocks: Bool
+    ) {
+        if restoreCommandHistory { restorePredictionHistory(from: context) }
+        guard restoreVisibleBlocks else { return }
         let previousSessions = context.sessions.filter { $0.id != runtimeSessionID }
         guard let previous = previousSessions.max(by: { $0.lastActiveAt < $1.lastActiveAt }) else { return }
 
-        let preferredDirectory = previous.initialWorkingDirectory
-        let fallbackDirectory = FileManager.default.homeDirectoryForCurrentUser.path
-        var isDirectory: ObjCBool = false
-        let canRestoreDirectory = !preferredDirectory.isEmpty
-            && FileManager.default.fileExists(atPath: preferredDirectory, isDirectory: &isDirectory)
-            && isDirectory.boolValue
-            && FileManager.default.isReadableFile(atPath: preferredDirectory)
-        let restoredDirectory = canRestoreDirectory ? preferredDirectory : fallbackDirectory
+        let preferredDirectory = previous.lastWorkingDirectory.isEmpty
+            ? previous.initialWorkingDirectory
+            : previous.lastWorkingDirectory
+        let latestEventDirectory = context.commandEvents
+            .filter { $0.sessionID == previous.id }
+            .max(by: { $0.timestamp < $1.timestamp })?
+            .workingDirectory
+        let directoryCandidates: [String?] = [
+            preferredDirectory,
+            latestEventDirectory,
+            previous.initialWorkingDirectory,
+            shellConfiguration.workingDirectory,
+            FileManager.default.homeDirectoryForCurrentUser.path
+        ]
+        let restoredDirectory = directoryCandidates
+            .compactMap(Self.validatedWorkingDirectory)
+            .first ?? FileManager.default.homeDirectoryForCurrentUser.path
         shellConfiguration.workingDirectory = restoredDirectory
         currentDirectory = restoredDirectory
 
         let sessionIDs = Set(previousSessions.map(\.id))
-        let lifecycleBySession = Dictionary(uniqueKeysWithValues: previousSessions.map { ($0.id, $0.lifecycle) })
-        let restoredBlocks = context.commandEvents
+        var eventByBlockID: [UUID: PersistedCommandEvent] = [:]
+        for event in context.commandEvents where sessionIDs.contains(event.sessionID) {
+            guard let existing = eventByBlockID[event.blockID] else {
+                eventByBlockID[event.blockID] = event
+                continue
+            }
+            if Self.preferredRestorationEvent(event, over: existing) {
+                eventByBlockID[event.blockID] = event
+            }
+        }
+        let restoredBlocks = eventByBlockID.values
             .filter { sessionIDs.contains($0.sessionID) }
             .sorted { $0.timestamp < $1.timestamp }
             .map { event -> CommandBlock in
@@ -1100,13 +1144,11 @@ final class TerminalSession: NSObject, ObservableObject {
                 let state: CommandBlock.ExecutionState
                 switch event.completion {
                 case .completed:
-                    state = .completed(exitCode: Int32(event.exitCode ?? 0))
+                    state = event.exitCode.map { .completed(exitCode: Int32($0)) } ?? .unknown
                 case .interrupted:
                     state = .interrupted(exitCode: event.exitCode.map(Int32.init))
                 case .unknown:
-                    state = lifecycleBySession[event.sessionID] == .interrupted
-                        ? .interrupted(exitCode: nil)
-                        : .interrupted(exitCode: nil)
+                    state = .unknown
                 }
                 return CommandBlock(
                     id: event.blockID,
@@ -1118,22 +1160,61 @@ final class TerminalSession: NSObject, ObservableObject {
                     state: state,
                     output: event.sanitizedOutputSummary ?? event.sanitizedErrorSummary ?? "",
                     isCollapsed: event.isCollapsed,
-                    isRerunnable: !event.command.contains(SensitiveDataSanitizer.redaction)
+                    isRerunnable: Self.isRestoredCommandRerunnable(event.command),
+                    origin: .restored(sessionID: event.sessionID),
+                    outputKind: event.outputKind
                 )
             }
         blockTimeline.restore(restoredBlocks)
         restoredBlockIDs.formUnion(restoredBlocks.map(\.id))
-        sessionBoundary = SessionBoundary(
-            lifecycle: previous.lifecycle,
-            lastActiveAt: previous.lastActiveAt,
-            restoredDirectory: restoredDirectory,
-            usedDirectoryFallback: !canRestoreDirectory
+        sessionBoundaries = Dictionary(uniqueKeysWithValues: previousSessions.map { session in
+            let workingDirectory = session.lastWorkingDirectory.isEmpty
+                ? session.initialWorkingDirectory
+                : session.lastWorkingDirectory
+            return (session.id, SessionBoundary(
+                sessionID: session.id,
+                lifecycle: session.lifecycle,
+                startedAt: session.startedAt,
+                lastActiveAt: session.lastActiveAt,
+                workingDirectory: workingDirectory,
+                shell: session.shell
+            ))
+        })
+        let sessionsWithCommands = Set(restoredBlocks.compactMap { block -> UUID? in
+            if case .restored(let sessionID) = block.origin { return sessionID }
+            return nil
+        })
+        restoredSessionOrder = previousSessions
+            .filter { sessionsWithCommands.contains($0.id) || $0.lifecycle == .interrupted }
+            .sorted {
+                if $0.startedAt == $1.startedAt { return $0.id.uuidString < $1.id.uuidString }
+                return $0.startedAt < $1.startedAt
+            }
+            .map(\.id)
+        newShellBoundary = NewShellBoundary(
+            workingDirectory: restoredDirectory,
+            previousDirectoryUnavailable: !preferredDirectory.isEmpty && restoredDirectory != preferredDirectory
         )
+    }
+
+    private static func preferredRestorationEvent(
+        _ candidate: PersistedCommandEvent,
+        over existing: PersistedCommandEvent
+    ) -> Bool {
+        if candidate.timestamp != existing.timestamp { return candidate.timestamp > existing.timestamp }
+        func completeness(_ event: PersistedCommandEvent) -> Int {
+            var score = event.completion == .unknown ? 0 : 4
+            if event.exitCode != nil { score += 2 }
+            if event.sanitizedOutputSummary != nil || event.sanitizedErrorSummary != nil { score += 1 }
+            return score
+        }
+        return completeness(candidate) > completeness(existing)
     }
 
     private func persistCompletedBlock(id: UUID) {
         guard let runtimeStateController,
-              let block = blockTimeline.block(id: id) else { return }
+              let block = blockTimeline.block(id: id),
+              block.origin == .live else { return }
 
         let exitCode: Int?
         switch block.state {
@@ -1141,7 +1222,7 @@ final class TerminalSession: NSObject, ObservableObject {
             exitCode = Int(code)
         case .interrupted(let code):
             exitCode = code.map(Int.init)
-        case .queued, .running:
+        case .queued, .running, .unknown:
             return
         }
 
@@ -1171,7 +1252,8 @@ final class TerminalSession: NSObject, ObservableObject {
                 if case .interrupted = block.state { return .interrupted }
                 return .completed
             }(),
-            isCollapsed: block.isCollapsed
+            isCollapsed: block.isCollapsed,
+            outputKind: summary == nil ? .none : .excerpt
         )
 
         let startTask = runtimeStateStartTask
@@ -1180,6 +1262,12 @@ final class TerminalSession: NSObject, ObservableObject {
             let diagnostic = await runtimeStateController.persistCommandEvent(event)
             self?.runtimeStateDiagnostic = diagnostic
         }
+    }
+
+    private static func isRestoredCommandRerunnable(_ command: String) -> Bool {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains(SensitiveDataSanitizer.redaction) else { return false }
+        return trimmed != "[command omitted]" && trimmed != "<command omitted>"
     }
 
     private func restorePredictionHistory(from context: PersistedRuntimeContext) {
@@ -1192,7 +1280,8 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     func applyRuntimeStateConfiguration(_ configuration: RuntimeStateConfiguration) {
-        if !configuration.predictionHistoryEnabled {
+        isCommandHistoryEnabled = configuration.commandHistoryEnabled
+        if !configuration.commandHistoryEnabled {
             history = CommandHistory()
             restoredRuntimeEventKeys.removeAll()
         }
@@ -1202,7 +1291,11 @@ final class TerminalSession: NSObject, ObservableObject {
             guard let self else { return }
             self.runtimeStateDiagnostic = result.diagnostic
             if let context = result.restoredContext {
-                self.restorePredictionHistory(from: context)
+                self.restoreRuntimeContext(
+                    context,
+                    restoreCommandHistory: result.restoresCommandHistory,
+                    restoreVisibleBlocks: result.restoresVisibleBlocks
+                )
             }
         }
     }
@@ -1237,7 +1330,9 @@ final class TerminalSession: NSObject, ObservableObject {
     func clearPreviousSessions() {
         for id in restoredBlockIDs { blockTimeline.remove(id: id) }
         restoredBlockIDs.removeAll()
-        sessionBoundary = nil
+        sessionBoundaries.removeAll()
+        restoredSessionOrder.removeAll()
+        newShellBoundary = nil
         guard let runtimeStateController else { return }
         Task { [weak self] in
             self?.runtimeStateDiagnostic = await runtimeStateController.deletePreviousSessions()
@@ -1248,7 +1343,9 @@ final class TerminalSession: NSObject, ObservableObject {
         history = CommandHistory()
         blockTimeline.clearFinalized()
         restoredBlockIDs.removeAll()
-        sessionBoundary = nil
+        sessionBoundaries.removeAll()
+        restoredSessionOrder.removeAll()
+        newShellBoundary = nil
         guard let runtimeStateController else { return }
         Task { [weak self] in
             self?.runtimeStateDiagnostic = await runtimeStateController.deleteExactCommandHistory()
@@ -1487,6 +1584,7 @@ final class TerminalSession: NSObject, ObservableObject {
             }
         } else {
             if shouldReturnToBlocksAfterAlternateScreen {
+                shouldRestoreBlocksViewportAfterAlternateScreen = true
                 modeAttribution = .manual
                 inputRequirement = isCommandActive ? .lineOriented : .shellIdle
                 // Re-evaluate immediately after the protocol-owned mode ends.
@@ -1495,6 +1593,12 @@ final class TerminalSession: NSObject, ObservableObject {
             }
             shouldReturnToBlocksAfterAlternateScreen = false
         }
+    }
+
+    func consumeBlocksViewportRestoreRequest() -> Bool {
+        guard shouldRestoreBlocksViewportAfterAlternateScreen else { return false }
+        shouldRestoreBlocksViewportAfterAlternateScreen = false
+        return true
     }
 
     private func startForegroundProcessMonitoring() {
@@ -1687,7 +1791,7 @@ final class TerminalSession: NSObject, ObservableObject {
         )
         commandAwaitingStartID = id
         selectedBlockID = id
-        if sanitized.redactionCount == 0 {
+        if isCommandHistoryEnabled, sanitized.redactionCount == 0 {
             history.append(sanitized.value)
         } else {
             history.resetNavigation()

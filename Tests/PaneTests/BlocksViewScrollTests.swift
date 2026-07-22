@@ -70,6 +70,44 @@ final class BlocksViewScrollTests: XCTestCase {
         } else {
             XCTAssertEqual(visibleRect.minY, documentView.bounds.minY, accuracy: 2)
         }
+
+        let terminalView = session.makeAuthoritativeTerminalView()
+        terminalView.feed(text: "\u{001B}[?1049h")
+        try await waitUntil("alternate screen to replace the blocks timeline") {
+            hostingView.layoutSubtreeIfNeeded()
+            return session.isAlternateScreenActive
+        }
+
+        terminalView.feed(text: "\u{001B}[?1049l")
+        try await waitUntil("blocks timeline to return after alternate screen") {
+            hostingView.layoutSubtreeIfNeeded()
+            return !session.isAlternateScreenActive
+                && self.timelineScrollView(in: hostingView) != nil
+        }
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+        await drainMainQueue(turns: 3)
+        hostingView.layoutSubtreeIfNeeded()
+
+        let restoredTimeline = try XCTUnwrap(timelineScrollView(in: hostingView))
+        let restoredDocumentView = try XCTUnwrap(restoredTimeline.documentView)
+        let restoredVisibleRect = restoredTimeline.documentVisibleRect
+        if restoredDocumentView.isFlipped {
+            XCTAssertEqual(restoredVisibleRect.maxY, restoredDocumentView.bounds.maxY, accuracy: 2)
+        } else {
+            XCTAssertEqual(restoredVisibleRect.minY, restoredDocumentView.bounds.minY, accuracy: 2)
+        }
+        let restoredOutput = try XCTUnwrap(
+            commandOutputView(containing: "timeline-line-30", in: hostingView)
+        )
+        let outputRectInClipView = restoredOutput.convert(
+            restoredOutput.bounds,
+            to: restoredTimeline.contentView
+        )
+        XCTAssertTrue(
+            outputRectInClipView.intersects(restoredTimeline.contentView.bounds),
+            "The completed block must be visible immediately after alternate-screen exit"
+        )
     }
 
     private func waitUntil(
@@ -103,5 +141,32 @@ final class BlocksViewScrollTests: XCTestCase {
             result.append(contentsOf: scrollViews(in: subview))
         }
         return result
+    }
+
+    private func timelineScrollView(in view: NSView) -> NSScrollView? {
+        scrollViews(in: view)
+            .filter { scrollView in
+                guard let documentView = scrollView.documentView else { return false }
+                return documentView.bounds.height > scrollView.contentView.bounds.height + 20
+            }
+            .max { lhs, rhs in
+                (lhs.documentView?.bounds.height ?? 0) < (rhs.documentView?.bounds.height ?? 0)
+            }
+    }
+
+    private func commandOutputView(
+        containing marker: String,
+        in view: NSView
+    ) -> CommandClickableNSTextView? {
+        if let outputView = view as? CommandClickableNSTextView,
+           outputView.string.contains(marker) {
+            return outputView
+        }
+        for subview in view.subviews {
+            if let outputView = commandOutputView(containing: marker, in: subview) {
+                return outputView
+            }
+        }
+        return nil
     }
 }
