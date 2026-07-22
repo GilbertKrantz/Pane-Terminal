@@ -61,6 +61,7 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
             throw RuntimeStateStoreError.openFailed
         }
         do {
+            try Self.backUpBeforeMigrationIfNeeded(handle, databaseURL: databaseURL)
             try Self.configureAndMigrate(handle)
         } catch {
             sqlite3_close(handle)
@@ -73,14 +74,18 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
         let sql = """
         INSERT INTO runtime_sessions (
             id, workspace_id, repository_id, shell,
-            initial_working_directory, started_at, last_active_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            initial_working_directory, started_at, last_active_at,
+            lifecycle, pane_version, schema_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             workspace_id = excluded.workspace_id,
             repository_id = excluded.repository_id,
             shell = excluded.shell,
             initial_working_directory = excluded.initial_working_directory,
-            last_active_at = excluded.last_active_at
+            last_active_at = excluded.last_active_at,
+            lifecycle = excluded.lifecycle,
+            pane_version = excluded.pane_version,
+            schema_version = excluded.schema_version
         """
         try withStatement(sql, operation: "start session") { statement in
             try bind(session.id.uuidString, at: 1, to: statement)
@@ -90,6 +95,9 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
             try bind(sanitizer.sanitizeCommand(session.initialWorkingDirectory).value, at: 5, to: statement)
             try bind(milliseconds(session.startedAt), at: 6, to: statement)
             try bind(milliseconds(session.lastActiveAt), at: 7, to: statement)
+            try bind(session.lifecycle.rawValue, at: 8, to: statement)
+            try bind(session.paneVersion, at: 9, to: statement)
+            try bind(Int64(session.schemaVersion), at: 10, to: statement)
             try stepDone(statement, operation: "start session")
         }
     }
@@ -100,23 +108,45 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
         let error = event.sanitizedErrorSummary.map(sanitizer.sanitizeError)
         let sql = """
         INSERT INTO command_events (
-            session_id, timestamp, working_directory, command, exit_code,
+            block_id, session_id, timestamp, working_directory, command, exit_code,
             duration_ms, sanitized_output_summary, sanitized_error_summary,
-            prediction_source, prediction_action
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            prediction_source, prediction_action, completion_state, is_collapsed
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(block_id) DO UPDATE SET
+            timestamp = excluded.timestamp,
+            working_directory = excluded.working_directory,
+            command = excluded.command,
+            exit_code = excluded.exit_code,
+            duration_ms = excluded.duration_ms,
+            sanitized_output_summary = excluded.sanitized_output_summary,
+            sanitized_error_summary = excluded.sanitized_error_summary,
+            completion_state = excluded.completion_state,
+            is_collapsed = excluded.is_collapsed
         """
         try withStatement(sql, operation: "persist command") { statement in
-            try bind(event.sessionID.uuidString, at: 1, to: statement)
-            try bind(milliseconds(event.timestamp), at: 2, to: statement)
-            try bind(sanitizer.sanitizeCommand(event.workingDirectory).value, at: 3, to: statement)
-            try bind(command.value, at: 4, to: statement)
-            try bind(event.exitCode.map(Int64.init), at: 5, to: statement)
-            try bind(event.durationMilliseconds.map(Int64.init), at: 6, to: statement)
-            try bind(output.map { String($0.value.prefix(1_000)) }, at: 7, to: statement)
-            try bind(error.map { String($0.value.prefix(1_000)) }, at: 8, to: statement)
-            try bind(event.predictionSource, at: 9, to: statement)
-            try bind(event.predictionAction, at: 10, to: statement)
+            try bind(event.blockID.uuidString, at: 1, to: statement)
+            try bind(event.sessionID.uuidString, at: 2, to: statement)
+            try bind(milliseconds(event.timestamp), at: 3, to: statement)
+            try bind(sanitizer.sanitizeCommand(event.workingDirectory).value, at: 4, to: statement)
+            try bind(command.value, at: 5, to: statement)
+            try bind(event.exitCode.map(Int64.init), at: 6, to: statement)
+            try bind(event.durationMilliseconds.map(Int64.init), at: 7, to: statement)
+            try bind(output.map { String($0.value.prefix(1_000)) }, at: 8, to: statement)
+            try bind(error.map { String($0.value.prefix(1_000)) }, at: 9, to: statement)
+            try bind(event.predictionSource, at: 10, to: statement)
+            try bind(event.predictionAction, at: 11, to: statement)
+            try bind(event.completion.rawValue, at: 12, to: statement)
+            try bind(event.isCollapsed ? Int64(1) : Int64(0), at: 13, to: statement)
             try stepDone(statement, operation: "persist command")
+        }
+    }
+
+    func updateCommandEventCollapsed(_ blockID: UUID, isCollapsed: Bool) async throws {
+        let sql = "UPDATE command_events SET is_collapsed = ? WHERE block_id = ?"
+        try withStatement(sql, operation: "update collapsed state") { statement in
+            try bind(isCollapsed ? Int64(1) : Int64(0), at: 1, to: statement)
+            try bind(blockID.uuidString, at: 2, to: statement)
+            try stepDone(statement, operation: "update collapsed state")
         }
     }
 
@@ -152,7 +182,8 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
         var sessionIDs: [String] = []
         let sessionSQL = """
         SELECT id, workspace_id, repository_id, shell,
-               initial_working_directory, started_at, last_active_at
+               initial_working_directory, started_at, last_active_at,
+               lifecycle, pane_version, schema_version
         FROM runtime_sessions
         WHERE (? IS NULL OR workspace_id = ?)
           AND (? IS NULL OR repository_id = ?)
@@ -176,7 +207,10 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
                     shell: shell,
                     initialWorkingDirectory: directory,
                     startedAt: date(sqlite3_column_int64(statement, 5)),
-                    lastActiveAt: date(sqlite3_column_int64(statement, 6))
+                    lastActiveAt: date(sqlite3_column_int64(statement, 6)),
+                    lifecycle: PersistedSessionLifecycle(rawValue: columnText(statement, 7) ?? "") ?? .active,
+                    paneVersion: columnText(statement, 8) ?? "0.1",
+                    schemaVersion: columnInt(statement, 9) ?? 1
                 ))
             }
         }
@@ -188,9 +222,9 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
         let placeholders = Array(repeating: "?", count: sessionIDs.count).joined(separator: ",")
         var events: [PersistedCommandEvent] = []
         let eventSQL = """
-        SELECT session_id, timestamp, working_directory, command, exit_code,
+        SELECT block_id, session_id, timestamp, working_directory, command, exit_code,
                duration_ms, sanitized_output_summary, sanitized_error_summary,
-               prediction_source, prediction_action
+               prediction_source, prediction_action, completion_state, is_collapsed
         FROM command_events
         WHERE session_id IN (\(placeholders))
         ORDER BY timestamp DESC LIMIT ?
@@ -199,21 +233,26 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
             try bindIdentifiers(sessionIDs, to: statement)
             try bind(Int64(boundedLimit), at: Int32(sessionIDs.count + 1), to: statement)
             while sqlite3_step(statement) == SQLITE_ROW {
-                guard let sessionText = columnText(statement, 0),
+                guard let blockText = columnText(statement, 0),
+                      let blockID = UUID(uuidString: blockText),
+                      let sessionText = columnText(statement, 1),
                       let sessionID = UUID(uuidString: sessionText),
-                      let directory = columnText(statement, 2),
-                      let command = columnText(statement, 3) else { continue }
+                      let directory = columnText(statement, 3),
+                      let command = columnText(statement, 4) else { continue }
                 events.append(PersistedCommandEvent(
+                    blockID: blockID,
                     sessionID: sessionID,
-                    timestamp: date(sqlite3_column_int64(statement, 1)),
+                    timestamp: date(sqlite3_column_int64(statement, 2)),
                     workingDirectory: directory,
                     command: command,
-                    exitCode: columnInt(statement, 4),
-                    durationMilliseconds: columnInt(statement, 5),
-                    sanitizedOutputSummary: columnText(statement, 6),
-                    sanitizedErrorSummary: columnText(statement, 7),
-                    predictionSource: columnText(statement, 8),
-                    predictionAction: columnText(statement, 9)
+                    exitCode: columnInt(statement, 5),
+                    durationMilliseconds: columnInt(statement, 6),
+                    sanitizedOutputSummary: columnText(statement, 7),
+                    sanitizedErrorSummary: columnText(statement, 8),
+                    predictionSource: columnText(statement, 9),
+                    predictionAction: columnText(statement, 10),
+                    completion: PersistedCommandEvent.Completion(rawValue: columnText(statement, 11) ?? "") ?? .completed,
+                    isCollapsed: sqlite3_column_int64(statement, 12) != 0
                 ))
             }
         }
@@ -270,6 +309,52 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
             try execute("DELETE FROM runtime_features")
             try execute("DELETE FROM command_events")
             try execute("DELETE FROM runtime_sessions")
+        }
+    }
+
+    func deleteSessions(excluding sessionID: UUID) async throws {
+        try executeBound(
+            "DELETE FROM runtime_sessions WHERE id != ?",
+            operation: "delete previous sessions",
+            values: [sessionID.uuidString]
+        )
+    }
+
+    func deleteAllCommandEvents() async throws {
+        try execute("DELETE FROM command_events")
+    }
+
+    func clearPersistedOutput() async throws {
+        try execute("UPDATE command_events SET sanitized_output_summary = NULL, sanitized_error_summary = NULL")
+    }
+
+    func updateSessionLifecycle(_ sessionID: UUID, lifecycle: PersistedSessionLifecycle, lastActiveAt: Date) async throws {
+        let sql = """
+        UPDATE runtime_sessions
+        SET lifecycle = ?, last_active_at = ?
+        WHERE id = ?
+        """
+        try withStatement(sql, operation: "update session lifecycle") { statement in
+            try bind(lifecycle.rawValue, at: 1, to: statement)
+            try bind(milliseconds(lastActiveAt), at: 2, to: statement)
+            try bind(sessionID.uuidString, at: 3, to: statement)
+            try stepDone(statement, operation: "update session lifecycle")
+        }
+    }
+
+    func markActiveSessionsInterrupted(excluding sessionID: UUID?) async throws -> [RuntimeSession] {
+        let context = try await loadRecentContext(workspaceID: nil, repositoryID: nil, limit: 0)
+        let active = context.sessions.filter { $0.lifecycle == .active && $0.id != sessionID }
+        for session in active {
+            try await updateSessionLifecycle(session.id, lifecycle: .interrupted, lastActiveAt: session.lastActiveAt)
+        }
+        return active.map { session in
+            RuntimeSession(
+                id: session.id, workspaceID: session.workspaceID, repositoryID: session.repositoryID,
+                shell: session.shell, initialWorkingDirectory: session.initialWorkingDirectory,
+                startedAt: session.startedAt, lastActiveAt: session.lastActiveAt, lifecycle: .interrupted,
+                paneVersion: session.paneVersion, schemaVersion: session.schemaVersion
+            )
         }
     }
 
@@ -335,7 +420,31 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
                 code: sqlite3_errcode(database)
             )
         }
-        guard sqlite3_column_int64(statement, 0) == 0 else { return }
+        let currentVersion = sqlite3_column_int64(statement, 0)
+        guard currentVersion <= 3 else { return }
+        guard currentVersion == 0 else {
+            try run("BEGIN IMMEDIATE", operation: "begin migration")
+            do {
+                if currentVersion == 1 {
+                    try run("ALTER TABLE runtime_sessions ADD COLUMN lifecycle TEXT NOT NULL DEFAULT 'active'", operation: "add session lifecycle")
+                    try run("ALTER TABLE runtime_sessions ADD COLUMN pane_version TEXT NOT NULL DEFAULT '0.1'", operation: "add pane version")
+                    try run("ALTER TABLE runtime_sessions ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1", operation: "add local schema version")
+                }
+                if currentVersion <= 2 {
+                    try run("ALTER TABLE command_events ADD COLUMN block_id TEXT", operation: "add block identifier")
+                    try run("UPDATE command_events SET block_id = lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))),2) || '-' || substr('89ab',abs(random()) % 4 + 1,1) || substr(lower(hex(randomblob(2))),2) || '-' || lower(hex(randomblob(6))) WHERE block_id IS NULL", operation: "backfill block identifiers")
+                    try run("ALTER TABLE command_events ADD COLUMN completion_state TEXT NOT NULL DEFAULT 'completed'", operation: "add completion state")
+                    try run("ALTER TABLE command_events ADD COLUMN is_collapsed INTEGER NOT NULL DEFAULT 0", operation: "add collapsed state")
+                    try run("CREATE UNIQUE INDEX idx_command_events_block ON command_events(block_id)", operation: "index block identifiers")
+                }
+                try run("PRAGMA user_version = 3", operation: "set schema version")
+                try run("COMMIT", operation: "commit migration")
+            } catch {
+                try? run("ROLLBACK", operation: "rollback migration")
+                throw error
+            }
+            return
+        }
 
         try run("BEGIN IMMEDIATE", operation: "begin migration")
         do {
@@ -347,12 +456,16 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
                 shell TEXT NOT NULL,
                 initial_working_directory TEXT NOT NULL,
                 started_at INTEGER NOT NULL,
-                last_active_at INTEGER NOT NULL
+                last_active_at INTEGER NOT NULL,
+                lifecycle TEXT NOT NULL DEFAULT 'active',
+                pane_version TEXT NOT NULL DEFAULT '0.1',
+                schema_version INTEGER NOT NULL DEFAULT 1
             )
             """, operation: "create sessions table")
             try run("""
             CREATE TABLE command_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                block_id TEXT NOT NULL UNIQUE,
                 session_id TEXT NOT NULL,
                 timestamp INTEGER NOT NULL,
                 working_directory TEXT NOT NULL,
@@ -363,6 +476,8 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
                 sanitized_error_summary TEXT,
                 prediction_source TEXT,
                 prediction_action TEXT,
+                completion_state TEXT NOT NULL DEFAULT 'completed',
+                is_collapsed INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY(session_id) REFERENCES runtime_sessions(id) ON DELETE CASCADE
             )
             """, operation: "create command-events table")
@@ -379,11 +494,46 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
             )
             """, operation: "create runtime-features table")
             try run("CREATE INDEX idx_runtime_features_session_time ON runtime_features(session_id, timestamp DESC)", operation: "index runtime features")
-            try run("PRAGMA user_version = 1", operation: "set schema version")
+            try run("PRAGMA user_version = 3", operation: "set schema version")
             try run("COMMIT", operation: "commit migration")
         } catch {
             try? run("ROLLBACK", operation: "rollback migration")
             throw error
+        }
+    }
+
+    private static func backUpBeforeMigrationIfNeeded(
+        _ database: OpaquePointer,
+        databaseURL: URL
+    ) throws {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, "PRAGMA user_version", -1, &statement, nil) == SQLITE_OK,
+              let statement else { throw RuntimeStateStoreError.databaseFailure(operation: "read schema version", code: sqlite3_errcode(database)) }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else { return }
+        let version = sqlite3_column_int64(statement, 0)
+        guard version > 0, version < 3 else { return }
+
+        let backupURL = databaseURL.deletingPathExtension()
+            .appendingPathExtension("v\(version)-\(Int(Date().timeIntervalSince1970)).backup.sqlite")
+        var backupDatabase: OpaquePointer?
+        guard sqlite3_open_v2(
+            backupURL.path,
+            &backupDatabase,
+            SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE,
+            nil
+        ) == SQLITE_OK, let backupDatabase else {
+            if let backupDatabase { sqlite3_close(backupDatabase) }
+            throw RuntimeStateStoreError.openFailed
+        }
+        defer { sqlite3_close(backupDatabase) }
+        guard let backup = sqlite3_backup_init(backupDatabase, "main", database, "main") else {
+            throw RuntimeStateStoreError.databaseFailure(operation: "create migration backup", code: sqlite3_errcode(backupDatabase))
+        }
+        let result = sqlite3_backup_step(backup, -1)
+        sqlite3_backup_finish(backup)
+        guard result == SQLITE_DONE else {
+            throw RuntimeStateStoreError.databaseFailure(operation: "write migration backup", code: result)
         }
     }
 

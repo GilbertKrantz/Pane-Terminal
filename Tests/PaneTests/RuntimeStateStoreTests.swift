@@ -350,6 +350,105 @@ final class RuntimeStateStoreTests: XCTestCase {
         XCTAssertEqual(remaining.sessions, [second])
     }
 
+
+    func testSessionLifecycleDefaultsToActiveAndCanCloseCleanly() async throws {
+        let store = InMemoryRuntimeStateStore()
+        let session = RuntimeSession(
+            id: UUID(), workspaceID: nil, repositoryID: nil,
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp",
+            startedAt: Date(timeIntervalSince1970: 10),
+            lastActiveAt: Date(timeIntervalSince1970: 20)
+        )
+        try await store.startSession(session)
+
+        try await store.updateSessionLifecycle(
+            session.id,
+            lifecycle: .closedCleanly,
+            lastActiveAt: Date(timeIntervalSince1970: 30)
+        )
+
+        let context = try await store.loadRecentContext(workspaceID: nil, repositoryID: nil, limit: 10)
+        XCTAssertEqual(context.sessions.first?.lifecycle, .closedCleanly)
+        XCTAssertEqual(context.sessions.first?.lastActiveAt, Date(timeIntervalSince1970: 30))
+        XCTAssertEqual(context.sessions.first?.schemaVersion, 3)
+    }
+
+    func testActiveSessionsAreMarkedInterruptedOnRecovery() async throws {
+        let store = InMemoryRuntimeStateStore()
+        let active = RuntimeSession(
+            id: UUID(), workspaceID: "workspace-a", repositoryID: nil,
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp/project",
+            startedAt: Date(timeIntervalSince1970: 1),
+            lastActiveAt: Date(timeIntervalSince1970: 2)
+        )
+        let closed = RuntimeSession(
+            id: UUID(), workspaceID: "workspace-a", repositoryID: nil,
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp/project",
+            startedAt: Date(timeIntervalSince1970: 3),
+            lastActiveAt: Date(timeIntervalSince1970: 4),
+            lifecycle: .closedCleanly
+        )
+        try await store.startSession(active)
+        try await store.startSession(closed)
+
+        let interrupted = try await store.markActiveSessionsInterrupted(excluding: nil)
+
+        XCTAssertEqual(interrupted.map(\.id), [active.id])
+        let context = try await store.loadRecentContext(workspaceID: "workspace-a", repositoryID: nil, limit: 10)
+        XCTAssertEqual(context.sessions.first { $0.id == active.id }?.lifecycle, .interrupted)
+        XCTAssertEqual(context.sessions.first { $0.id == closed.id }?.lifecycle, .closedCleanly)
+    }
+
+    func testCollapsedStateUpdatePersistsForRestoration() async throws {
+        let store = InMemoryRuntimeStateStore()
+        let session = RuntimeSession(
+            id: UUID(), workspaceID: nil, repositoryID: nil,
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp",
+            startedAt: Date(), lastActiveAt: Date()
+        )
+        let blockID = UUID()
+        try await store.startSession(session)
+        try await store.persistCommandEvent(PersistedCommandEvent(
+            blockID: blockID, sessionID: session.id, timestamp: Date(),
+            workingDirectory: "/tmp", command: "false", exitCode: 1,
+            durationMilliseconds: 10, sanitizedOutputSummary: nil,
+            sanitizedErrorSummary: "failed", predictionSource: nil,
+            predictionAction: nil, completion: .completed
+        ))
+
+        try await store.updateCommandEventCollapsed(blockID, isCollapsed: true)
+
+        let context = try await store.loadRecentContext(workspaceID: nil, repositoryID: nil, limit: 10)
+        XCTAssertEqual(context.commandEvents.first?.blockID, blockID)
+        XCTAssertTrue(context.commandEvents.first?.isCollapsed == true)
+    }
+
+    func testCorruptDatabaseIsMovedAsideWithoutStartupLoop() async throws {
+        let directory = temporaryDirectory(named: "CorruptionRecovery")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databaseURL = directory.appendingPathComponent("runtime.sqlite")
+        try Data("not a sqlite database".utf8).write(to: databaseURL)
+        let controller = RuntimeStateController(
+            databaseURL: databaseURL,
+            configuration: RuntimeStateConfiguration(
+                persistenceEnabled: true,
+                predictionHistoryEnabled: true,
+                outputSummariesEnabled: false,
+                filePathCollectionEnabled: true
+            )
+        )
+        let result = await controller.startSession(RuntimeSession(
+            id: UUID(), workspaceID: "/tmp", repositoryID: nil,
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp",
+            startedAt: Date(), lastActiveAt: Date()
+        ))
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: databaseURL.path))
+        XCTAssertTrue(result.diagnostic?.contains("recovery file") == true)
+        let recoveryFile = await controller.recoveryFile()
+        XCTAssertNotNil(recoveryFile)
+    }
+
     private func temporaryDirectory(named name: String) -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("Pane-\(name)-\(UUID().uuidString)")

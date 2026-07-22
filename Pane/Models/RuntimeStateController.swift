@@ -21,6 +21,8 @@ actor RuntimeStateController {
     private var durableStore: SQLiteRuntimeStateStore?
     private var configuration: RuntimeStateConfiguration
     private var currentSession: RuntimeSession?
+    private var recoveryDiagnostic: String?
+    private var recoveryFileURL: URL?
 
     init(
         databaseURL: URL,
@@ -34,7 +36,7 @@ actor RuntimeStateController {
 
     func startSession(_ session: RuntimeSession, restoreLimit: Int = 200) async -> RuntimeStateOperationResult {
         currentSession = storageSafeSession(session)
-        guard configuration.predictionHistoryEnabled, let currentSession else {
+        guard let currentSession else {
             return RuntimeStateOperationResult(restoredContext: nil, diagnostic: nil)
         }
 
@@ -60,14 +62,18 @@ actor RuntimeStateController {
 
         do {
             let store = try durableStateStore()
-            try await store.startSession(currentSession)
-            try await store.applyRetentionPolicy()
-            let context = try await store.loadRecentContext(
-                workspaceID: currentSession.workspaceID,
-                repositoryID: currentSession.repositoryID,
+            _ = try await store.markActiveSessionsInterrupted(excluding: currentSession.id)
+            var context = try await store.loadRecentContext(
+                workspaceID: nil,
+                repositoryID: nil,
                 limit: restoreLimit
             )
-            return RuntimeStateOperationResult(restoredContext: context, diagnostic: nil)
+            if !configuration.predictionHistoryEnabled {
+                context = PersistedRuntimeContext(sessions: context.sessions, commandEvents: [], features: [])
+            }
+            try await store.startSession(currentSession)
+            try await store.applyRetentionPolicy()
+            return RuntimeStateOperationResult(restoredContext: context, diagnostic: recoveryDiagnostic)
         } catch {
             let fallback = try? await ephemeralStore.loadRecentContext(
                 workspaceID: currentSession.workspaceID,
@@ -101,6 +107,42 @@ actor RuntimeStateController {
             return nil
         } catch {
             return "Prediction history could not be saved; Pane is continuing with memory-only history."
+        }
+    }
+
+    func updateCurrentSessionActivity(workingDirectory: String, at date: Date = Date()) async -> String? {
+        guard let currentSession else { return nil }
+        let updated = storageSafeSession(RuntimeSession(
+            id: currentSession.id,
+            workspaceID: Self.workspaceIdentifier(for: workingDirectory),
+            repositoryID: currentSession.repositoryID,
+            shell: currentSession.shell,
+            initialWorkingDirectory: workingDirectory,
+            startedAt: currentSession.startedAt,
+            lastActiveAt: date,
+            lifecycle: .active,
+            paneVersion: currentSession.paneVersion,
+            schemaVersion: currentSession.schemaVersion
+        ))
+        self.currentSession = updated
+        do {
+            try await ephemeralStore.startSession(updated)
+            if configuration.persistenceEnabled { try await durableStateStore().startSession(updated) }
+            return nil
+        } catch {
+            return "Session activity could not be saved; Pane is continuing with memory-only context."
+        }
+    }
+
+    func updateCommandEventCollapsed(_ blockID: UUID, isCollapsed: Bool) async -> String? {
+        do {
+            try await ephemeralStore.updateCommandEventCollapsed(blockID, isCollapsed: isCollapsed)
+            if configuration.persistenceEnabled {
+                try await durableStateStore().updateCommandEventCollapsed(blockID, isCollapsed: isCollapsed)
+            }
+            return nil
+        } catch {
+            return "Collapsed block state could not be saved."
         }
     }
 
@@ -162,6 +204,41 @@ actor RuntimeStateController {
         }
     }
 
+    func closeCurrentSessionCleanly(at date: Date = Date()) async -> String? {
+        guard let currentSession else { return nil }
+        do {
+            try await ephemeralStore.updateSessionLifecycle(currentSession.id, lifecycle: .closedCleanly, lastActiveAt: date)
+            if let store = try durableStateStoreIfPresentOrEnabled() {
+                try await store.updateSessionLifecycle(currentSession.id, lifecycle: .closedCleanly, lastActiveAt: date)
+            }
+            self.currentSession = RuntimeSession(
+                id: currentSession.id,
+                workspaceID: currentSession.workspaceID,
+                repositoryID: currentSession.repositoryID,
+                shell: currentSession.shell,
+                initialWorkingDirectory: currentSession.initialWorkingDirectory,
+                startedAt: currentSession.startedAt,
+                lastActiveAt: date,
+                lifecycle: .closedCleanly,
+                paneVersion: currentSession.paneVersion,
+                schemaVersion: currentSession.schemaVersion
+            )
+            return nil
+        } catch {
+            return "Session shutdown state could not be saved."
+        }
+    }
+
+    func recoverInterruptedSessions(excludingCurrentSession: Bool = true) async -> [RuntimeSession] {
+        let excluded = excludingCurrentSession ? currentSession?.id : nil
+        var recovered = (try? await ephemeralStore.markActiveSessionsInterrupted(excluding: excluded)) ?? []
+        if let store = try? durableStateStoreIfPresentOrEnabled(),
+           let durable = try? await store.markActiveSessionsInterrupted(excluding: excluded) {
+            recovered.append(contentsOf: durable)
+        }
+        return recovered.sorted { $0.lastActiveAt > $1.lastActiveAt }
+    }
+
     func deleteAllState() async -> String? {
         do {
             try await ephemeralStore.deleteAllState()
@@ -180,11 +257,76 @@ actor RuntimeStateController {
         }
     }
 
+    func deletePreviousSessions() async -> String? {
+        guard let currentSession else { return nil }
+        do {
+            try await ephemeralStore.deleteSessions(excluding: currentSession.id)
+            if let store = try durableStateStoreIfPresentOrEnabled() {
+                try await store.deleteSessions(excluding: currentSession.id)
+            }
+            return nil
+        } catch {
+            return "Previous sessions could not be cleared completely."
+        }
+    }
+
+    func deleteExactCommandHistory() async -> String? {
+        do {
+            try await ephemeralStore.deleteAllCommandEvents()
+            if let store = try durableStateStoreIfPresentOrEnabled() { try await store.deleteAllCommandEvents() }
+            return nil
+        } catch {
+            return "Exact command history could not be cleared completely."
+        }
+    }
+
+    func clearPersistedBlockOutput() async -> String? {
+        do {
+            try await ephemeralStore.clearPersistedOutput()
+            if let store = try durableStateStoreIfPresentOrEnabled() { try await store.clearPersistedOutput() }
+            return nil
+        } catch {
+            return "Persisted block output could not be cleared completely."
+        }
+    }
+
+    func localDataDirectory() -> URL {
+        databaseURL.deletingLastPathComponent()
+    }
+
+    func recoveryFile() -> URL? { recoveryFileURL }
+
+    func clearRecoveryFile() -> String? {
+        guard let recoveryFileURL else { return nil }
+        do {
+            try FileManager.default.removeItem(at: recoveryFileURL)
+            self.recoveryFileURL = nil
+            recoveryDiagnostic = nil
+            return nil
+        } catch {
+            return "The local recovery file could not be cleared."
+        }
+    }
+
     private func durableStateStore() throws -> SQLiteRuntimeStateStore {
         if let durableStore { return durableStore }
-        let store = try SQLiteRuntimeStateStore(databaseURL: databaseURL)
-        durableStore = store
-        return store
+        do {
+            let store = try SQLiteRuntimeStateStore(databaseURL: databaseURL)
+            durableStore = store
+            return store
+        } catch {
+            guard FileManager.default.fileExists(atPath: databaseURL.path) else { throw error }
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyyMMdd-HHmmss"
+            let recoveryURL = databaseURL.deletingLastPathComponent()
+                .appendingPathComponent("runtime-state-recovery-\(formatter.string(from: Date())).sqlite")
+            try FileManager.default.moveItem(at: databaseURL, to: recoveryURL)
+            let store = try SQLiteRuntimeStateStore(databaseURL: databaseURL)
+            durableStore = store
+            recoveryDiagnostic = "Pane recovered from an unreadable local database. The recovery file remains local at \(recoveryURL.lastPathComponent)."
+            recoveryFileURL = recoveryURL
+            return store
+        }
     }
 
     private func durableStateStoreIfPresentOrEnabled() throws -> SQLiteRuntimeStateStore? {
@@ -204,7 +346,10 @@ actor RuntimeStateController {
                 shell: session.shell,
                 initialWorkingDirectory: "",
                 startedAt: session.startedAt,
-                lastActiveAt: session.lastActiveAt
+                lastActiveAt: session.lastActiveAt,
+                lifecycle: session.lifecycle,
+                paneVersion: session.paneVersion,
+                schemaVersion: session.schemaVersion
             )
         }
         return session
@@ -212,6 +357,7 @@ actor RuntimeStateController {
 
     private func storageSafeEvent(_ event: PersistedCommandEvent) -> PersistedCommandEvent {
         PersistedCommandEvent(
+            blockID: event.blockID,
             sessionID: event.sessionID,
             timestamp: event.timestamp,
             workingDirectory: configuration.filePathCollectionEnabled ? event.workingDirectory : "",
@@ -225,7 +371,13 @@ actor RuntimeStateController {
                 ? event.sanitizedErrorSummary
                 : nil,
             predictionSource: event.predictionSource,
-            predictionAction: event.predictionAction
+            predictionAction: event.predictionAction,
+            completion: event.completion,
+            isCollapsed: event.isCollapsed
         )
+    }
+
+    nonisolated private static func workspaceIdentifier(for directory: String) -> String {
+        URL(fileURLWithPath: directory, isDirectory: true).standardizedFileURL.path
     }
 }

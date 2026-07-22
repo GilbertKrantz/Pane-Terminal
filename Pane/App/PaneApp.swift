@@ -29,6 +29,11 @@ struct PaneApp: App {
         .windowToolbarStyle(.unifiedCompact)
         .commands {
             TerminalCommands(session: session)
+            CommandGroup(after: .help) {
+                Button("Pane Onboarding") {
+                    NotificationCenter.default.post(name: .showPaneOnboarding, object: nil)
+                }
+            }
         }
 
         Settings {
@@ -56,6 +61,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var terminalControlKeyMonitor: Any?
     private var windowIconObserver: NSObjectProtocol?
     private var applicationIcon: NSImage?
+    private var isFinalizingTermination = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         terminalControlKeyMonitor = NSEvent.addLocalMonitorForEvents(
@@ -116,6 +122,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !isFinalizingTermination, let session = Self.sharedSession else { return .terminateNow }
+        isFinalizingTermination = true
+        Task { @MainActor in
+            await session.finalizeApplicationExit()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         if let terminalControlKeyMonitor {
             NSEvent.removeMonitor(terminalControlKeyMonitor)
@@ -125,7 +141,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             NotificationCenter.default.removeObserver(windowIconObserver)
             self.windowIconObserver = nil
         }
-        Self.sharedSession?.terminateForApplicationExit()
+        if !isFinalizingTermination {
+            Self.sharedSession?.terminateForApplicationExit()
+        }
     }
 
     private func applyIcon(to windows: [NSWindow]) {
@@ -141,19 +159,29 @@ private struct TerminalCommands: Commands {
 
     var body: some Commands {
         CommandMenu("Terminal") {
-            Button(session.mode == .blocks ? "Enter Terminal Mode" : "Return to Blocks Mode") {
-                session.toggleMode()
+            Button("Focus Composer") {
+                session.focusComposer()
             }
-            .keyboardShortcut("i", modifiers: [.command, .shift])
+            .keyboardShortcut("l", modifiers: [.command])
 
-            Divider()
-
-            Button("Direct Input") {
-                session.enterDirectInput()
+            Button("Focus Direct Terminal") {
+                session.focusDirectTerminal()
             }
             .keyboardShortcut("d", modifiers: [.command, .shift])
 
-            Button(session.isSecureInputActive ? "Exit Secure Input" : "Enter Secure Input") {
+            Button("Open Full Terminal") {
+                session.setMode(.terminal)
+            }
+            .keyboardShortcut("i", modifiers: [.command, .shift])
+
+            Button("Return to Blocks") {
+                session.focusComposer()
+            }
+            .disabled(session.isSecureInputActive)
+
+            Divider()
+
+            Button(session.isSecureInputActive ? "Exit Manual Secure Input" : "Enter Secure Input") {
                 if session.isSecureInputActive {
                     session.exitSecureInput()
                 } else {
@@ -210,9 +238,17 @@ private struct TerminalCommands: Commands {
             .keyboardShortcut("k", modifiers: [.command])
 
             Button("Restart Shell") {
-                session.restartShell()
+                session.requestRestartShell()
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])
+
+            Button("Copy Local Diagnostics") {
+                session.copyLocalDiagnostics()
+            }
+
+            Button("Copy Diagnostics with Sanitized Command Context") {
+                session.copyLocalDiagnostics(includeSanitizedCommandContext: true)
+            }
         }
     }
 }

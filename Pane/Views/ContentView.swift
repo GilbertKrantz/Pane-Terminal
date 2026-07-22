@@ -4,6 +4,8 @@ import AppKit
 struct ContentView: View {
     @ObservedObject var session: TerminalSession
     @State private var isTerminalActionsPresented = false
+    @State private var isOnboardingPresented = false
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var modeBinding: Binding<InputMode> {
@@ -42,6 +44,22 @@ struct ContentView: View {
         .animation(nil, value: session.mode)
         .task {
             session.ensureAuthoritativeTerminalIsRunning()
+            if !hasCompletedOnboarding { isOnboardingPresented = true }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showPaneOnboarding)) { _ in
+            isOnboardingPresented = true
+        }
+        .sheet(isPresented: $isOnboardingPresented) {
+            PaneOnboardingView(session: session) {
+                hasCompletedOnboarding = true
+                isOnboardingPresented = false
+            }
+        }
+        .alert("Restart the shell?", isPresented: $session.isRestartConfirmationPresented) {
+            Button("Cancel", role: .cancel) {}
+            Button("Restart Shell", role: .destructive) { session.confirmRestartShell() }
+        } message: {
+            Text("The foreground process will be terminated. Completed blocks remain, and Pane starts a fresh shell in the last safe directory.")
         }
         .toolbarBackground(PaneTheme.contentSurface, for: .windowToolbar)
         .toolbarBackground(.visible, for: .windowToolbar)
@@ -325,7 +343,10 @@ private struct TerminalActionsMenu: View {
                 session.sendInterrupt()
             }
             actionButton("Restart Shell", systemImage: "arrow.clockwise") {
-                session.restartShell()
+                session.requestRestartShell()
+            }
+            actionButton("Copy Local Diagnostics", systemImage: "stethoscope") {
+                session.copyLocalDiagnostics()
             }
         }
         .padding(5)
@@ -351,6 +372,57 @@ private struct TerminalActionsMenu: View {
             dismiss()
         }
     }
+}
+
+private struct PaneOnboardingView: View {
+    @ObservedObject var session: TerminalSession
+    let dismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Welcome to Pane").font(.largeTitle.bold())
+                Text("A local-first, block-native terminal optimized for zsh. No account or network access is required.")
+                    .foregroundStyle(.secondary)
+            }
+            concept("1", "Blocks", "Run normal commands from the composer. Commands and allowed sanitized excerpts become searchable, collapsible local blocks.", "rectangle.stack")
+            concept("2", "Real terminal interaction", "Interactive programs use one authoritative SwiftTerm terminal and the same persistent PTY.", "terminal")
+            concept("3", "Escape hatch", "Use Direct Input or Full Terminal whenever automatic interaction detection is wrong.", "keyboard")
+
+            HStack {
+                Menu("Try a command") {
+                    Button("pwd") { session.commandDraft = "pwd" }
+                    Button("ls") { session.commandDraft = "ls" }
+                    Button("printf Hello from Pane") { session.commandDraft = "printf \"Hello from Pane\\n\"" }
+                    Divider()
+                    Button("python3 (interactive)") { session.commandDraft = "python3" }
+                }
+                Text("Commands are placed in the composer and never run without your action.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Get Started", action: dismiss).keyboardShortcut(.defaultAction)
+            }
+
+            Text("History is stored only in ~/Library/Application Support/Pane when enabled. Open Settings to inspect categories or clear Pane data.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(28)
+        .frame(width: 620)
+    }
+
+    private func concept(_ number: String, _ title: String, _ detail: String, _ symbol: String) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: symbol).font(.title2).frame(width: 34)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(number). \(title)").font(.headline)
+                Text(detail).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+extension Notification.Name {
+    static let showPaneOnboarding = Notification.Name("Pane.showOnboarding")
 }
 
 private struct TerminalActionButton: View {

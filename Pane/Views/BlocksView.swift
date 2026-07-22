@@ -3,8 +3,12 @@ import SwiftUI
 struct BlocksView: View {
     @ObservedObject var session: TerminalSession
 
+    private enum TimelineAnchor: Hashable {
+        case bottom
+    }
+
     private var finalizedBlocks: [CommandBlock] {
-        session.blocks.filter { block in
+        session.visibleBlocks.filter { block in
             switch block.state {
             case .completed, .interrupted:
                 return true
@@ -19,43 +23,145 @@ struct BlocksView: View {
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 4) {
-                    ForEach(finalizedBlocks) { block in
-                        CommandBlockView(
-                            block: block,
-                            isSelected: session.selectedBlockID == block.id,
-                            session: session
-                        )
-                        .id(block.id)
+        VStack(spacing: 0) {
+            BlockSearchBar(session: session, matchCount: finalizedBlocks.count)
+            if let restartedAt = session.lastShellRestartAt {
+                let restartDirectory = session.currentDirectory ?? "home directory"
+                Label(
+                    "Shell restarted at \(restartedAt.formatted(date: .omitted, time: .shortened)) · fresh shell in \(restartDirectory)",
+                    systemImage: "arrow.clockwise"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, PaneMetrics.blockOuterInset + PaneMetrics.blockInnerInset)
+                .padding(.vertical, 6)
+                .background(PaneTheme.subtleControlFill)
+            }
+            Divider().overlay(PaneTheme.separator.opacity(0.5))
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 4) {
+                        ForEach(finalizedBlocks) { block in
+                            CommandBlockView(
+                                block: block,
+                                isSelected: session.selectedBlockID == block.id,
+                                session: session
+                            )
+                            .id(block.id)
+
+                            if block.id == lastVisibleRestoredBlockID,
+                               let boundary = session.sessionBoundary {
+                                SessionBoundaryView(boundary: boundary)
+                            }
+                        }
+
+                        Color.clear
+                            .frame(height: 8)
+                            .id(TimelineAnchor.bottom)
                     }
+                    .padding(.horizontal, PaneMetrics.blockOuterInset)
+                    .padding(.top, 6)
                 }
-                .padding(.horizontal, PaneMetrics.blockOuterInset)
-                .padding(.top, 6)
-                .padding(.bottom, 8)
-            }
-            // Keep the newest command next to the pinned composer. When the
-            // timeline exceeds the viewport, older blocks overflow upward.
-            .defaultScrollAnchor(.bottom)
-            .background(PaneTheme.contentSurface)
-            .onChange(of: session.selectedBlockID) { _, selectedID in
-                guard let selectedID else { return }
-                withAnimation(.easeOut(duration: 0.16)) {
-                    proxy.scrollTo(selectedID, anchor: .center)
-                }
-            }
-            .onChange(of: lastFinalizedBlockID) { _, blockID in
-                guard let blockID else { return }
-                // Defer until LazyVStack has materialized the newly finalized
-                // row. Scrolling does not mutate observable session state.
-                DispatchQueue.main.async {
+                .defaultScrollAnchor(.bottom)
+                .background(PaneTheme.contentSurface)
+                .onChange(of: session.selectedBlockID) { _, selectedID in
+                    guard let selectedID else { return }
                     withAnimation(.easeOut(duration: 0.16)) {
-                        proxy.scrollTo(blockID, anchor: .bottom)
+                        proxy.scrollTo(selectedID, anchor: .center)
                     }
+                }
+                .onChange(of: lastFinalizedBlockID) { _, blockID in
+                    guard blockID != nil else { return }
+                    scrollToTimelineBottom(using: proxy)
                 }
             }
         }
+    }
+
+    private func scrollToTimelineBottom(using proxy: ScrollViewProxy) {
+        // The finalized AppKit output view receives its proposed width during
+        // the next layout pass. Scroll to the end marker, then pin it again on
+        // the following pass so newly wrapped output cannot leave the viewport
+        // slightly above the true bottom.
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.16)) {
+                proxy.scrollTo(TimelineAnchor.bottom, anchor: .bottom)
+            }
+            DispatchQueue.main.async {
+                proxy.scrollTo(TimelineAnchor.bottom, anchor: .bottom)
+            }
+        }
+    }
+
+    private var lastVisibleRestoredBlockID: UUID? {
+        finalizedBlocks.last(where: { session.restoredBlockIDs.contains($0.id) })?.id
+    }
+}
+
+private struct BlockSearchBar: View {
+    @ObservedObject var session: TerminalSession
+    let matchCount: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Search commands, output, directories, and status", text: $session.blockSearchText)
+                .textFieldStyle(.plain)
+            Picker("Filter", selection: $session.blockSearchFilter) {
+                ForEach(BlockSearchFilter.allCases, id: \.self) { filter in
+                    Text(filter.rawValue).tag(filter)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 112)
+            Text("\(matchCount)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            Button { session.selectPreviousSearchMatch() } label: { Image(systemName: "chevron.up") }
+                .buttonStyle(.borderless).help("Previous match")
+            Button { session.selectNextSearchMatch() } label: { Image(systemName: "chevron.down") }
+                .buttonStyle(.borderless).help("Next match")
+            Menu {
+                Button("Collapse All Completed") { session.setAllCompletedBlocksCollapsed(true) }
+                Button("Expand All Matches") {
+                    for block in session.visibleBlocks where block.isCollapsed {
+                        session.toggleBlockCollapsed(id: block.id)
+                    }
+                }
+            } label: { Image(systemName: "rectangle.compress.vertical") }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+        }
+        .controlSize(.small)
+        .padding(.horizontal, PaneMetrics.blockOuterInset + PaneMetrics.blockInnerInset)
+        .padding(.vertical, 7)
+        .background(PaneTheme.contentSurface)
+    }
+}
+
+private struct SessionBoundaryView: View {
+    let boundary: TerminalSession.SessionBoundary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label(boundary.lifecycle == .interrupted ? "Previous session was interrupted" : "Previous session", systemImage: boundary.lifecycle == .interrupted ? "exclamationmark.triangle" : "clock.arrow.circlepath")
+                .font(.caption.weight(.semibold))
+            Text("Last active \(boundary.lastActiveAt.formatted(date: .abbreviated, time: .shortened))")
+                .font(.caption).foregroundStyle(.secondary)
+            Text(boundary.usedDirectoryFallback
+                ? "Pane restarted with a fresh shell in the home directory because the previous directory was unavailable."
+                : "Pane restarted with a fresh shell in \(displayDirectory).")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(PaneTheme.subtleControlFill, in: RoundedRectangle(cornerRadius: 9))
+        .accessibilityElement(children: .combine)
+    }
+
+    private var displayDirectory: String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return boundary.restoredDirectory == home ? "~" : boundary.restoredDirectory.replacingOccurrences(of: home + "/", with: "~/")
     }
 }
 

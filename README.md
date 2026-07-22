@@ -152,11 +152,11 @@ Terminal text, block text, and composer input share the same optical 24-point le
 | **Tab / Shift-Tab** | Stage a lone suggestion, or select the next / previous candidate when several are visible |
 | **Escape** | Dismiss visible autocomplete suggestions; otherwise use normal text behavior |
 | **Up / Down** | Navigate session command history while no command is active |
-| **Command-Shift-I** | Toggle Blocks / Terminal mode |
+| **Command-Shift-I** | Open Full Terminal mode |
 | **Command-Shift-D** | Focus Direct Input, embedded in an active block when available |
 | **Command-Shift-S** | Enter or exit manual Secure Input |
 | **Command-Up / Command-Down** | Select the previous / next block |
-| **Command-Return** | Rerun the selected block |
+| **Command-Return** | Place the selected safe command in the composer |
 | **Command-E** | Put the selected command in the composer |
 | **Control-C** | Interrupt the active Blocks command, or send `ETX` directly in Terminal mode |
 | **Control-D** | Send `EOT` to the active Blocks command, or directly in Terminal mode |
@@ -179,7 +179,9 @@ Autocomplete appears only while the shell is idle and the caret follows a non-wh
 
 The persistent PTY shell remains authoritative. Pane creates a private Unix-domain socket for each shell generation and sends completion requests over that socket, never through the main PTY. A regular `zle -F` handler in the warm shell accepts a bounded request and forks a short-lived `zpty` completion worker from that process. The worker therefore starts with the active shell's current directory, parameters and environment, aliases, functions, options, and loaded completion definitions instead of reconstructing session state in a cold sidecar shell. It runs zsh's own completion system and returns bounded, encoded candidates over the socket without changing the visible command line, history, terminal buffer, or PTY stream.
 
-Completed commands are sanitized and written asynchronously to `~/Library/Application Support/Pane/runtime-state.sqlite`. On launch, Pane restores at most 200 relevant commands into local prediction history; it never restores blocks, terminal buffers, drafts, secure-input state, or automatically executes a command. Open **Pane > Settings** to disable persistence or history, disable summaries or working-directory paths, inspect stored categories, and clear the current session, current workspace, or all prediction history.
+Eligible commands and block metadata are written asynchronously to `~/Library/Application Support/Pane/runtime-state.sqlite`. Pane inserts a safe pending record when a command starts and atomically finalizes it with completion state, exit status, duration, collapsed state, and an optional sanitized output excerpt. On launch, Pane marks a still-active prior session interrupted, restores up to 200 durable blocks behind an explicit session boundary, validates the previous directory, and starts a fresh shell there or falls back to the home directory. It never resurrects a PTY, foreground process, alternate-screen buffer, draft, secure input, or raw terminal byte stream, and never automatically executes a restored command.
+
+The block header provides local partial-match search across commands, sanitized output, directory display names, and status, plus failed/interrupted filters and next/previous navigation. Completed safe commands support Edit and Rerun, explicit Run Again, and Run in Original Directory. Sensitive or redacted commands are transient and cannot become durable rerunnable history.
 
 Capture has a short deadline and fixed request, candidate, and response-size caps so a slow or excessive completion definition cannot hold the app indefinitely. A failed, unavailable, malformed, or timed-out capture falls back to Pane's bounded local history, command, executable, and filesystem suggestions.
 
@@ -215,7 +217,7 @@ Oh My Zsh is not bundled or installed. If it is configured in `.zshrc`, its envi
 - SwiftTerm `LocalProcess` uses `forkpty`; ordinary pipes are not used.
 - Window changes update the emulator and PTY using `TIOCSWINSZ`, only when dimensions actually change.
 - Shell exit interrupts unfinished blocks, restores the normal terminal buffer, and exposes **Restart Shell**.
-- Restart terminates the old shell before starting a new `/bin/zsh -l -i` session.
+- Restart warns for a foreground process, terminates the old shell before starting a new `/bin/zsh -l -i` session, preserves completed blocks, and shows a restart boundary.
 - Closing the final window quits the app; application termination stops the shell and closes PTY I/O without publishing teardown state through a disappearing SwiftUI view.
 - `TERM` defaults to `xterm-256color`, `COLORTERM` to `truecolor`, and `TERM_PROGRAM` to `Pane`.
 
@@ -230,12 +232,12 @@ Terminal delegate state is equality-guarded. Buffer-change notifications, visibi
 - Foreground-process recognition is intentionally bounded, and a program can retain canonical/echo input without using a recognized name. Manually switch to Terminal mode when an interactive program exposes none of Pane's signals.
 - Secure-input detection is driven primarily by PTY ECHO state and therefore follows programs that correctly disable echo. A misbehaving program that reads a secret while leaving ECHO enabled provides no authoritative terminal signal; use manual Secure Input for such programs.
 - Up and Down navigate command history rather than moving the caret vertically in a multiline draft.
-- Durable command-context collection and restoration are wired. Repository detection, Git/project feature collection, transition ranking, semantic retrieval, and an optional local model remain future prediction phases. Finalized visual blocks and terminal scrollback intentionally remain session-only.
+- Durable session and finalized-block restoration are wired. Repository detection, Git/project feature collection, transition ranking, semantic retrieval, and an optional local model remain future prediction phases. Terminal scrollback remains session-only.
 - Replacing zsh with `exec`, removing the integration hooks, or redefining them can prevent the completion marker and leave a block running until interruption, shell exit, or restart.
 - Warm-shell autocomplete depends on zsh's socket, ZLE, PTY, and completion modules. If integration is unavailable, a custom completion exceeds the deadline or caps, or its response cannot be decoded, Pane uses its less context-aware local fallback.
 - Completion workers inherit live shell state by forking from the active zsh, but they run in a short-lived child. Side effects produced only while computing a completion are discarded rather than applied back to the authoritative shell.
 - Automatic input classification combines alternate-screen, process-group, termios, and bounded process-name signals. Process-group and termios changes can lag by up to one polling interval; manual Full Terminal selection remains authoritative until the user leaves it.
-- There are no tabs, generated AI predictions, synchronization, remote-session management, or search/export.
+- There are no tabs, generated AI predictions, synchronization, remote-session management, or cloud export. Local redacted diagnostics and block copy actions are available.
 - OSC 52 clipboard reads are enabled for terminal compatibility. A production release should add an explicit permission policy for untrusted remote programs.
 
 ## Implementation status
@@ -256,7 +258,7 @@ Terminal delegate state is equality-guarded. Buffer-change notifications, visibi
 - Block-first input routing with embedded authoritative direct/secure input, plus an explicit Full Terminal layout
 - ECHO-driven secure-input routing that bypasses the composer, suppresses autocomplete, and resumes only at a verified shell prompt boundary
 - Centralized secret sanitization plus ephemeral and durable SQLite runtime-state stores with migrations, bounded retention, scoped deletion, and defense-in-depth write sanitization
-- Live sanitized command collection, bounded restart restoration into prediction history, memory fallback, and Settings controls for storage categories and deletion
+- Crash-aware local session lifecycle, bounded finalized-block restoration, working-directory fallback, memory-only storage fallback, and Settings controls for storage categories and deletion
 - Isolated DEC 1049 alternate buffer with restoration of the unchanged normal buffer
 - Alternate-screen transcript suppression, split-sequence handling, and manual mode override
 - Resize, scrollback, copy/paste, mouse input, Meta input, clear, restart, shell-exit handling, and cleanup
@@ -265,7 +267,7 @@ Terminal delegate state is equality-guarded. Buffer-change notifications, visibi
 
 Verification is revision-specific; these results are from the current checkout after the block-first authoritative-terminal routing work:
 
-- SwiftPM: **111 of 111 tests passed**, including compact authoritative presentation for normal-buffer choices and agent interfaces, expanded alternate-screen presentation, alternate-screen override of transient secure classification, stable authoritative host identity, direct-terminal command capture, raw/secure input routing, suspended-draft restoration, protocol framing, selectable autocomplete, no-echo leakage checks, PTY-to-SQLite restoration, read-only mirror chrome, persistent PTY behavior, Control-C routing, alternate-buffer isolation, stderr-only output with a nonzero exit status, and warm-shell completion capture.
+- SwiftPM: **119 of 119 tests passed**, including session lifecycle and corruption recovery, block search/collapse restoration, true-bottom timeline scrolling, width-aware clickable output layout, compact authoritative presentation for normal-buffer choices and agent interfaces, expanded alternate-screen presentation, stable authoritative host identity, direct-terminal command capture, raw/secure input routing, no-echo leakage checks, PTY-to-SQLite restoration, persistent PTY behavior, Control-C routing, alternate-buffer isolation, stderr-only output with a nonzero exit status, and warm-shell completion capture.
 - Native Xcode build: **succeeded** for the `Pane` Debug scheme on macOS with SwiftTerm 1.14.0.
 - Runtime: the generated `Pane.app` was registered, launched as a bundle, and remained running after startup. Interactive visual behavior was not reverified in this pass.
 - Generated app: `/tmp/PaneDerivedData/Build/Products/Debug/Pane.app`.

@@ -14,7 +14,7 @@ struct ShellConfiguration: Equatable, Sendable {
         environment["TERM"] = "xterm-256color"
         environment["COLORTERM"] = "truecolor"
         environment["TERM_PROGRAM"] = "Pane"
-        environment["TERM_PROGRAM_VERSION"] = "1.0"
+        environment["TERM_PROGRAM_VERSION"] = "0.2"
         environment["PANE_BLOCKS"] = "1"
 
         return ShellConfiguration(

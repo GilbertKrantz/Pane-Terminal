@@ -4,12 +4,15 @@ struct RuntimeStateSettingsView: View {
     @ObservedObject var settings: RuntimeStateSettings
     @ObservedObject var session: TerminalSession
     @State private var confirmClearAll = false
+    @State private var confirmClearPrevious = false
+    @State private var confirmClearCommands = false
+    @State private var confirmClearOutput = false
 
     var body: some View {
         Form {
-            Section("Prediction history") {
+            Section("Local session storage") {
                 configurationToggle(
-                    "Remember prediction history",
+                    "Remember command and block history",
                     isOn: $settings.predictionHistoryEnabled
                 )
                 configurationToggle(
@@ -19,15 +22,16 @@ struct RuntimeStateSettingsView: View {
                 .disabled(!settings.predictionHistoryEnabled)
 
                 Text(settings.persistenceEnabled
-                    ? "Sanitized history is stored locally in Pane's Application Support folder."
-                    : "Prediction can continue with memory-only history until Pane quits.")
+                    ? "Allowed history is stored only in Pane's local Application Support folder. Pane does not upload commands, output, diagnostics, or crash data."
+                    : "History remains memory-only until Pane quits.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             Section("Collected categories") {
-                storedCategory("Completed command text", detail: "Sanitized before collection")
-                storedCategory("Exit status and duration", detail: "Stored")
+                storedCategory("Command history", detail: "Optional; sensitive commands excluded")
+                storedCategory("Block metadata", detail: "Stored locally")
+                storedCategory("Exit status and duration", detail: "Stored locally")
                 configurationToggle(
                     "Output and error summaries",
                     isOn: $settings.outputSummariesEnabled
@@ -36,21 +40,32 @@ struct RuntimeStateSettingsView: View {
                     "Working-directory paths",
                     isOn: $settings.filePathCollectionEnabled
                 )
-                storedCategory("Raw terminal output", detail: "Never stored")
+                storedCategory("Sanitized output excerpts", detail: settings.outputSummariesEnabled ? "Optional, enabled" : "Optional, disabled")
+                storedCategory("Runtime state", detail: "Lifecycle only; no raw bytes")
+                storedCategory("Application preferences", detail: "Stored locally")
+                storedCategory("Raw terminal byte stream", detail: "Never stored")
                 storedCategory("Environment-variable values", detail: "Never stored")
                 storedCategory("Git metadata", detail: "Not collected")
-                storedCategory("Typed or secure input", detail: "Never stored")
+                storedCategory("Typed or secure input", detail: "Never stored during secure input")
             }
 
-            Section("Delete history") {
-                Button("Clear Current Session History") {
+            Section("Manage local data") {
+                Button("Clear Current Session") {
                     session.clearCurrentSessionPredictionHistory()
                 }
-                Button("Clear Current Workspace History") {
-                    session.clearCurrentWorkspacePredictionHistory()
+                Button("Clear Previous Sessions", role: .destructive) {
+                    confirmClearPrevious = true
                 }
-                .disabled(!settings.filePathCollectionEnabled)
-                Button("Clear All Prediction History", role: .destructive) {
+                Button("Clear Exact Command History", role: .destructive) {
+                    confirmClearCommands = true
+                }
+                Button("Clear Persisted Block Output", role: .destructive) {
+                    confirmClearOutput = true
+                }
+                Button("Reveal Local Data Location") {
+                    session.revealLocalDataLocation()
+                }
+                Button("Clear All Pane Data", role: .destructive) {
                     confirmClearAll = true
                 }
             }
@@ -59,19 +74,35 @@ struct RuntimeStateSettingsView: View {
                 Section("Status") {
                     Label(diagnostic, systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.secondary)
+                    if diagnostic.localizedCaseInsensitiveContains("recovery file") {
+                        Button("Reveal Recovery File") { session.revealRecoveryFile() }
+                        Button("Clear Recovery File", role: .destructive) { session.clearRecoveryFile() }
+                    }
                 }
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 590)
-        .alert("Clear all prediction history?", isPresented: $confirmClearAll) {
+        .frame(width: 560, height: 680)
+        .alert("Clear all Pane data?", isPresented: $confirmClearAll) {
             Button("Cancel", role: .cancel) {}
             Button("Clear All", role: .destructive) {
                 session.clearAllPredictionHistory()
             }
         } message: {
-            Text("This removes all saved and in-memory prediction history. It does not clear terminal scrollback or shell history.")
+            Text("This removes Pane's saved sessions, exact command history, persisted excerpts, runtime metadata, and in-memory blocks. It does not remove your shell's own history.")
         }
+        .alert("Clear previous sessions?", isPresented: $confirmClearPrevious) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear Previous Sessions", role: .destructive) { session.clearPreviousSessions() }
+        } message: { Text("This removes restored blocks and metadata from sessions before the current shell.") }
+        .alert("Clear exact command history?", isPresented: $confirmClearCommands) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear Command History", role: .destructive) { session.clearExactCommandHistory() }
+        } message: { Text("This removes exact rerunnable command text and its persisted block records.") }
+        .alert("Clear persisted block output?", isPresented: $confirmClearOutput) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear Output", role: .destructive) { session.clearPersistedBlockOutput() }
+        } message: { Text("This removes all saved sanitized output and error excerpts while retaining eligible command metadata.") }
     }
 
     private func configurationToggle(

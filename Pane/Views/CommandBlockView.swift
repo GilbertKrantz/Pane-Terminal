@@ -148,7 +148,8 @@ struct CommandBlockView: View {
                 ToolbarHoverSurface(systemName: "arrow.clockwise")
             }
             .buttonStyle(.plain)
-            .help("Rerun command")
+            .disabled(!block.isRerunnable)
+            .help(block.isRerunnable ? "Edit and rerun" : "Rerun unavailable for sensitive or redacted commands")
 
             Button {
                 session.toggleBlockCollapsed(id: block.id)
@@ -180,9 +181,33 @@ struct CommandBlockView: View {
         Button("Copy Command", systemImage: "text.badge.plus") {
             session.copyCommand(id: block.id)
         }
+        Button("Copy Output", systemImage: "doc.on.doc") {
+            session.copyOutput(id: block.id)
+        }
+        Button("Copy Command and Output", systemImage: "doc.on.clipboard") {
+            session.copyCommandAndOutput(id: block.id)
+        }
+        Button("Copy Sanitized Block", systemImage: "checkmark.shield") {
+            session.copySanitizedBlock(id: block.id)
+        }
+        Button("Copy Working Directory", systemImage: "folder") {
+            session.copyWorkingDirectory(id: block.id)
+        }
+
+        Divider()
+
         Button("Edit in Composer", systemImage: "pencil") {
             session.editBlock(id: block.id)
         }
+        .disabled(!block.isRerunnable)
+        Button("Run Again", systemImage: "arrow.clockwise") {
+            session.runAgainBlock(id: block.id)
+        }
+        .disabled(!block.isRerunnable)
+        Button("Run in Original Directory", systemImage: "folder.badge.gearshape") {
+            session.runBlockInOriginalDirectory(id: block.id)
+        }
+        .disabled(!block.isRerunnable)
 
         Divider()
 

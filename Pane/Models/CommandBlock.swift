@@ -17,6 +17,7 @@ struct CommandBlock: Identifiable, Equatable, Sendable {
     var state: ExecutionState
     var output: String
     var isCollapsed: Bool
+    var isRerunnable: Bool
 
     init(
         id: UUID = UUID(),
@@ -27,7 +28,8 @@ struct CommandBlock: Identifiable, Equatable, Sendable {
         completedAt: Date? = nil,
         state: ExecutionState = .queued,
         output: String = "",
-        isCollapsed: Bool = false
+        isCollapsed: Bool = false,
+        isRerunnable: Bool = true
     ) {
         self.id = id
         self.command = command
@@ -38,6 +40,7 @@ struct CommandBlock: Identifiable, Equatable, Sendable {
         self.state = state
         self.output = output
         self.isCollapsed = isCollapsed
+        self.isRerunnable = isRerunnable
     }
 
     var duration: TimeInterval? {
@@ -96,12 +99,14 @@ struct CommandBlockTimeline: Equatable, Sendable {
     mutating func enqueue(
         command: String,
         workingDirectory: String,
-        at date: Date = Date()
+        at date: Date = Date(),
+        isRerunnable: Bool = true
     ) -> UUID {
         let block = CommandBlock(
             command: command,
             workingDirectory: workingDirectory,
-            submittedAt: date
+            submittedAt: date,
+            isRerunnable: isRerunnable
         )
         blocks.append(block)
         queuedBlockIDs.append(block.id)
@@ -172,6 +177,27 @@ struct CommandBlockTimeline: Equatable, Sendable {
         blocks[index].isCollapsed.toggle()
     }
 
+    mutating func setCollapsed(_ collapsed: Bool, id: UUID) {
+        guard let index = index(of: id) else { return }
+        blocks[index].isCollapsed = collapsed
+    }
+
+    mutating func setAllCompletedCollapsed(_ collapsed: Bool) {
+        for index in blocks.indices {
+            switch blocks[index].state {
+            case .completed, .interrupted:
+                blocks[index].isCollapsed = collapsed
+            case .queued, .running:
+                break
+            }
+        }
+    }
+
+    mutating func restore(_ restoredBlocks: [CommandBlock]) {
+        let existing = Set(blocks.map(\.id))
+        blocks.insert(contentsOf: restoredBlocks.filter { !existing.contains($0.id) }, at: 0)
+    }
+
     @discardableResult
     mutating func appendContinuation(_ continuation: String, to id: UUID) -> String? {
         guard let index = index(of: id),
@@ -219,6 +245,17 @@ struct CommandBlockTimeline: Equatable, Sendable {
         }
     }
 
+    mutating func clearFinalizedOutput() {
+        for index in blocks.indices {
+            switch blocks[index].state {
+            case .completed, .interrupted:
+                blocks[index].output = ""
+            case .queued, .running:
+                break
+            }
+        }
+    }
+
     func block(id: UUID) -> CommandBlock? {
         guard let index = index(of: id) else { return nil }
         return blocks[index]
@@ -226,5 +263,36 @@ struct CommandBlockTimeline: Equatable, Sendable {
 
     private func index(of id: UUID) -> Int? {
         blocks.firstIndex { $0.id == id }
+    }
+}
+
+enum BlockSearchFilter: String, CaseIterable, Sendable {
+    case all = "All"
+    case failed = "Failed"
+    case interrupted = "Interrupted"
+    case unknown = "Unknown"
+}
+
+struct BlockSearchQuery: Equatable, Sendable {
+    var text = ""
+    var filter: BlockSearchFilter = .all
+
+    func matches(_ block: CommandBlock) -> Bool {
+        let statusMatches: Bool
+        switch filter {
+        case .all:
+            statusMatches = true
+        case .failed:
+            statusMatches = block.failed
+        case .interrupted:
+            if case .interrupted = block.state { statusMatches = true } else { statusMatches = false }
+        case .unknown:
+            if case .interrupted(exitCode: nil) = block.state { statusMatches = true } else { statusMatches = false }
+        }
+        guard statusMatches else { return false }
+        let needle = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return true }
+        return [block.command, block.output, block.workingDirectory, block.statusText]
+            .contains { $0.localizedCaseInsensitiveContains(needle) }
     }
 }

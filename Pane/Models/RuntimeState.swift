@@ -38,6 +38,20 @@ struct ProjectState: Codable, Sendable, Equatable {
     let projectType: String?
 }
 
+struct PaneSessionID: Hashable, Codable, Sendable, Equatable {
+    let rawValue: UUID
+
+    init(rawValue: UUID = UUID()) {
+        self.rawValue = rawValue
+    }
+}
+
+enum PersistedSessionLifecycle: String, Codable, Sendable, Equatable {
+    case active
+    case closedCleanly
+    case interrupted
+}
+
 struct RuntimeSession: Codable, Sendable, Equatable {
     let id: UUID
     let workspaceID: String?
@@ -46,9 +60,43 @@ struct RuntimeSession: Codable, Sendable, Equatable {
     let initialWorkingDirectory: String
     let startedAt: Date
     let lastActiveAt: Date
+    let lifecycle: PersistedSessionLifecycle
+    let paneVersion: String
+    let schemaVersion: Int
+
+    init(
+        id: UUID,
+        workspaceID: String?,
+        repositoryID: String?,
+        shell: String,
+        initialWorkingDirectory: String,
+        startedAt: Date,
+        lastActiveAt: Date,
+        lifecycle: PersistedSessionLifecycle = .active,
+        paneVersion: String = "0.2",
+        schemaVersion: Int = 3
+    ) {
+        self.id = id
+        self.workspaceID = workspaceID
+        self.repositoryID = repositoryID
+        self.shell = shell
+        self.initialWorkingDirectory = initialWorkingDirectory
+        self.startedAt = startedAt
+        self.lastActiveAt = lastActiveAt
+        self.lifecycle = lifecycle
+        self.paneVersion = paneVersion
+        self.schemaVersion = schemaVersion
+    }
 }
 
 struct PersistedCommandEvent: Codable, Sendable, Equatable {
+    enum Completion: String, Codable, Sendable, Equatable {
+        case completed
+        case interrupted
+        case unknown
+    }
+
+    let blockID: UUID
     let sessionID: UUID
     let timestamp: Date
     let workingDirectory: String
@@ -59,6 +107,38 @@ struct PersistedCommandEvent: Codable, Sendable, Equatable {
     let sanitizedErrorSummary: String?
     let predictionSource: String?
     let predictionAction: String?
+    let completion: Completion
+    let isCollapsed: Bool
+
+    init(
+        blockID: UUID = UUID(),
+        sessionID: UUID,
+        timestamp: Date,
+        workingDirectory: String,
+        command: String,
+        exitCode: Int?,
+        durationMilliseconds: Int?,
+        sanitizedOutputSummary: String?,
+        sanitizedErrorSummary: String?,
+        predictionSource: String?,
+        predictionAction: String?,
+        completion: Completion = .completed,
+        isCollapsed: Bool = false
+    ) {
+        self.blockID = blockID
+        self.sessionID = sessionID
+        self.timestamp = timestamp
+        self.workingDirectory = workingDirectory
+        self.command = command
+        self.exitCode = exitCode
+        self.durationMilliseconds = durationMilliseconds
+        self.sanitizedOutputSummary = sanitizedOutputSummary
+        self.sanitizedErrorSummary = sanitizedErrorSummary
+        self.predictionSource = predictionSource
+        self.predictionAction = predictionAction
+        self.completion = completion
+        self.isCollapsed = isCollapsed
+    }
 }
 
 struct RuntimeFeature: Codable, Sendable, Equatable {
@@ -68,19 +148,41 @@ struct RuntimeFeature: Codable, Sendable, Equatable {
     let value: String
 }
 
+struct PersistedSessionContext: Codable, Sendable, Equatable {
+    let session: RuntimeSession
+    let commandEvents: [PersistedCommandEvent]
+}
+
 struct PersistedRuntimeContext: Codable, Sendable, Equatable {
     let sessions: [RuntimeSession]
     let commandEvents: [PersistedCommandEvent]
     let features: [RuntimeFeature]
+
+    var sessionContexts: [PersistedSessionContext] {
+        sessions
+            .sorted { $0.startedAt < $1.startedAt }
+            .map { session in
+                let events = commandEvents
+                    .filter { $0.sessionID == session.id }
+                    .sorted { $0.timestamp < $1.timestamp }
+                return PersistedSessionContext(session: session, commandEvents: events)
+            }
+    }
 }
 
 protocol RuntimeStateStore: Sendable {
     func startSession(_ session: RuntimeSession) async throws
     func persistCommandEvent(_ event: PersistedCommandEvent) async throws
+    func updateCommandEventCollapsed(_ blockID: UUID, isCollapsed: Bool) async throws
     func persistFeatures(_ features: [RuntimeFeature]) async throws
     func loadRecentContext(workspaceID: String?, repositoryID: String?, limit: Int) async throws -> PersistedRuntimeContext
     func deleteSession(_ sessionID: UUID) async throws
     func deleteWorkspace(_ workspaceID: String) async throws
     func deleteAllState() async throws
+    func deleteSessions(excluding sessionID: UUID) async throws
+    func deleteAllCommandEvents() async throws
+    func clearPersistedOutput() async throws
+    func updateSessionLifecycle(_ sessionID: UUID, lifecycle: PersistedSessionLifecycle, lastActiveAt: Date) async throws
+    func markActiveSessionsInterrupted(excluding sessionID: UUID?) async throws -> [RuntimeSession]
     func applyRetentionPolicy() async throws
 }

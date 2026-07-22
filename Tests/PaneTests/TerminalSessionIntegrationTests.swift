@@ -878,7 +878,9 @@ final class TerminalSessionIntegrationTests: XCTestCase {
         try await waitUntil("prediction history to restore", timeout: 8) {
             restoredSession.history.commands.contains(command)
         }
-        XCTAssertTrue(restoredSession.blocks.isEmpty)
+        XCTAssertTrue(restoredSession.blocks.contains { block in
+            block.command == command && block.isRerunnable
+        })
         XCTAssertTrue(restoredSession.commandDraft.isEmpty)
         XCTAssertFalse(restoredSession.isSecureInputActive)
     }

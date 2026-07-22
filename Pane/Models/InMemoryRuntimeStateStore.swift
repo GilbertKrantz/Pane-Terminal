@@ -18,10 +18,34 @@ actor InMemoryRuntimeStateStore: RuntimeStateStore {
     }
 
     func persistCommandEvent(_ event: PersistedCommandEvent) async throws {
-        commandEvents.append(event)
+        if let index = commandEvents.firstIndex(where: { $0.blockID == event.blockID }) {
+            commandEvents[index] = event
+        } else {
+            commandEvents.append(event)
+        }
         if commandEvents.count > maximumCommandEvents {
             commandEvents.removeFirst(commandEvents.count - maximumCommandEvents)
         }
+    }
+
+    func updateCommandEventCollapsed(_ blockID: UUID, isCollapsed: Bool) async throws {
+        guard let index = commandEvents.firstIndex(where: { $0.blockID == blockID }) else { return }
+        let event = commandEvents[index]
+        commandEvents[index] = PersistedCommandEvent(
+            blockID: event.blockID,
+            sessionID: event.sessionID,
+            timestamp: event.timestamp,
+            workingDirectory: event.workingDirectory,
+            command: event.command,
+            exitCode: event.exitCode,
+            durationMilliseconds: event.durationMilliseconds,
+            sanitizedOutputSummary: event.sanitizedOutputSummary,
+            sanitizedErrorSummary: event.sanitizedErrorSummary,
+            predictionSource: event.predictionSource,
+            predictionAction: event.predictionAction,
+            completion: event.completion,
+            isCollapsed: isCollapsed
+        )
     }
 
     func persistFeatures(_ features: [RuntimeFeature]) async throws {
@@ -75,6 +99,67 @@ actor InMemoryRuntimeStateStore: RuntimeStateStore {
         sessions.removeAll()
         commandEvents.removeAll()
         features.removeAll()
+    }
+
+    func deleteSessions(excluding sessionID: UUID) async throws {
+        let deleted = Set(sessions.keys.filter { $0 != sessionID })
+        sessions = sessions.filter { $0.key == sessionID }
+        commandEvents.removeAll { deleted.contains($0.sessionID) }
+        features.removeAll { deleted.contains($0.sessionID) }
+    }
+
+    func deleteAllCommandEvents() async throws {
+        commandEvents.removeAll()
+    }
+
+    func clearPersistedOutput() async throws {
+        commandEvents = commandEvents.map { event in
+            PersistedCommandEvent(
+                blockID: event.blockID, sessionID: event.sessionID, timestamp: event.timestamp,
+                workingDirectory: event.workingDirectory, command: event.command,
+                exitCode: event.exitCode, durationMilliseconds: event.durationMilliseconds,
+                sanitizedOutputSummary: nil, sanitizedErrorSummary: nil,
+                predictionSource: event.predictionSource, predictionAction: event.predictionAction,
+                completion: event.completion, isCollapsed: event.isCollapsed
+            )
+        }
+    }
+
+    func updateSessionLifecycle(_ sessionID: UUID, lifecycle: PersistedSessionLifecycle, lastActiveAt: Date) async throws {
+        guard let session = sessions[sessionID] else { return }
+        sessions[sessionID] = RuntimeSession(
+            id: session.id,
+            workspaceID: session.workspaceID,
+            repositoryID: session.repositoryID,
+            shell: session.shell,
+            initialWorkingDirectory: session.initialWorkingDirectory,
+            startedAt: session.startedAt,
+            lastActiveAt: lastActiveAt,
+            lifecycle: lifecycle,
+            paneVersion: session.paneVersion,
+            schemaVersion: session.schemaVersion
+        )
+    }
+
+    func markActiveSessionsInterrupted(excluding sessionID: UUID?) async throws -> [RuntimeSession] {
+        var interrupted: [RuntimeSession] = []
+        for session in sessions.values where session.lifecycle == .active && session.id != sessionID {
+            let updated = RuntimeSession(
+                id: session.id,
+                workspaceID: session.workspaceID,
+                repositoryID: session.repositoryID,
+                shell: session.shell,
+                initialWorkingDirectory: session.initialWorkingDirectory,
+                startedAt: session.startedAt,
+                lastActiveAt: session.lastActiveAt,
+                lifecycle: .interrupted,
+                paneVersion: session.paneVersion,
+                schemaVersion: session.schemaVersion
+            )
+            sessions[session.id] = updated
+            interrupted.append(updated)
+        }
+        return interrupted.sorted { $0.lastActiveAt > $1.lastActiveAt }
     }
 
     func applyRetentionPolicy() async throws {

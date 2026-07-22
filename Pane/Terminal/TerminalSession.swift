@@ -86,6 +86,13 @@ private final class PTYProcessDelegateBridge: LocalProcessDelegate {
 
 @MainActor
 final class TerminalSession: NSObject, ObservableObject {
+    struct SessionBoundary: Equatable {
+        let lifecycle: PersistedSessionLifecycle
+        let lastActiveAt: Date
+        let restoredDirectory: String
+        let usedDirectoryFallback: Bool
+    }
+
     @Published private(set) var mode: InputMode = .blocks
     @Published private(set) var isShellRunning = false
     @Published private(set) var shellExitStatus: Int32?
@@ -100,6 +107,12 @@ final class TerminalSession: NSObject, ObservableObject {
     @Published private(set) var activeCommandVisibleLineCount = 1
     @Published var selectedBlockID: UUID?
     @Published var commandDraft = ""
+    @Published var blockSearchText = ""
+    @Published var blockSearchFilter: BlockSearchFilter = .all
+    @Published private(set) var sessionBoundary: SessionBoundary?
+    @Published private(set) var restoredBlockIDs: Set<UUID> = []
+    @Published var isRestartConfirmationPresented = false
+    @Published private(set) var lastShellRestartAt: Date?
 
     private(set) var history = CommandHistory()
     private var process: LocalProcess?
@@ -119,7 +132,7 @@ final class TerminalSession: NSObject, ObservableObject {
     private var activeCommandCompletedLineCount = 0
     private var activeCommandHasCurrentLineContent = false
     private var windowSize = winsize(ws_row: 25, ws_col: 80, ws_xpixel: 0, ws_ypixel: 0)
-    private let shellConfiguration: ShellConfiguration
+    private var shellConfiguration: ShellConfiguration
     private let commandAutocomplete = CommandAutocomplete()
     private let zshCompletionClient = WarmZshCompletionClient()
     private let runtimeStateController: RuntimeStateController?
@@ -128,6 +141,7 @@ final class TerminalSession: NSObject, ObservableObject {
     private let sensitiveDataSanitizer = SensitiveDataSanitizer()
     private var restoredRuntimeEventKeys: Set<String> = []
     private var runtimeStateStartTask: Task<Void, Never>?
+    private var isRuntimeStatePrepared: Bool
     private var zshCompletionEndpoint: WarmZshCompletionEndpoint?
     private var isShuttingDown = false
     private var isShellIntegrationReady = false
@@ -138,6 +152,11 @@ final class TerminalSession: NSObject, ObservableObject {
 
     var blocks: [CommandBlock] {
         blockTimeline.blocks
+    }
+
+    var visibleBlocks: [CommandBlock] {
+        let query = BlockSearchQuery(text: blockSearchText, filter: blockSearchFilter)
+        return blockTimeline.blocks.filter(query.matches)
     }
 
     var selectedBlock: CommandBlock? {
@@ -174,6 +193,7 @@ final class TerminalSession: NSObject, ObservableObject {
     ) {
         self.shellConfiguration = shellConfiguration
         self.runtimeStateController = runtimeStateController
+        self.isRuntimeStatePrepared = runtimeStateController == nil
         self.currentDirectory = shellConfiguration.workingDirectory
         super.init()
     }
@@ -263,16 +283,22 @@ final class TerminalSession: NSObject, ObservableObject {
         liveCommandTerminalBlockID = nil
     }
 
-    func startShell() {
+    func startShell(in workingDirectory: String? = nil) {
         guard !isShuttingDown, process?.running != true else { return }
+        guard isRuntimeStatePrepared else {
+            prepareRuntimeStateAndStartShell()
+            return
+        }
 
         shellExitStatus = nil
         isShellIntegrationReady = false
         streamParser = BlockStreamParser()
         transcriptFilter = AlternateScreenTranscriptFilter()
-        if currentDirectory != shellConfiguration.workingDirectory {
-            currentDirectory = shellConfiguration.workingDirectory
-        }
+        let effectiveDirectory = Self.validatedWorkingDirectory(workingDirectory)
+            ?? Self.validatedWorkingDirectory(currentDirectory)
+            ?? Self.validatedWorkingDirectory(shellConfiguration.workingDirectory)
+            ?? FileManager.default.homeDirectoryForCurrentUser.path
+        currentDirectory = effectiveDirectory
         processGeneration &+= 1
         let generation = processGeneration
         let completionEndpoint = try? zshCompletionClient.makeEndpoint(
@@ -309,12 +335,11 @@ final class TerminalSession: NSObject, ObservableObject {
             executable: shellConfiguration.executable,
             args: shellConfiguration.arguments,
             environment: shellConfiguration.environment,
-            currentDirectory: shellConfiguration.workingDirectory
+            currentDirectory: effectiveDirectory
         )
         isShellRunning = newProcess.running
 
         if newProcess.running {
-            startRuntimeStateSession()
             startForegroundProcessMonitoring()
             let installationCommand: String
             if let completionEndpoint {
@@ -352,7 +377,21 @@ final class TerminalSession: NSObject, ObservableObject {
         stopForegroundProcessMonitoring()
         leaveAlternateScreenIfNeeded()
         terminalView?.feed(text: "\r\n[Restarting shell]\r\n")
+        lastShellRestartAt = Date()
         startShell()
+    }
+
+    func requestRestartShell() {
+        if isCommandActive {
+            isRestartConfirmationPresented = true
+        } else {
+            restartShell()
+        }
+    }
+
+    func confirmRestartShell() {
+        isRestartConfirmationPresented = false
+        restartShell()
     }
 
     func shutdown() {
@@ -389,6 +428,34 @@ final class TerminalSession: NSObject, ObservableObject {
         invalidateCompletionEndpoint()
         stopForegroundProcessMonitoring()
         zshCompletionClient.shutdown()
+    }
+
+    func finalizeApplicationExit() async {
+        let activeID = blockTimeline.activeBlockID ?? commandAwaitingStartID
+        shutdown()
+        if let activeID,
+           let block = blockTimeline.block(id: activeID),
+           block.isRerunnable,
+           let runtimeStateController {
+            let output = sensitiveDataSanitizer.sanitizeOutput(block.output).value
+            let event = PersistedCommandEvent(
+                blockID: block.id,
+                sessionID: runtimeSessionID,
+                timestamp: block.completedAt ?? Date(),
+                workingDirectory: block.workingDirectory,
+                command: block.command,
+                exitCode: nil,
+                durationMilliseconds: block.duration.map { Int(($0 * 1_000).rounded()) },
+                sanitizedOutputSummary: output.isEmpty ? nil : String(output.prefix(1_000)),
+                sanitizedErrorSummary: nil,
+                predictionSource: nil,
+                predictionAction: nil,
+                completion: .interrupted,
+                isCollapsed: block.isCollapsed
+            )
+            _ = await runtimeStateController.persistCommandEvent(event)
+        }
+        _ = await runtimeStateController?.closeCurrentSessionCleanly()
     }
 
     func submitDraft() {
@@ -431,7 +498,8 @@ final class TerminalSession: NSObject, ObservableObject {
 
         let blockID = blockTimeline.enqueue(
             command: command,
-            workingDirectory: currentDirectory ?? shellConfiguration.workingDirectory
+            workingDirectory: currentDirectory ?? shellConfiguration.workingDirectory,
+            isRerunnable: sensitiveDataSanitizer.sanitizeCommand(command).redactionCount == 0
         )
 
         if !isCommandActive, isShellIntegrationReady {
@@ -573,9 +641,44 @@ final class TerminalSession: NSObject, ObservableObject {
         writeToPasteboard(block.output)
     }
 
-    func rerunBlock(id: UUID) {
+    func copyCommandAndOutput(id: UUID) {
         guard let block = blockTimeline.block(id: id) else { return }
+        writeToPasteboard(block.output.isEmpty ? block.command : "\(block.command)\n\n\(block.output)")
+    }
+
+    func copySanitizedBlock(id: UUID) {
+        guard let block = blockTimeline.block(id: id) else { return }
+        let command = sensitiveDataSanitizer.sanitizeCommand(block.command).value
+        let output = sensitiveDataSanitizer.sanitizeOutput(block.output).value
+        writeToPasteboard(output.isEmpty ? command : "\(command)\n\n\(output)")
+    }
+
+    func copyWorkingDirectory(id: UUID) {
+        guard let block = blockTimeline.block(id: id) else { return }
+        writeToPasteboard(block.workingDirectory)
+    }
+
+    func rerunBlock(id: UUID) {
+        editBlock(id: id)
+    }
+
+    func runAgainBlock(id: UUID) {
+        guard let block = blockTimeline.block(id: id), block.isRerunnable else { return }
         submit(command: block.command)
+    }
+
+    func runBlockInOriginalDirectory(id: UUID) {
+        guard let block = blockTimeline.block(id: id), block.isRerunnable else { return }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: block.workingDirectory, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            runtimeStateDiagnostic = "The original working directory no longer exists. The command was placed in the composer instead."
+            editBlock(id: id)
+            return
+        }
+        let escapedDirectory = "'" + block.workingDirectory.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        commandDraft = "cd -- \(escapedDirectory) && \(block.command)"
+        setMode(.blocks)
     }
 
     func rerunSelectedBlock() {
@@ -584,7 +687,7 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     func editBlock(id: UUID) {
-        guard let block = blockTimeline.block(id: id) else { return }
+        guard let block = blockTimeline.block(id: id), block.isRerunnable else { return }
         commandDraft = block.command
         modeAttribution = .manual
         mode = .blocks
@@ -597,6 +700,39 @@ final class TerminalSession: NSObject, ObservableObject {
 
     func toggleBlockCollapsed(id: UUID) {
         blockTimeline.toggleCollapsed(id: id)
+        guard let block = blockTimeline.block(id: id), let runtimeStateController else { return }
+        Task { [weak self] in
+            self?.runtimeStateDiagnostic = await runtimeStateController.updateCommandEventCollapsed(
+                id,
+                isCollapsed: block.isCollapsed
+            )
+        }
+    }
+
+    func setAllCompletedBlocksCollapsed(_ collapsed: Bool) {
+        let ids = blockTimeline.blocks.filter { block in
+            switch block.state {
+            case .completed, .interrupted: return true
+            case .queued, .running: return false
+            }
+        }.map(\.id)
+        blockTimeline.setAllCompletedCollapsed(collapsed)
+        guard let runtimeStateController else { return }
+        Task { [weak self] in
+            for id in ids {
+                if let diagnostic = await runtimeStateController.updateCommandEventCollapsed(id, isCollapsed: collapsed) {
+                    self?.runtimeStateDiagnostic = diagnostic
+                }
+            }
+        }
+    }
+
+    func selectNextSearchMatch() {
+        moveSearchSelection(by: 1)
+    }
+
+    func selectPreviousSearchMatch() {
+        moveSearchSelection(by: -1)
     }
 
     func removeBlock(id: UUID) {
@@ -632,6 +768,40 @@ final class TerminalSession: NSObject, ObservableObject {
             mode = .terminal
         }
         focusAuthoritativeTerminal()
+    }
+
+    func focusComposer() {
+        guard !isSecureInputActive else { return }
+        setMode(.blocks)
+        inputRequirement = isCommandActive ? .lineOriented : .shellIdle
+    }
+
+    func focusDirectTerminal() {
+        enterDirectInput()
+    }
+
+    func copyLocalDiagnostics(includeSanitizedCommandContext: Bool = false) {
+        let paneVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2"
+        let persistenceStatus = runtimeStateDiagnostic == nil ? "available" : "degraded"
+        let databaseHealth = runtimeStateDiagnostic == nil ? "healthy" : "warning"
+        var lines = [
+            "Pane version: \(paneVersion)",
+            "macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)",
+            "Architecture: \(Self.architectureName)",
+            "Shell: \(shellConfiguration.executable)",
+            "Presentation: \(mode.rawValue)",
+            "Input requirement: \(String(describing: inputRequirement))",
+            "Secure input active: \(isSecureInputActive)",
+            "Alternate screen active: \(isAlternateScreenActive)",
+            "PTY size: \(windowSize.ws_col)x\(windowSize.ws_row)",
+            "Persistence: \(persistenceStatus)",
+            "Database health: \(databaseHealth)",
+            "SwiftTerm: 1.14.0"
+        ]
+        if includeSanitizedCommandContext, let block = selectedBlock {
+            lines.append("Sanitized command: \(sensitiveDataSanitizer.sanitizeCommand(block.command).value)")
+        }
+        writeToPasteboard(lines.joined(separator: "\n"))
     }
 
     func enterSecureInput() {
@@ -691,6 +861,15 @@ final class TerminalSession: NSObject, ObservableObject {
                 handleNormalPromptBoundary()
                 if currentDirectory != workingDirectory {
                     currentDirectory = workingDirectory
+                }
+                if let runtimeStateController {
+                    Task { [weak self] in
+                        if let diagnostic = await runtimeStateController.updateCurrentSessionActivity(
+                            workingDirectory: workingDirectory
+                        ) {
+                            self?.runtimeStateDiagnostic = diagnostic
+                        }
+                    }
                 }
 
                 if !isShellIntegrationReady {
@@ -826,6 +1005,33 @@ final class TerminalSession: NSObject, ObservableObject {
         isLiveCommandFlushScheduled = false
         liveCommandTerminalView = nil
         liveCommandTerminalBlockID = nil
+        persistPendingBlock(id: blockID)
+    }
+
+    private func persistPendingBlock(id: UUID) {
+        guard let runtimeStateController,
+              let block = blockTimeline.block(id: id),
+              block.isRerunnable else { return }
+        let event = PersistedCommandEvent(
+            blockID: block.id,
+            sessionID: runtimeSessionID,
+            timestamp: block.startedAt ?? Date(),
+            workingDirectory: block.workingDirectory,
+            command: block.command,
+            exitCode: nil,
+            durationMilliseconds: nil,
+            sanitizedOutputSummary: nil,
+            sanitizedErrorSummary: nil,
+            predictionSource: nil,
+            predictionAction: nil,
+            completion: .unknown,
+            isCollapsed: block.isCollapsed
+        )
+        let startTask = runtimeStateStartTask
+        Task { [weak self] in
+            await startTask?.value
+            self?.runtimeStateDiagnostic = await runtimeStateController.persistCommandEvent(event)
+        }
     }
 
     private func dispatchNextQueuedCommandIfNeeded() {
@@ -842,8 +1048,8 @@ final class TerminalSession: NSObject, ObservableObject {
         }
     }
 
-    private func startRuntimeStateSession() {
-        guard let runtimeStateController else { return }
+    private func prepareRuntimeStateAndStartShell() {
+        guard runtimeStateStartTask == nil, let runtimeStateController else { return }
         let directory = currentDirectory ?? shellConfiguration.workingDirectory
         let session = RuntimeSession(
             id: runtimeSessionID,
@@ -852,7 +1058,8 @@ final class TerminalSession: NSObject, ObservableObject {
             shell: shellConfiguration.executable,
             initialWorkingDirectory: directory,
             startedAt: runtimeSessionStartedAt,
-            lastActiveAt: Date()
+            lastActiveAt: Date(),
+            lifecycle: .active
         )
 
         runtimeStateStartTask = Task { [weak self] in
@@ -860,9 +1067,68 @@ final class TerminalSession: NSObject, ObservableObject {
             guard let self else { return }
             self.runtimeStateDiagnostic = result.diagnostic
             if let context = result.restoredContext {
-                self.restorePredictionHistory(from: context)
+                self.restoreRuntimeContext(context)
             }
+            self.isRuntimeStatePrepared = true
+            self.startShell()
         }
+    }
+
+    private func restoreRuntimeContext(_ context: PersistedRuntimeContext) {
+        restorePredictionHistory(from: context)
+        let previousSessions = context.sessions.filter { $0.id != runtimeSessionID }
+        guard let previous = previousSessions.max(by: { $0.lastActiveAt < $1.lastActiveAt }) else { return }
+
+        let preferredDirectory = previous.initialWorkingDirectory
+        let fallbackDirectory = FileManager.default.homeDirectoryForCurrentUser.path
+        var isDirectory: ObjCBool = false
+        let canRestoreDirectory = !preferredDirectory.isEmpty
+            && FileManager.default.fileExists(atPath: preferredDirectory, isDirectory: &isDirectory)
+            && isDirectory.boolValue
+            && FileManager.default.isReadableFile(atPath: preferredDirectory)
+        let restoredDirectory = canRestoreDirectory ? preferredDirectory : fallbackDirectory
+        shellConfiguration.workingDirectory = restoredDirectory
+        currentDirectory = restoredDirectory
+
+        let sessionIDs = Set(previousSessions.map(\.id))
+        let lifecycleBySession = Dictionary(uniqueKeysWithValues: previousSessions.map { ($0.id, $0.lifecycle) })
+        let restoredBlocks = context.commandEvents
+            .filter { sessionIDs.contains($0.sessionID) }
+            .sorted { $0.timestamp < $1.timestamp }
+            .map { event -> CommandBlock in
+                let duration = TimeInterval(event.durationMilliseconds ?? 0) / 1_000
+                let state: CommandBlock.ExecutionState
+                switch event.completion {
+                case .completed:
+                    state = .completed(exitCode: Int32(event.exitCode ?? 0))
+                case .interrupted:
+                    state = .interrupted(exitCode: event.exitCode.map(Int32.init))
+                case .unknown:
+                    state = lifecycleBySession[event.sessionID] == .interrupted
+                        ? .interrupted(exitCode: nil)
+                        : .interrupted(exitCode: nil)
+                }
+                return CommandBlock(
+                    id: event.blockID,
+                    command: event.command,
+                    workingDirectory: event.workingDirectory,
+                    submittedAt: event.timestamp.addingTimeInterval(-duration),
+                    startedAt: event.timestamp.addingTimeInterval(-duration),
+                    completedAt: event.timestamp,
+                    state: state,
+                    output: event.sanitizedOutputSummary ?? event.sanitizedErrorSummary ?? "",
+                    isCollapsed: event.isCollapsed,
+                    isRerunnable: !event.command.contains(SensitiveDataSanitizer.redaction)
+                )
+            }
+        blockTimeline.restore(restoredBlocks)
+        restoredBlockIDs.formUnion(restoredBlocks.map(\.id))
+        sessionBoundary = SessionBoundary(
+            lifecycle: previous.lifecycle,
+            lastActiveAt: previous.lastActiveAt,
+            restoredDirectory: restoredDirectory,
+            usedDirectoryFallback: !canRestoreDirectory
+        )
     }
 
     private func persistCompletedBlock(id: UUID) {
@@ -890,6 +1156,7 @@ final class TerminalSession: NSObject, ObservableObject {
             max(0, Int(($0 * 1_000).rounded()))
         }
         let event = PersistedCommandEvent(
+            blockID: block.id,
             sessionID: runtimeSessionID,
             timestamp: block.completedAt ?? Date(),
             workingDirectory: block.workingDirectory,
@@ -899,7 +1166,12 @@ final class TerminalSession: NSObject, ObservableObject {
             sanitizedOutputSummary: exitCode == 0 ? summary : nil,
             sanitizedErrorSummary: exitCode == 0 ? nil : summary,
             predictionSource: nil,
-            predictionAction: nil
+            predictionAction: nil,
+            completion: {
+                if case .interrupted = block.state { return .interrupted }
+                return .completed
+            }(),
+            isCollapsed: block.isCollapsed
         )
 
         let startTask = runtimeStateStartTask
@@ -932,9 +1204,6 @@ final class TerminalSession: NSObject, ObservableObject {
             if let context = result.restoredContext {
                 self.restorePredictionHistory(from: context)
             }
-            // Re-register with the current directory so path-collection
-            // changes take effect in the active session row immediately.
-            self.startRuntimeStateSession()
         }
     }
 
@@ -963,6 +1232,69 @@ final class TerminalSession: NSObject, ObservableObject {
         Task { [weak self] in
             self?.runtimeStateDiagnostic = await runtimeStateController.deleteAllState()
         }
+    }
+
+    func clearPreviousSessions() {
+        for id in restoredBlockIDs { blockTimeline.remove(id: id) }
+        restoredBlockIDs.removeAll()
+        sessionBoundary = nil
+        guard let runtimeStateController else { return }
+        Task { [weak self] in
+            self?.runtimeStateDiagnostic = await runtimeStateController.deletePreviousSessions()
+        }
+    }
+
+    func clearExactCommandHistory() {
+        history = CommandHistory()
+        blockTimeline.clearFinalized()
+        restoredBlockIDs.removeAll()
+        sessionBoundary = nil
+        guard let runtimeStateController else { return }
+        Task { [weak self] in
+            self?.runtimeStateDiagnostic = await runtimeStateController.deleteExactCommandHistory()
+        }
+    }
+
+    func clearPersistedBlockOutput() {
+        blockTimeline.clearFinalizedOutput()
+        guard let runtimeStateController else { return }
+        Task { [weak self] in
+            self?.runtimeStateDiagnostic = await runtimeStateController.clearPersistedBlockOutput()
+        }
+    }
+
+    func revealLocalDataLocation() {
+        guard let runtimeStateController else { return }
+        Task {
+            let url = await runtimeStateController.localDataDirectory()
+            try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+    }
+
+    func revealRecoveryFile() {
+        guard let runtimeStateController else { return }
+        Task {
+            guard let url = await runtimeStateController.recoveryFile() else { return }
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        }
+    }
+
+    func clearRecoveryFile() {
+        guard let runtimeStateController else { return }
+        Task { [weak self] in
+            self?.runtimeStateDiagnostic = await runtimeStateController.clearRecoveryFile()
+        }
+    }
+
+    nonisolated private static func validatedWorkingDirectory(_ path: String?) -> String? {
+        guard let path, !path.isEmpty else { return nil }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+              isDirectory.boolValue,
+              FileManager.default.isReadableFile(atPath: path),
+              FileManager.default.isExecutableFile(atPath: path) else { return nil }
+        return path
     }
 
     nonisolated private static func workspaceIdentifier(for directory: String) -> String {
@@ -1098,6 +1430,28 @@ final class TerminalSession: NSObject, ObservableObject {
 
         let targetIndex = min(max(0, currentIndex + offset), blocks.count - 1)
         self.selectedBlockID = blocks[targetIndex].id
+    }
+
+    private func moveSearchSelection(by offset: Int) {
+        let matches = visibleBlocks
+        guard !matches.isEmpty else { return }
+        guard let selectedBlockID,
+              let index = matches.firstIndex(where: { $0.id == selectedBlockID }) else {
+            self.selectedBlockID = offset < 0 ? matches.last?.id : matches.first?.id
+            return
+        }
+        let next = (index + offset + matches.count) % matches.count
+        self.selectedBlockID = matches[next].id
+    }
+
+    nonisolated private static var architectureName: String {
+#if arch(arm64)
+        "arm64"
+#elseif arch(x86_64)
+        "x86_64"
+#else
+        "unknown"
+#endif
     }
 
     private func writeToPasteboard(_ string: String) {
@@ -1328,7 +1682,8 @@ final class TerminalSession: NSObject, ObservableObject {
             : "[Sensitive command omitted]"
         let id = blockTimeline.enqueue(
             command: visibleCommand,
-            workingDirectory: currentDirectory ?? shellConfiguration.workingDirectory
+            workingDirectory: currentDirectory ?? shellConfiguration.workingDirectory,
+            isRerunnable: sanitized.redactionCount == 0
         )
         commandAwaitingStartID = id
         selectedBlockID = id

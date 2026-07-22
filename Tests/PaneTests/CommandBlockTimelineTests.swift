@@ -103,4 +103,36 @@ final class CommandBlockTimelineTests: XCTestCase {
         XCTAssertEqual(completed.output, "Downloaded\nInstalled")
         XCTAssertEqual(completed.state, .completed(exitCode: 0))
     }
+
+    func testSearchMatchesCommandOutputDirectoryAndFailureState() {
+        let successful = CommandBlock(
+            command: "swift test",
+            workingDirectory: "/tmp/Pane",
+            state: .completed(exitCode: 0),
+            output: "All tests passed"
+        )
+        let failed = CommandBlock(
+            command: "npm test",
+            workingDirectory: "/tmp/Web",
+            state: .completed(exitCode: 1),
+            output: "Assertion failed"
+        )
+
+        XCTAssertTrue(BlockSearchQuery(text: "tests passed").matches(successful))
+        XCTAssertTrue(BlockSearchQuery(text: "pane").matches(successful))
+        XCTAssertTrue(BlockSearchQuery(text: "", filter: .failed).matches(failed))
+        XCTAssertFalse(BlockSearchQuery(text: "", filter: .failed).matches(successful))
+    }
+
+    func testRestoredCollapsedStateIsPreserved() throws {
+        var timeline = CommandBlockTimeline()
+        let restored = CommandBlock(
+            command: "pwd",
+            workingDirectory: "/tmp",
+            state: .completed(exitCode: 0),
+            isCollapsed: true
+        )
+        timeline.restore([restored])
+        XCTAssertTrue(try XCTUnwrap(timeline.block(id: restored.id)).isCollapsed)
+    }
 }
