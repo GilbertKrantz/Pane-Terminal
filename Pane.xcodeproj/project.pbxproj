@@ -29,6 +29,7 @@
 		100000000000000000000014 /* ShellIntegration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000018 /* ShellIntegration.swift */; };
 		100000000000000000000015 /* BlocksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000019 /* BlocksView.swift */; };
 		100000000000000000000016 /* CommandBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001A /* CommandBlockView.swift */; };
+		10000000000000000000002F /* CommandClickableTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002F /* CommandClickableTextView.swift */; };
 		100000000000000000000017 /* BlockOutputSanitizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001B /* BlockOutputSanitizerTests.swift */; };
 		100000000000000000000018 /* BlockStreamParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001C /* BlockStreamParserTests.swift */; };
 		100000000000000000000019 /* CommandBlockTimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001D /* CommandBlockTimelineTests.swift */; };
@@ -108,6 +109,7 @@
 		20000000000000000000002C /* RuntimeStateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeStateController.swift; sourceTree = "<group>"; };
 		20000000000000000000002D /* RuntimeStateSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeStateSettings.swift; sourceTree = "<group>"; };
 		20000000000000000000002E /* RuntimeStateSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeStateSettingsView.swift; sourceTree = "<group>"; };
+		20000000000000000000002F /* CommandClickableTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandClickableTextView.swift; sourceTree = "<group>"; };
 		C6E13DE3300FD1A2004ECCBE /* AppIcons.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcons.icon; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -206,6 +208,7 @@
 				20000000000000000000002E /* RuntimeStateSettingsView.swift */,
 				200000000000000000000019 /* BlocksView.swift */,
 				20000000000000000000001A /* CommandBlockView.swift */,
+				20000000000000000000002F /* CommandClickableTextView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -368,6 +371,7 @@
 				100000000000000000000014 /* ShellIntegration.swift in Sources */,
 				100000000000000000000015 /* BlocksView.swift in Sources */,
 				100000000000000000000016 /* CommandBlockView.swift in Sources */,
+				10000000000000000000002F /* CommandClickableTextView.swift in Sources */,
 				10000000000000000000001A /* AlternateScreenTranscriptFilter.swift in Sources */,
 				10000000000000000000001D /* CommandAutocomplete.swift in Sources */,
 				10000000000000000000001F /* WarmZshCompletionClient.swift in Sources */,

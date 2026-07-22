@@ -36,12 +36,14 @@ struct CommandBlockView: View {
                 .textSelection(.enabled)
 
             if !block.isCollapsed, !block.output.isEmpty {
-                Text(block.output)
-                    .font(.callout.monospaced())
-                    .foregroundStyle(.primary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 2)
+                CommandClickableTextView(
+                    text: block.output,
+                    font: .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular),
+                    textColor: .labelColor
+                )
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 2)
+                .help("Command-click links to open them")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
