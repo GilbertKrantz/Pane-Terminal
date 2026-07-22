@@ -35,6 +35,15 @@ struct CommandClickableTextView: NSViewRepresentable {
         textView.invalidateIntrinsicContentSize()
     }
 
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        nsView textView: CommandClickableNSTextView,
+        context: Context
+    ) -> CGSize? {
+        guard let width = proposal.width, width > 0 else { return nil }
+        return CGSize(width: width, height: textView.height(fitting: width))
+    }
+
     private var attributedText: NSAttributedString {
         let attributed = NSMutableAttributedString(
             string: text,
@@ -64,10 +73,32 @@ struct CommandClickableTextView: NSViewRepresentable {
 
 final class CommandClickableNSTextView: NSTextView {
     override var intrinsicContentSize: NSSize {
+        guard bounds.width > 0 else {
+            return NSSize(width: NSView.noIntrinsicMetric, height: 0)
+        }
         guard let textContainer, let layoutManager else { return super.intrinsicContentSize }
         layoutManager.ensureLayout(for: textContainer)
         let usedRect = layoutManager.usedRect(for: textContainer)
         return NSSize(width: NSView.noIntrinsicMetric, height: ceil(usedRect.height))
+    }
+
+    func height(fitting width: CGFloat) -> CGFloat {
+        guard let textContainer, let layoutManager else { return 0 }
+
+        if abs(frame.width - width) > 0.5 {
+            setFrameSize(NSSize(width: width, height: frame.height))
+        }
+        textContainer.containerSize.height = CGFloat.greatestFiniteMagnitude
+        layoutManager.ensureLayout(for: textContainer)
+        return ceil(layoutManager.usedRect(for: textContainer).height)
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        let widthChanged = abs(frame.width - newSize.width) > 0.5
+        super.setFrameSize(newSize)
+        if widthChanged {
+            invalidateIntrinsicContentSize()
+        }
     }
 
     override func clicked(onLink link: Any, at charIndex: Int) {
