@@ -32,7 +32,7 @@ final class BlocksViewScrollTests: XCTestCase {
 
         try await waitUntil("shell startup") {
             hostingView.layoutSubtreeIfNeeded()
-            return session.isShellRunning
+            return session.isShellReadyForInput
         }
 
         let command = "for pane_line in {1..30}; do printf 'timeline-line-%02d\\n' $pane_line; done"

@@ -35,6 +35,43 @@ final class TerminalSessionIntegrationTests: XCTestCase {
     }
 
     @MainActor
+    func testShellInitializationBlocksDraftSubmissionUntilReady() async throws {
+        let session = makeTestSession()
+        session.commandDraft = "printf 'ready-after-initialization\\n'"
+
+        XCTAssertEqual(session.shellReadiness, .starting)
+        XCTAssertFalse(session.isShellReadyForInput)
+
+        session.submitDraft()
+
+        XCTAssertTrue(session.blocks.isEmpty)
+        XCTAssertEqual(session.commandDraft, "printf 'ready-after-initialization\\n'")
+
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        XCTAssertFalse(session.isShellReadyForInput)
+        try await waitUntil("shell initialization to finish", timeout: 5) {
+            session.shellReadiness == .ready && session.isShellReadyForInput
+        }
+
+        session.submitDraft()
+        try await waitUntil("post-initialization command to complete", timeout: 5) {
+            session.blocks.contains { block in
+                guard block.command == "printf 'ready-after-initialization\\n'" else {
+                    return false
+                }
+                if case .completed = block.state { return true }
+                return false
+            }
+        }
+        XCTAssertTrue(session.commandDraft.isEmpty)
+    }
+
+    @MainActor
     func testBlocksComposerHasAFullWidthEditableTextView() async throws {
         NSWindow.allowsAutomaticWindowTabbing = false
         let configuration = ShellConfiguration.loginZsh(
@@ -60,8 +97,12 @@ final class TerminalSessionIntegrationTests: XCTestCase {
             session.shutdown()
         }
 
-        hostingView.layoutSubtreeIfNeeded()
-        try await Task.sleep(nanoseconds: 150_000_000)
+        try await waitUntil("shell readiness and composer mount", timeout: 5) {
+            hostingView.layoutSubtreeIfNeeded()
+            return session.isShellReadyForInput
+                && self.findTextView(in: hostingView) != nil
+        }
+        try await Task.sleep(nanoseconds: 100_000_000)
         hostingView.layoutSubtreeIfNeeded()
 
         let textView = try XCTUnwrap(findTextView(in: hostingView))
@@ -203,6 +244,9 @@ final class TerminalSessionIntegrationTests: XCTestCase {
         session.attach(terminalView: terminalView)
         defer { session.shutdown() }
 
+        try await waitUntil("shell initialization before alternate screen", timeout: 5) {
+            session.isShellReadyForInput
+        }
         terminalView.feed(text: "\u{001B}[?1049h")
         try await waitUntil("embedded direct input after entering alternate screen") {
             session.isAlternateScreenActive
@@ -343,9 +387,16 @@ final class TerminalSessionIntegrationTests: XCTestCase {
     }
 
     @MainActor
-    func testManualSecureInputSuspendsAndRestoresComposerDraft() {
+    func testManualSecureInputSuspendsAndRestoresComposerDraft() async throws {
         let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
         defer { session.shutdown() }
+        try await waitUntil("shell initialization before secure input", timeout: 5) {
+            session.isShellReadyForInput
+        }
         session.commandDraft = "unrelated draft"
 
         session.enterSecureInput()
@@ -728,6 +779,9 @@ final class TerminalSessionIntegrationTests: XCTestCase {
         session.attach(terminalView: terminalView)
         defer { session.shutdown() }
 
+        try await waitUntil("interactive shell initialization", timeout: 5) {
+            session.isShellReadyForInput
+        }
         session.commandDraft = "printf 'PANE_ZSHRC=%s\\n' \"$PANE_ZSHRC\""
         session.submitDraft()
 
@@ -756,7 +810,9 @@ final class TerminalSessionIntegrationTests: XCTestCase {
         session.attach(terminalView: terminalView)
         defer { session.shutdown() }
 
-        XCTAssertTrue(session.isShellRunning)
+        try await waitUntil("persistent shell initialization", timeout: 5) {
+            session.isShellReadyForInput
+        }
         session.commandDraft = "cd /"
         session.submitDraft()
         try await waitUntil("cd command to complete") {
@@ -1341,5 +1397,355 @@ final class TerminalSessionIntegrationTests: XCTestCase {
             }
         }
         return nil
+    }
+}
+
+extension TerminalSessionIntegrationTests {
+    @MainActor
+    func testStandardCopyCommandSanitizesSecrets() throws {
+        let session = TerminalSession()
+        session.submit(command: "curl -H 'Authorization: Bearer pane-secret-token-1234567890' https://example.com")
+        let block = try XCTUnwrap(session.blocks.last)
+
+        session.copyCommand(id: block.id)
+        let copied = NSPasteboard.general.string(forType: .string) ?? ""
+
+        XCTAssertFalse(copied.contains("pane-secret-token-1234567890"))
+    }
+
+    @MainActor
+    func testNormalCopyCommandRemainsUnchanged() throws {
+        let session = TerminalSession()
+        let command = "echo hello"
+        session.submit(command: command)
+        let block = try XCTUnwrap(session.blocks.last)
+
+        session.copyCommand(id: block.id)
+
+        XCTAssertEqual(NSPasteboard.general.string(forType: .string), command)
+    }
+
+    @MainActor
+    func testStaleFocusGenerationIsIgnored() {
+        let session = TerminalSession()
+        session.requestFocus(.authoritativeTerminal)
+        let queuedGeneration = session.focusGeneration
+        session.requestFocus(.composer)
+
+        XCTAssertNotEqual(session.focusGeneration, queuedGeneration)
+        XCTAssertEqual(session.focusTarget, .composer)
+    }
+
+    @MainActor
+    func testTerminalRepresentableUpdatePreservesSearchFieldFocus() async throws {
+        let session = TerminalSession()
+        let terminalHost = NSHostingView(rootView: TerminalViewRepresentable(session: session))
+        let searchField = NSSearchField(frame: NSRect(x: 12, y: 212, width: 280, height: 28))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 640, height: 240))
+        terminalHost.frame = NSRect(x: 0, y: 0, width: 640, height: 200)
+        container.addSubview(terminalHost)
+        container.addSubview(searchField)
+        let window = NSWindow(
+            contentRect: container.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = container
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            session.shutdown()
+        }
+
+        container.layoutSubtreeIfNeeded()
+        XCTAssertTrue(window.makeFirstResponder(searchField))
+
+        session.requestFocus(.none)
+        terminalHost.rootView = TerminalViewRepresentable(session: session)
+        container.layoutSubtreeIfNeeded()
+        await drainMainQueue(turns: 2)
+
+        XCTAssertTrue(window.firstResponder === searchField.currentEditor())
+    }
+
+    @MainActor
+    func testCopyOutputAndCombinedCopySanitizeBearerTokens() async throws {
+        let session = makeTestSession()
+        let terminalView = TerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+        let secret = "pane-output-secret-1234567890"
+        let command = "printf 'Authorization: Bearer (secret)\\n'"
+
+        session.submit(command: command)
+        try await waitUntil("secret-bearing output to complete", timeout: 5) {
+            session.blocks.contains { block in
+                guard block.command == command else { return false }
+                if case .completed = block.state { return true }
+                return false
+            }
+        }
+        let block = try XCTUnwrap(session.blocks.first { $0.command == command })
+
+        session.copyOutput(id: block.id)
+        let outputCopy = NSPasteboard.general.string(forType: .string) ?? ""
+        session.copyCommandAndOutput(id: block.id)
+        let combinedCopy = NSPasteboard.general.string(forType: .string) ?? ""
+
+        XCTAssertFalse(outputCopy.contains(secret))
+        XCTAssertFalse(combinedCopy.contains(secret))
+        XCTAssertFalse(outputCopy.isEmpty)
+        XCTAssertFalse(combinedCopy.isEmpty)
+    }
+
+    @MainActor
+    func testRestartPersistsActiveCommandAsInterruptedWithStableIDAndOutput() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Pane-RestartPersistence-(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databaseURL = directory.appendingPathComponent("runtime.sqlite")
+        let controller = RuntimeStateController(
+            databaseURL: databaseURL,
+            configuration: persistenceTestConfiguration
+        )
+        let session = TerminalSession(
+            shellConfiguration: testShellConfiguration,
+            runtimeStateController: controller
+        )
+        let terminalView = TerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+        let command = "printf 'PANE_BEFORE_RESTART\\n'; sleep 10"
+
+        session.submit(command: command)
+        try await waitUntil("restart command to become active", timeout: 5) {
+            session.activeCommandBlock?.command == command
+                && session.activeCommandBlock?.state == .running
+        }
+        let blockID = try XCTUnwrap(session.activeCommandBlock?.id)
+        session.restartShell()
+        session.restartShell()
+        XCTAssertTrue(session.isRestartInProgress)
+        XCTAssertEqual(session.shellReadiness, .starting)
+        XCTAssertFalse(session.isShellReadyForInput)
+        try await waitUntil("restart finalization", timeout: 5) {
+            session.lastShellRestartAt != nil && !session.isRestartInProgress
+        }
+        try await waitUntil("restarted shell initialization", timeout: 5) {
+            session.isShellReadyForInput
+        }
+
+        let context = try await SQLiteRuntimeStateStore(databaseURL: databaseURL)
+            .loadRecentContext(workspaceID: nil, repositoryID: nil, limit: 20)
+        let matchingEvents = context.commandEvents.filter { $0.blockID == blockID }
+        let event = try XCTUnwrap(matchingEvents.first)
+        XCTAssertEqual(matchingEvents.count, 1)
+        XCTAssertEqual(event.completion, .interrupted)
+        XCTAssertEqual(event.command, command)
+        XCTAssertTrue(event.sanitizedOutputSummary?.contains("PANE_BEFORE_RESTART") == true)
+        XCTAssertEqual(event.outputKind, .excerpt)
+    }
+
+    @MainActor
+    func testApplicationExitPersistsSensitiveCommandAsNonRerunnablePlaceholder() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Pane-SensitiveExit-(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databaseURL = directory.appendingPathComponent("runtime.sqlite")
+        let controller = RuntimeStateController(
+            databaseURL: databaseURL,
+            configuration: persistenceTestConfiguration
+        )
+        let session = TerminalSession(
+            shellConfiguration: testShellConfiguration,
+            runtimeStateController: controller
+        )
+        let terminalView = TerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        let secret = "pane-sensitive-exit-1234567890"
+        let command = "OPENAI_API_KEY=(secret) sleep 10"
+
+        session.submit(command: command)
+        try await waitUntil("sensitive command to become active", timeout: 5) {
+            session.activeCommandBlock?.command == command
+                && session.activeCommandBlock?.state == .running
+        }
+        let blockID = try XCTUnwrap(session.activeCommandBlock?.id)
+        await session.finalizeApplicationExit()
+
+        let context = try await SQLiteRuntimeStateStore(databaseURL: databaseURL)
+            .loadRecentContext(workspaceID: nil, repositoryID: nil, limit: 20)
+        let event = try XCTUnwrap(context.commandEvents.first { $0.blockID == blockID })
+        XCTAssertEqual(event.completion, .interrupted)
+        XCTAssertEqual(event.command, "[Sensitive command interrupted]")
+        XCTAssertNil(event.sanitizedOutputSummary)
+        XCTAssertEqual(event.outputKind, .none)
+        XCTAssertFalse(String(describing: context).contains(secret))
+        let persistedBytes = try FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ).reduce(into: Data()) { bytes, url in
+            bytes.append(try Data(contentsOf: url))
+        }
+        XCTAssertFalse(String(decoding: persistedBytes, as: UTF8.self).contains(secret))
+
+        let restoredSession = TerminalSession()
+        restoredSession.restoreRuntimeContext(
+            context,
+            restoreCommandHistory: true,
+            restoreVisibleBlocks: true
+        )
+        let restoredBlock = try XCTUnwrap(restoredSession.blocks.first { $0.id == blockID })
+        XCTAssertFalse(restoredBlock.isRerunnable)
+        restoredSession.copyCommandAndOutput(id: blockID)
+        XCTAssertFalse((NSPasteboard.general.string(forType: .string) ?? "").contains(secret))
+    }
+
+    @MainActor
+    func testControlledShutdownPersistsActiveCommandOnceAndRejectsSubmissions() async throws {
+        let ephemeralStore = InMemoryRuntimeStateStore()
+        var configuration = persistenceTestConfiguration
+        configuration.persistenceEnabled = false
+        let controller = RuntimeStateController(
+            databaseURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("unused-(UUID().uuidString).sqlite"),
+            configuration: configuration,
+            ephemeralStore: ephemeralStore
+        )
+        let session = TerminalSession(
+            shellConfiguration: testShellConfiguration,
+            runtimeStateController: controller
+        )
+        let terminalView = TerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        let command = "printf 'PANE_BEFORE_SHUTDOWN\\n'; sleep 10"
+
+        session.submit(command: command)
+        try await waitUntil("shutdown command to become active", timeout: 5) {
+            session.activeCommandBlock?.command == command
+                && session.activeCommandBlock?.state == .running
+        }
+        let blockID = try XCTUnwrap(session.activeCommandBlock?.id)
+        session.shutdown()
+        session.shutdown()
+        session.submit(command: "echo must-not-run")
+        XCTAssertTrue(session.isShuttingDown)
+        try await waitUntil("controlled shutdown finalization", timeout: 5) {
+            !session.isShellRunning
+        }
+
+        let context = try await ephemeralStore.loadRecentContext(
+            workspaceID: nil, repositoryID: nil, limit: 20
+        )
+        let matchingEvents = context.commandEvents.filter { $0.blockID == blockID }
+        XCTAssertEqual(matchingEvents.count, 1)
+        XCTAssertEqual(matchingEvents.first?.completion, .interrupted)
+        XCTAssertFalse(session.blocks.contains { $0.command == "echo must-not-run" })
+    }
+
+    @MainActor
+    func testUnexpectedShellExitPersistsActiveCommandAsInterrupted() async throws {
+        let ephemeralStore = InMemoryRuntimeStateStore()
+        var configuration = persistenceTestConfiguration
+        configuration.persistenceEnabled = false
+        let controller = RuntimeStateController(
+            databaseURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("unused-(UUID().uuidString).sqlite"),
+            configuration: configuration,
+            ephemeralStore: ephemeralStore
+        )
+        let session = TerminalSession(
+            shellConfiguration: testShellConfiguration,
+            runtimeStateController: controller
+        )
+        let terminalView = TerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+        let command = "printf 'PANE_BEFORE_SHELL_EXIT\\n'; kill -KILL $$"
+
+        session.submit(command: command)
+        try await waitUntil("shell process to exit", timeout: 5) {
+            !session.isShellRunning && session.shellExitStatus != nil
+        }
+        let blockID = try XCTUnwrap(session.blocks.first { $0.command == command }?.id)
+        var persistedEvent: PersistedCommandEvent?
+        let persistenceDeadline = Date().addingTimeInterval(5)
+        while persistedEvent == nil, Date() < persistenceDeadline {
+            let context = try await ephemeralStore.loadRecentContext(
+                workspaceID: nil, repositoryID: nil, limit: 20
+            )
+            persistedEvent = context.commandEvents.first { event in
+                event.blockID == blockID && event.completion == .interrupted
+            }
+            if persistedEvent == nil {
+                try await Task.sleep(nanoseconds: 5_000_000)
+            }
+        }
+        XCTAssertNotNil(persistedEvent, "Expected shell-exit event persistence")
+
+        let finalizedBlock = try XCTUnwrap(session.blocks.first { $0.id == blockID })
+        if case .interrupted(let exitCode) = finalizedBlock.state {
+            XCTAssertEqual(exitCode, 137)
+        } else {
+            XCTFail("Expected interrupted shell-exit block")
+        }
+    }
+
+    @MainActor
+    func testSecureInputFocusIntentOverridesAndSafelyReturnsToComposer() async throws {
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+        try await waitUntil("shell initialization before focus transition", timeout: 5) {
+            session.isShellReadyForInput
+        }
+        session.requestFocus(.composer)
+
+        session.enterSecureInput()
+        XCTAssertEqual(session.focusTarget, .authoritativeTerminal)
+        XCTAssertEqual(session.inputRequirement, .secure)
+
+        session.exitSecureInput()
+        XCTAssertEqual(session.focusTarget, .composer)
+        XCTAssertEqual(session.mode, .blocks)
+        XCTAssertEqual(session.inputRequirement, .shellIdle)
+    }
+
+    @MainActor
+    private var testShellConfiguration: ShellConfiguration {
+        ShellConfiguration.loginZsh(
+            processEnvironment: [
+                "HOME": "/tmp",
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"
+            ],
+            homeDirectory: URL(fileURLWithPath: "/tmp")
+        )
+    }
+
+    private var persistenceTestConfiguration: RuntimeStateConfiguration {
+        RuntimeStateConfiguration(
+            persistenceEnabled: true,
+            commandHistoryEnabled: true,
+            visibleSessionRecoveryEnabled: true,
+            predictionContextEnabled: true,
+            outputSummariesEnabled: true,
+            filePathCollectionEnabled: true
+        )
     }
 }

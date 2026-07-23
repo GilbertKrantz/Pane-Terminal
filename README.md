@@ -242,6 +242,8 @@ Terminal delegate state is equality-guarded. Buffer-change notifications, visibi
 
 ## Implementation status
 
+**Limited private-alpha candidate — manual runtime compatibility validation pending**
+
 ### Working
 
 - Native SwiftUI/AppKit app named Pane with semantic colors, system material, SF Symbols, native controls, and adaptive appearance

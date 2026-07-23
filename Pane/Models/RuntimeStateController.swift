@@ -7,6 +7,7 @@ struct RuntimeStateConfiguration: Sendable, Equatable {
     var predictionContextEnabled: Bool
     var outputSummariesEnabled: Bool
     var filePathCollectionEnabled: Bool
+    var restoreAcrossWorkspacesEnabled: Bool = false
     var maximumRestoredSessions: Int = 3
     var maximumRestoredCommands: Int = 200
     var maximumRestoredOutputBytes: Int = 2 * 1_024 * 1_024
@@ -69,10 +70,11 @@ actor RuntimeStateController {
         }
 
         guard configuration.persistenceEnabled else {
+            let scope = restorationScope(for: currentSession)
             return RuntimeStateOperationResult(
                 restoredContext: try? await ephemeralStore.loadRecentContext(
-                    workspaceID: currentSession.workspaceID,
-                    repositoryID: currentSession.repositoryID,
+                    workspaceID: scope.workspaceID,
+                    repositoryID: scope.repositoryID,
                     limits: restorationLimits(commandLimit: restoreLimit)
                 ),
                 diagnostic: nil,
@@ -84,9 +86,10 @@ actor RuntimeStateController {
         do {
             let store = try durableStateStore()
             _ = try await store.markActiveSessionsInterrupted(excluding: currentSession.id)
+            let scope = restorationScope(for: currentSession)
             let context = try await store.loadRecentContext(
-                workspaceID: nil,
-                repositoryID: nil,
+                workspaceID: scope.workspaceID,
+                repositoryID: scope.repositoryID,
                 limits: restorationLimits(commandLimit: restoreLimit)
             )
             try await store.startSession(currentSession)
@@ -98,9 +101,10 @@ actor RuntimeStateController {
                 restoresVisibleBlocks: configuration.visibleSessionRecoveryEnabled
             )
         } catch {
+            let scope = restorationScope(for: currentSession)
             let fallback = try? await ephemeralStore.loadRecentContext(
-                workspaceID: currentSession.workspaceID,
-                repositoryID: currentSession.repositoryID,
+                workspaceID: scope.workspaceID,
+                repositoryID: scope.repositoryID,
                 limit: restoreLimit
             )
             return RuntimeStateOperationResult(
@@ -110,6 +114,16 @@ actor RuntimeStateController {
                 restoresVisibleBlocks: false
             )
         }
+    }
+
+    private func restorationScope(for session: RuntimeSession) -> (workspaceID: String?, repositoryID: String?) {
+        guard configuration.restoreAcrossWorkspacesEnabled else {
+            guard configuration.filePathCollectionEnabled else {
+                return ("pane-anonymous-local-scope", "pane-anonymous-local-scope")
+            }
+            return (session.workspaceID, session.repositoryID)
+        }
+        return (nil, nil)
     }
 
     private func restorationLimits(commandLimit: Int) -> RuntimeStateRestoreLimits {

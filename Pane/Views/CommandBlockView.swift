@@ -194,9 +194,6 @@ struct CommandBlockView: View {
         Button("Copy Command and Output", systemImage: "doc.on.clipboard") {
             session.copyCommandAndOutput(id: block.id)
         }
-        Button("Copy Sanitized Block", systemImage: "checkmark.shield") {
-            session.copySanitizedBlock(id: block.id)
-        }
         Button("Copy Working Directory", systemImage: "folder") {
             session.copyWorkingDirectory(id: block.id)
         }

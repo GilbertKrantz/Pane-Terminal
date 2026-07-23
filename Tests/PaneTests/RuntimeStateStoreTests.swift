@@ -633,3 +633,169 @@ final class RuntimeStateStoreTests: XCTestCase {
         return directory
     }
 }
+
+extension RuntimeStateStoreTests {
+    @MainActor
+    func testRestoreAcrossWorkspacesDefaultsOffInSettings() throws {
+        let suiteName = "Pane.RuntimeStateRestoreScopeTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = RuntimeStateSettings(defaults: defaults)
+        XCTAssertFalse(settings.restoreAcrossWorkspacesEnabled)
+        XCTAssertFalse(settings.configuration.restoreAcrossWorkspacesEnabled)
+    }
+
+    func testInMemoryRestoreScopesWorkspacesUnlessGlobalRequested() async throws {
+        let store = InMemoryRuntimeStateStore()
+        let sessionA = RuntimeSession(
+            id: UUID(), workspaceID: "workspace-a", repositoryID: nil,
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp/a", startedAt: Date(), lastActiveAt: Date()
+        )
+        let sessionB = RuntimeSession(
+            id: UUID(), workspaceID: "workspace-b", repositoryID: nil,
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp/b", startedAt: Date(), lastActiveAt: Date()
+        )
+        try await store.startSession(sessionA)
+        try await store.startSession(sessionB)
+        try await store.persistCommandEvent(PersistedCommandEvent(
+            sessionID: sessionA.id, timestamp: Date(), workingDirectory: "/tmp/a", command: "echo a",
+            exitCode: 0, durationMilliseconds: nil, sanitizedOutputSummary: nil, sanitizedErrorSummary: nil,
+            predictionSource: nil, predictionAction: nil
+        ))
+        try await store.persistCommandEvent(PersistedCommandEvent(
+            sessionID: sessionB.id, timestamp: Date(), workingDirectory: "/tmp/b", command: "echo b",
+            exitCode: 0, durationMilliseconds: nil, sanitizedOutputSummary: nil, sanitizedErrorSummary: nil,
+            predictionSource: nil, predictionAction: nil
+        ))
+
+        let scoped = try await store.loadRecentContext(workspaceID: "workspace-a", repositoryID: nil, limit: 10)
+        XCTAssertEqual(scoped.sessions.map(\.workspaceID), ["workspace-a"])
+        XCTAssertEqual(scoped.commandEvents.map(\.command), ["echo a"])
+
+        let global = try await store.loadRecentContext(workspaceID: nil, repositoryID: nil, limit: 10)
+        XCTAssertEqual(Set(global.commandEvents.map(\.command)), ["echo a", "echo b"])
+    }
+
+    func testControllerRestoreIsWorkspaceScopedGlobalOnlyByOptInAndDisabledWithoutPaths() async throws {
+        let directory = temporaryDirectory(named: "ControllerWorkspaceScope")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databaseURL = directory.appendingPathComponent("runtime.sqlite")
+        let store = try SQLiteRuntimeStateStore(databaseURL: databaseURL)
+        let base = Date().addingTimeInterval(-100)
+        let sessionA = RuntimeSession(
+            id: UUID(), workspaceID: "workspace-a", repositoryID: "repo-a",
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp/a",
+            startedAt: base,
+            lastActiveAt: base.addingTimeInterval(1), lifecycle: .closedCleanly
+        )
+        let sessionB = RuntimeSession(
+            id: UUID(), workspaceID: "workspace-b", repositoryID: "repo-b",
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp/b",
+            startedAt: base.addingTimeInterval(10),
+            lastActiveAt: base.addingTimeInterval(11), lifecycle: .closedCleanly
+        )
+        try await store.startSession(sessionA)
+        try await store.startSession(sessionB)
+        try await store.persistCommandEvent(PersistedCommandEvent(
+            sessionID: sessionA.id, timestamp: base.addingTimeInterval(2),
+            workingDirectory: "/tmp/a", command: "echo a", exitCode: 0,
+            durationMilliseconds: nil, sanitizedOutputSummary: nil,
+            sanitizedErrorSummary: nil, predictionSource: nil, predictionAction: nil
+        ))
+        try await store.persistCommandEvent(PersistedCommandEvent(
+            sessionID: sessionB.id, timestamp: base.addingTimeInterval(12),
+            workingDirectory: "/tmp/b", command: "echo b", exitCode: 0,
+            durationMilliseconds: nil, sanitizedOutputSummary: nil,
+            sanitizedErrorSummary: nil, predictionSource: nil, predictionAction: nil
+        ))
+
+        let baseConfiguration = RuntimeStateConfiguration(
+            persistenceEnabled: true,
+            commandHistoryEnabled: true,
+            visibleSessionRecoveryEnabled: true,
+            predictionContextEnabled: true,
+            outputSummariesEnabled: true,
+            filePathCollectionEnabled: true
+        )
+        let currentA = RuntimeSession(
+            id: UUID(), workspaceID: "workspace-a", repositoryID: "repo-a",
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp/a",
+            startedAt: Date(), lastActiveAt: Date()
+        )
+        let scoped = await RuntimeStateController(
+            databaseURL: databaseURL,
+            configuration: baseConfiguration
+        ).startSession(currentA)
+        XCTAssertEqual(scoped.restoredContext?.commandEvents.map(\.command), ["echo a"])
+
+        var globalConfiguration = baseConfiguration
+        globalConfiguration.restoreAcrossWorkspacesEnabled = true
+        let global = await RuntimeStateController(
+            databaseURL: databaseURL,
+            configuration: globalConfiguration
+        ).startSession(RuntimeSession(
+            id: UUID(), workspaceID: "workspace-c", repositoryID: "repo-c",
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp/c",
+            startedAt: Date(), lastActiveAt: Date()
+        ))
+        XCTAssertEqual(Set(global.restoredContext?.commandEvents.map(\.command) ?? []), ["echo a", "echo b"])
+
+        var noPathConfiguration = baseConfiguration
+        noPathConfiguration.filePathCollectionEnabled = false
+        let noPathRestore = await RuntimeStateController(
+            databaseURL: databaseURL,
+            configuration: noPathConfiguration
+        ).startSession(RuntimeSession(
+            id: UUID(), workspaceID: "workspace-a", repositoryID: "repo-a",
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp/a",
+            startedAt: Date(), lastActiveAt: Date()
+        ))
+        XCTAssertTrue(noPathRestore.restoredContext?.commandEvents.isEmpty == true)
+        XCTAssertTrue(noPathRestore.restoredContext?.sessions.isEmpty == true)
+    }
+
+    func testSQLiteSessionAndWorkspaceDeletionCascadeCommandEvents() async throws {
+        let directory = temporaryDirectory(named: "SQLiteForeignKeyCascade")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try SQLiteRuntimeStateStore(
+            databaseURL: directory.appendingPathComponent("runtime.sqlite")
+        )
+        let sessionA = RuntimeSession(
+            id: UUID(), workspaceID: "workspace-a", repositoryID: nil,
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp/a",
+            startedAt: Date(), lastActiveAt: Date()
+        )
+        let sessionB = RuntimeSession(
+            id: UUID(), workspaceID: "workspace-b", repositoryID: nil,
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp/b",
+            startedAt: Date(), lastActiveAt: Date()
+        )
+        try await store.startSession(sessionA)
+        try await store.startSession(sessionB)
+        for (session, command) in [(sessionA, "echo a"), (sessionB, "echo b")] {
+            try await store.persistCommandEvent(PersistedCommandEvent(
+                sessionID: session.id, timestamp: Date(),
+                workingDirectory: session.initialWorkingDirectory,
+                command: command, exitCode: 0, durationMilliseconds: nil,
+                sanitizedOutputSummary: nil, sanitizedErrorSummary: nil,
+                predictionSource: nil, predictionAction: nil
+            ))
+        }
+
+        try await store.deleteSession(sessionA.id)
+        var context = try await store.loadRecentContext(
+            workspaceID: nil, repositoryID: nil, limit: 10
+        )
+        XCTAssertEqual(context.sessions.map(\.id), [sessionB.id])
+        XCTAssertEqual(context.commandEvents.map(\.command), ["echo b"])
+
+        try await store.deleteWorkspace("workspace-b")
+        context = try await store.loadRecentContext(
+            workspaceID: nil, repositoryID: nil, limit: 10
+        )
+        XCTAssertTrue(context.sessions.isEmpty)
+        XCTAssertTrue(context.commandEvents.isEmpty)
+        XCTAssertTrue(context.features.isEmpty)
+    }
+}

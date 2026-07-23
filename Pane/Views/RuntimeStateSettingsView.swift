@@ -48,6 +48,13 @@ struct RuntimeStateSettingsView: View {
                     "Restore last working directory",
                     isOn: $settings.filePathCollectionEnabled
                 )
+                configurationToggle(
+                    "Restore across all workspaces",
+                    isOn: $settings.restoreAcrossWorkspacesEnabled
+                )
+                Text("When enabled, Pane may show commands from unrelated local directories and projects.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 storedCategory("Sanitized output excerpts", detail: settings.outputSummariesEnabled ? "Optional, enabled" : "Optional, disabled")
                 storedCategory("Runtime state", detail: "Lifecycle only; no raw bytes")
                 storedCategory("Application preferences", detail: "Stored locally")

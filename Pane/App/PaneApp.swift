@@ -112,6 +112,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil,
             queue: .main
         ) { [weak self] notification in
+            assert(Thread.isMainThread)
             MainActor.assumeIsolated {
                 guard let window = notification.object as? NSWindow else { return }
                 self?.applyIcon(to: [window])
@@ -183,11 +184,13 @@ private struct TerminalCommands: Commands {
                 session.focusDirectTerminal()
             }
             .keyboardShortcut("d", modifiers: [.command, .shift])
+            .disabled(!session.isShellReadyForInput)
 
             Button("Open Full Terminal") {
                 session.setMode(.terminal)
             }
             .keyboardShortcut("i", modifiers: [.command, .shift])
+            .disabled(!session.isShellReadyForInput)
 
             Button("Return to Blocks") {
                 session.focusComposer()
@@ -204,6 +207,7 @@ private struct TerminalCommands: Commands {
                 }
             }
             .keyboardShortcut("s", modifiers: [.command, .shift])
+            .disabled(!session.isShellReadyForInput && !session.isSecureInputActive)
 
             Divider()
 
@@ -223,7 +227,11 @@ private struct TerminalCommands: Commands {
                 session.rerunSelectedBlock()
             }
             .keyboardShortcut(.return, modifiers: [.command])
-            .disabled(session.mode != .blocks || session.selectedBlockID == nil)
+            .disabled(
+                session.mode != .blocks
+                    || session.selectedBlockID == nil
+                    || !session.isShellReadyForInput
+            )
 
             Button("Edit Selected Command") {
                 session.editSelectedBlock()
@@ -236,10 +244,12 @@ private struct TerminalCommands: Commands {
             Button("Send Interrupt") {
                 session.sendInterrupt()
             }
+            .disabled(!session.isShellReadyForInput)
 
             Button("Send End of File") {
                 session.sendEndOfFile()
             }
+            .disabled(!session.isShellReadyForInput)
 
             Divider()
 
@@ -256,6 +266,7 @@ private struct TerminalCommands: Commands {
                 session.requestRestartShell()
             }
             .keyboardShortcut("r", modifiers: [.command, .shift])
+            .disabled(session.isRestartInProgress || session.isShuttingDown)
 
             Button("Copy Local Diagnostics") {
                 session.copyLocalDiagnostics()

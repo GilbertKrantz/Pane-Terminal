@@ -15,7 +15,7 @@ struct CommandComposerView: View {
     @State private var selectionRequest: ComposerSelectionRequest?
 
     private var canSubmit: Bool {
-        session.isShellRunning
+        session.isShellReadyForInput
             && (presentedCommandBlock != nil
                 || !session.commandDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
@@ -149,8 +149,11 @@ struct CommandComposerView: View {
             selectionUTF16Offset: $caretUTF16Offset,
             selectionRequest: selectionRequest,
             shouldFocus: session.mode == .blocks
+                && session.isShellReadyForInput
                 && session.inputRequirement != .direct
-                && session.inputRequirement != .secure,
+                && session.inputRequirement != .secure
+                && session.focusTarget == .composer,
+            focusGeneration: session.focusGeneration,
             shouldRouteTerminalControlKeys: session.isCommandActive,
             onSubmit: { session.submitDraft() },
             onInterrupt: { session.sendInterrupt() },
@@ -633,6 +636,7 @@ private struct ComposerTextView: NSViewRepresentable {
     @Binding var selectionUTF16Offset: Int
     let selectionRequest: ComposerSelectionRequest?
     let shouldFocus: Bool
+    let focusGeneration: UInt64
     let shouldRouteTerminalControlKeys: Bool
     let onSubmit: () -> Void
     let onInterrupt: () -> Void
@@ -757,8 +761,8 @@ private struct ComposerTextView: NSViewRepresentable {
         var parent: ComposerTextView
         private var heightUpdateQueued = false
         private var isSynchronizingFromSwiftUI = false
-        private var focusRequestQueued = false
-        private var didRequestInitialFocus = false
+        private var queuedFocusGeneration: UInt64?
+        private var appliedFocusGeneration: UInt64?
         private var selectionUpdateQueued = false
         private var lastSelectionRequestID: UUID?
         var isMounted = false
@@ -828,9 +832,11 @@ private struct ComposerTextView: NSViewRepresentable {
         }
 
         private func requestFocus(for textView: NSTextView) {
+            let generation = parent.focusGeneration
             DispatchQueue.main.async { [weak self, weak textView] in
                 guard let self,
                       self.isMounted,
+                      self.parent.focusGeneration == generation,
                       self.parent.shouldFocus,
                       let textView,
                       let window = textView.window else { return }
@@ -859,21 +865,25 @@ private struct ComposerTextView: NSViewRepresentable {
         }
 
         func requestInitialFocus(for textView: NSTextView) {
+            let generation = parent.focusGeneration
             guard isMounted,
                   parent.shouldFocus,
-                  !didRequestInitialFocus,
-                  !focusRequestQueued else { return }
-            focusRequestQueued = true
+                  appliedFocusGeneration != generation,
+                  queuedFocusGeneration != generation else { return }
+            queuedFocusGeneration = generation
 
             DispatchQueue.main.async { [weak self, weak textView] in
                 guard let self else { return }
-                self.focusRequestQueued = false
+                if self.queuedFocusGeneration == generation {
+                    self.queuedFocusGeneration = nil
+                }
                 guard self.isMounted,
+                      self.parent.focusGeneration == generation,
                       self.parent.shouldFocus,
                       let textView,
                       let window = textView.window else { return }
                 if window.firstResponder === textView || window.makeFirstResponder(textView) {
-                    self.didRequestInitialFocus = true
+                    self.appliedFocusGeneration = generation
                 }
             }
         }

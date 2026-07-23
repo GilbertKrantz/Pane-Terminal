@@ -23,12 +23,20 @@ struct ContentView: View {
                 Divider()
                     .overlay(PaneTheme.separator.opacity(0.65))
 
-                CommandComposerView(session: session)
+                if session.isShellReadyForInput {
+                    CommandComposerView(session: session)
+                } else {
+                    ShellReadinessBar(session: session)
+                }
             } else if session.mode == .terminal {
                 Divider()
                     .overlay(PaneTheme.separator.opacity(0.65))
 
-                terminalModeBar
+                if session.isShellReadyForInput {
+                    terminalModeBar
+                } else {
+                    ShellReadinessBar(session: session)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -87,8 +95,14 @@ struct ContentView: View {
                     .padding(.trailing, PaneMetrics.contentTextColumn)
                     .padding(.top, 8)
             }
+
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay {
+            if !session.isShellReadyForInput {
+                ShellReadinessOverlay(session: session)
+            }
+        }
     }
 
     @ToolbarContentBuilder
@@ -99,6 +113,7 @@ struct ContentView: View {
                     .fixedSize(horizontal: true, vertical: false)
 
                 ModeSwitcher(selection: modeBinding)
+                    .disabled(!session.isShellReadyForInput)
 
                 terminalActionsMenu
                     .frame(width: 30, height: 30)
@@ -114,6 +129,7 @@ struct ContentView: View {
                     .fixedSize(horizontal: true, vertical: false)
 
                 ModeSwitcher(selection: modeBinding)
+                    .disabled(!session.isShellReadyForInput)
 
                 terminalActionsMenu
             }
@@ -194,7 +210,14 @@ struct ContentView: View {
     }
 
     private var shellStatusColor: Color {
-        if !session.isShellRunning { return .red }
+        switch session.shellReadiness {
+        case .starting, .initializing:
+            return .orange
+        case .stopped:
+            return .red
+        case .ready:
+            break
+        }
         if session.blockTimeline.activeBlockID != nil { return .yellow }
         return .secondary
     }
@@ -238,6 +261,127 @@ struct ContentView: View {
         .background(.bar)
         .padding(.horizontal, PaneMetrics.composerOuterInset)
         .padding(.vertical, 6)
+    }
+}
+
+private struct ShellReadinessOverlay: View {
+    @ObservedObject var session: TerminalSession
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.001)
+                .contentShape(Rectangle())
+
+            VStack(spacing: 12) {
+                if session.shellReadiness == .stopped && !session.isShuttingDown {
+                    Image(systemName: "exclamationmark.circle")
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundStyle(.secondary)
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                VStack(spacing: 5) {
+                    Text(title)
+                        .font(.headline)
+
+                    Text(detail)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if session.shellReadiness == .stopped && !session.isShuttingDown {
+                    Button("Restart Shell") {
+                        session.requestRestartShell()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(session.isRestartInProgress)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 20)
+            .frame(maxWidth: 360)
+            .background {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(.regularMaterial)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(PaneTheme.separator.opacity(0.7), lineWidth: 0.5)
+            }
+            .shadow(color: .black.opacity(0.12), radius: 16, y: 6)
+            .padding(24)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(title). \(detail)")
+    }
+
+    private var title: String {
+        if session.isShuttingDown { return "Closing shell…" }
+        if session.isRestartInProgress { return "Starting a new shell…" }
+        switch session.shellReadiness {
+        case .starting:
+            return "Starting your shell…"
+        case .initializing:
+            return "Initializing your shell…"
+        case .stopped:
+            return "Shell stopped"
+        case .ready:
+            return ""
+        }
+    }
+
+    private var detail: String {
+        if session.isShuttingDown {
+            return "Pane is saving the current session before closing."
+        }
+        if session.isRestartInProgress {
+            return "Input will be available when the new shell finishes initializing."
+        }
+        switch session.shellReadiness {
+        case .starting:
+            return "Pane is launching \(session.shellDisplayName). Input is temporarily unavailable."
+        case .initializing:
+            return "Loading your shell configuration. Input will be available when initialization finishes."
+        case .stopped:
+            return "Start a new shell to continue entering commands."
+        case .ready:
+            return ""
+        }
+    }
+}
+
+private struct ShellReadinessBar: View {
+    @ObservedObject var session: TerminalSession
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if session.shellReadiness == .stopped && !session.isShuttingDown {
+                Image(systemName: "exclamationmark.circle")
+                    .foregroundStyle(.secondary)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+            }
+
+            Text(session.activeProcessLabel)
+                .font(.caption.weight(.medium))
+
+            Text("Input is unavailable until the shell is ready.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Spacer()
+        }
+        .padding(.horizontal, PaneMetrics.composerOuterInset)
+        .padding(.vertical, 8)
+        .background(.bar)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -326,6 +470,7 @@ private struct TerminalActionsMenu: View {
             actionButton("Direct Input", systemImage: "keyboard") {
                 session.enterDirectInput()
             }
+            .disabled(!session.isShellReadyForInput)
             actionButton(
                 session.isSecureInputActive ? "Exit Secure Input" : "Enter Secure Input",
                 systemImage: session.isSecureInputActive ? "lock.open" : "lock"
@@ -336,15 +481,18 @@ private struct TerminalActionsMenu: View {
                     session.enterSecureInput()
                 }
             }
+            .disabled(!session.isShellReadyForInput && !session.isSecureInputActive)
 
             Divider().padding(.vertical, 3)
 
             actionButton("Send Interrupt", systemImage: "stop.circle") {
                 session.sendInterrupt()
             }
+            .disabled(!session.isShellReadyForInput)
             actionButton("Restart Shell", systemImage: "arrow.clockwise") {
                 session.requestRestartShell()
             }
+            .disabled(session.isRestartInProgress || session.isShuttingDown)
             actionButton("Copy Local Diagnostics", systemImage: "stethoscope") {
                 session.copyLocalDiagnostics()
             }

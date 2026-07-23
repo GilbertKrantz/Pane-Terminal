@@ -121,9 +121,6 @@ struct TerminalViewRepresentable: NSViewRepresentable {
         hostView.terminalView.terminal.updateFullScreen()
         hostView.terminalView.setNeedsDisplay(hostView.terminalView.bounds)
         hostView.terminalView.layer?.setNeedsDisplay()
-        DispatchQueue.main.async { [weak terminalView = hostView.terminalView] in
-            terminalView?.window?.makeFirstResponder(terminalView)
-        }
     }
 
     static func dismantleNSView(_ mountView: AuthoritativeTerminalMountView, coordinator: ()) {}
