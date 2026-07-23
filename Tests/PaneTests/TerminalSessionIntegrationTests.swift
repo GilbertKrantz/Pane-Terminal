@@ -302,7 +302,7 @@ final class TerminalSessionIntegrationTests: XCTestCase {
 
         XCTAssertEqual(session.mode, .blocks)
         XCTAssertEqual(session.inputRequirement, .lineOriented)
-        XCTAssertEqual(session.activeTerminalPresentation, .none)
+        XCTAssertEqual(session.activeTerminalPresentation, .liveMirror)
 
         session.sendInterrupt()
         try await waitUntil("shell foreground to restore Blocks mode", timeout: 8) {
@@ -428,7 +428,7 @@ final class TerminalSessionIntegrationTests: XCTestCase {
             if case .rawTermios = session.modeAttribution { return true }
             return false
         }
-        XCTAssertEqual(session.activeTerminalPresentation, .compact)
+        XCTAssertEqual(session.activeTerminalPresentation, .authoritativeInBlock)
 
         session.sendInterrupt()
         try await waitUntil("canonical shell input to restore Blocks mode", timeout: 8) {
@@ -545,6 +545,15 @@ final class TerminalSessionIntegrationTests: XCTestCase {
         }
 
         session.sendInterrupt()
+        try await waitUntil("interactive block to finish and return focus", timeout: 8) {
+            guard let block = session.blocks.first(where: { $0.command == command }) else {
+                return false
+            }
+            if case .interrupted = block.state {
+                return session.focusTarget == .composer
+            }
+            return false
+        }
     }
 
     @MainActor
@@ -994,6 +1003,9 @@ final class TerminalSessionIntegrationTests: XCTestCase {
 
         let completedBlock = try XCTUnwrap(session.blockTimeline.block(id: blockID))
         XCTAssertEqual(completedBlock.output, "PANE_PROGRESS_DONE")
+        let snapshot = try XCTUnwrap(completedBlock.terminalSnapshot)
+        XCTAssertFalse(snapshot.bytes.isEmpty)
+        XCTAssertFalse(snapshot.isTruncated)
         XCTAssertEqual(
             occurrenceCount(
                 of: "PANE_PROGRESS_DONE",

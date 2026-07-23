@@ -4,10 +4,11 @@ import Darwin
 import Foundation
 @preconcurrency import SwiftTerm
 
-private struct BoundedByteTail {
+struct BoundedByteTail {
     private let limit: Int
     private var storage = Data()
     private var discardedCount = 0
+    private var hasDiscardedBytes = false
 
     init(limit: Int) {
         self.limit = limit
@@ -15,6 +16,10 @@ private struct BoundedByteTail {
 
     var isEmpty: Bool {
         storage.count == discardedCount
+    }
+
+    var isTruncated: Bool {
+        hasDiscardedBytes
     }
 
     var data: Data {
@@ -25,15 +30,19 @@ private struct BoundedByteTail {
         guard !data.isEmpty else { return }
 
         if data.count >= limit {
+            let replacingRetainedBytes = !isEmpty
             storage = Data(data.suffix(limit))
             discardedCount = 0
+            hasDiscardedBytes = hasDiscardedBytes || replacingRetainedBytes || data.count > limit
             return
         }
 
         storage.append(data)
         let retainedCount = storage.count - discardedCount
         if retainedCount > limit {
-            discardedCount += retainedCount - limit
+            let overflow = retainedCount - limit
+            discardedCount += overflow
+            hasDiscardedBytes = true
         }
 
         // Compact in coarse batches so a long download does not copy the
@@ -47,6 +56,7 @@ private struct BoundedByteTail {
     mutating func removeAll() {
         storage.removeAll(keepingCapacity: true)
         discardedCount = 0
+        hasDiscardedBytes = false
     }
 }
 
@@ -128,7 +138,14 @@ final class TerminalSession: NSObject, ObservableObject {
     @Published private(set) var blockTimeline = CommandBlockTimeline()
     @Published private(set) var isAlternateScreenActive = false
     @Published private(set) var modeAttribution: InputModeAttribution = .manual
-    @Published private(set) var inputRequirement: TerminalInputRequirement = .shellIdle
+    @Published private(set) var inputRequirement: TerminalInputRequirement = .shellIdle {
+        didSet {
+            guard blockTimeline.activeBlockID != nil,
+                  !isAlternateScreenActive,
+                  inputRequirement == .direct || inputRequirement == .secure else { return }
+            activeBlockUsedNonAlternateDirectInteraction = true
+        }
+    }
     @Published private(set) var terminalSecurityState: TerminalSecurityState = .normal
     @Published private(set) var runtimeStateDiagnostic: String?
     @Published private(set) var activeCommandVisibleLineCount = 1
@@ -161,6 +178,9 @@ final class TerminalSession: NSObject, ObservableObject {
     private var streamParser = BlockStreamParser()
     private var transcriptFilter = AlternateScreenTranscriptFilter()
     private var activeBlockOutput = BoundedByteTail(limit: 4 * 1_024 * 1_024)
+    private var activeBlockTerminalBytes = BoundedByteTail(limit: 4 * 1_024 * 1_024)
+    private var activeBlockUsedNonAlternateDirectInteraction = false
+    private var activeBlockEnteredAlternateScreen = false
     private var pendingLiveCommandOutput = Data()
     private var isLiveCommandFlushScheduled = false
     private var activeCommandCompletedLineCount = 0
@@ -923,6 +943,10 @@ final class TerminalSession: NSObject, ObservableObject {
         for event in events {
             switch event {
             case .output(let data):
+                if data.range(of: AlternateScreenTranscriptFilter.transitionPlaceholder) != nil {
+                    activeBlockEnteredAlternateScreen = true
+                }
+                activeBlockTerminalBytes.append(data)
                 routeActiveBlockOutput(data)
 
             case .commandStarted(let command):
@@ -962,18 +986,21 @@ final class TerminalSession: NSObject, ObservableObject {
 
                 if blockTimeline.activeBlockID != nil {
                     let output = finalizedActiveBlockOutput()
+                    let terminalSnapshot = finalizedActiveTerminalSnapshot()
                     if exitCode == 128 + SIGINT,
                        let activeID = blockTimeline.activeBlockID {
                         blockTimeline.interruptActive(
                             exitCode: exitCode,
-                            output: output
+                            output: output,
+                            terminalSnapshot: terminalSnapshot
                         )
                         selectedBlockID = activeID
                         persistCompletedBlock(id: activeID)
                     } else {
                         if let id = blockTimeline.finishActive(
                             exitCode: exitCode,
-                            output: output
+                            output: output,
+                            terminalSnapshot: terminalSnapshot
                         ) {
                             selectedBlockID = id
                             persistCompletedBlock(id: id)
@@ -1074,7 +1101,12 @@ final class TerminalSession: NSObject, ObservableObject {
         }
 
         let output = finalizedActiveBlockOutput()
-        blockTimeline.interruptUnfinished(exitCode: exitCode, activeOutput: output)
+        let terminalSnapshot = finalizedActiveTerminalSnapshot()
+        blockTimeline.interruptUnfinished(
+            exitCode: exitCode,
+            activeOutput: output,
+            activeTerminalSnapshot: terminalSnapshot
+        )
 
         defer {
             clearActiveBlockCapture()
@@ -1150,6 +1182,9 @@ final class TerminalSession: NSObject, ObservableObject {
     private func beginActiveBlockCapture(blockID: UUID) {
         guard blockTimeline.activeBlockID == blockID else { return }
         activeBlockOutput.removeAll()
+        activeBlockTerminalBytes.removeAll()
+        activeBlockUsedNonAlternateDirectInteraction = false
+        activeBlockEnteredAlternateScreen = false
         resetActiveCommandLineEstimate()
         pendingLiveCommandOutput.removeAll(keepingCapacity: true)
         isLiveCommandFlushScheduled = false
@@ -1559,8 +1594,49 @@ final class TerminalSession: NSObject, ObservableObject {
         return BlockOutputSanitizer.sanitize(activeBlockOutput.data)
     }
 
+
+    private func finalizedActiveTerminalSnapshot() -> TerminalReplaySnapshot? {
+        guard blockTimeline.activeBlockID != nil else { return nil }
+        let rawBytes = activeBlockTerminalBytes.data
+        let requiresRichRendering = Self.requiresRichTerminalRendering(rawBytes)
+            || (activeBlockUsedNonAlternateDirectInteraction && !activeBlockEnteredAlternateScreen)
+        guard requiresRichRendering else { return nil }
+
+        let safeBytes = TerminalReplaySanitizer.sanitize(rawBytes)
+        guard !safeBytes.isEmpty else { return nil }
+        return TerminalReplaySnapshot(
+            bytes: safeBytes,
+            columns: max(1, Int(windowSize.ws_col)),
+            rows: max(1, Int(windowSize.ws_row)),
+            isTruncated: activeBlockTerminalBytes.isTruncated
+        )
+    }
+
+    nonisolated static func requiresRichTerminalRendering(_ data: Data) -> Bool {
+        guard !data.isEmpty else { return false }
+        var sawCarriageReturn = false
+        var previousWasCarriageReturn = false
+
+        for byte in data {
+            if byte == 0x1B || byte == 0x9B { return true }
+            if byte == 0x08 { return true }
+            if byte == 0x0D {
+                sawCarriageReturn = true
+                previousWasCarriageReturn = true
+                continue
+            }
+            if previousWasCarriageReturn, byte != 0x0A { return true }
+            previousWasCarriageReturn = false
+        }
+
+        return sawCarriageReturn && !data.contains(0x0A)
+    }
+
     private func clearActiveBlockCapture() {
         activeBlockOutput.removeAll()
+        activeBlockTerminalBytes.removeAll()
+        activeBlockUsedNonAlternateDirectInteraction = false
+        activeBlockEnteredAlternateScreen = false
         resetActiveCommandLineEstimate()
         pendingLiveCommandOutput.removeAll(keepingCapacity: true)
         isLiveCommandFlushScheduled = false
@@ -1697,6 +1773,9 @@ final class TerminalSession: NSObject, ObservableObject {
         isAlternateScreenActive = isActive
 
         if isActive {
+            if blockTimeline.activeBlockID != nil {
+                activeBlockEnteredAlternateScreen = true
+            }
             if mode == .blocks {
                 shouldReturnToBlocksAfterAlternateScreen = true
                 // TUIs commonly disable ECHO immediately before entering the
@@ -1900,16 +1979,18 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     var shouldEmbedAuthoritativeTerminalInActiveBlock: Bool {
-        activeTerminalPresentation != .none
+        activeTerminalPresentation == .authoritativeInBlock
+            || activeTerminalPresentation == .expanded
     }
 
     var activeTerminalPresentation: ActiveTerminalPresentation {
-        guard mode == .blocks, isCommandActive else { return .none }
+        guard isCommandActive else { return mode == .terminal ? .fullTerminal : .hidden }
         if isAlternateScreenActive { return .expanded }
+        if mode == .terminal { return .fullTerminal }
         if inputRequirement == .direct || inputRequirement == .secure {
-            return .compact
+            return .authoritativeInBlock
         }
-        return .none
+        return .liveMirror
     }
 
     var shouldPresentExpandedAuthoritativeTerminal: Bool {
@@ -1917,7 +1998,7 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     var shouldPresentCompactAuthoritativeTerminal: Bool {
-        activeTerminalPresentation == .compact
+        activeTerminalPresentation == .authoritativeInBlock
     }
 
     /// Pane's precmd marker is emitted only after the foreground command has

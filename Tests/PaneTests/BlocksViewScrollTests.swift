@@ -157,10 +157,19 @@ final class BlocksViewScrollTests: XCTestCase {
     private func commandOutputView(
         containing marker: String,
         in view: NSView
-    ) -> CommandClickableNSTextView? {
+    ) -> NSView? {
         if let outputView = view as? CommandClickableNSTextView,
            outputView.string.contains(marker) {
             return outputView
+        }
+        if let outputView = view as? FrozenBlockTerminalView {
+            let text = String(
+                data: outputView.terminal.getBufferAsData(kind: .active),
+                encoding: .utf8
+            ) ?? ""
+            if text.contains(marker) {
+                return outputView
+            }
         }
         for subview in view.subviews {
             if let outputView = commandOutputView(containing: marker, in: subview) {

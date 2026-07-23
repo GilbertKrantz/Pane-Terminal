@@ -23,6 +23,19 @@ private func applyPaneTerminalPalette(to terminalView: TerminalView) {
     }
 }
 
+private func applyFrozenBlockTerminalPalette(to terminalView: TerminalView) {
+    let foreground = PaneTheme.terminalForeground(
+        for: terminalView.effectiveAppearance
+    )
+    if !terminalView.nativeBackgroundColor.isEqual(NSColor.clear) {
+        terminalView.nativeBackgroundColor = .clear
+    }
+    if !terminalView.nativeForegroundColor.isEqual(foreground) {
+        terminalView.nativeForegroundColor = foreground
+    }
+    terminalView.layer?.backgroundColor = NSColor.clear.cgColor
+}
+
 
 final class AuthoritativeTerminalHostView: NSView {
     let terminalView: PaneTerminalView
@@ -284,5 +297,116 @@ struct LiveCommandTerminalViewRepresentable: NSViewRepresentable {
                 )
             }
         }
+    }
+}
+
+/// Read-only terminal emulator for completed blocks. It replays sanitized VT
+/// bytes into an emulator that owns no PTY and suppresses all protocol replies.
+final class FrozenBlockTerminalView: TerminalView {
+    override var isOpaque: Bool { false }
+
+    override func layout() {
+        super.layout()
+        hideSnapshotChrome()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        hideSnapshotChrome()
+    }
+
+    override func send(source: Terminal, data: ArraySlice<UInt8>) {
+        // Frozen terminal snapshots never send keyboard, mouse, or terminal
+        // protocol replies back to the live shell.
+    }
+
+    override func paste(_ sender: Any?) {}
+
+    func replay(_ snapshot: TerminalReplaySnapshot) {
+        applyFrozenBlockTerminalPalette(to: self)
+        terminalDelegate = nil
+        terminal.resetToInitialState()
+        terminal.resize(
+            cols: max(1, snapshot.columns),
+            rows: max(1, snapshot.rows)
+        )
+        feed(byteArray: Array(snapshot.bytes)[...])
+        terminal.hideCursor()
+        hideSnapshotChrome()
+        terminal.updateFullScreen()
+        setNeedsDisplay(bounds)
+    }
+
+    private func hideSnapshotChrome() {
+        for case let scroller as NSScroller in subviews {
+            scroller.isHidden = true
+        }
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+}
+
+struct FrozenBlockTerminalViewRepresentable: NSViewRepresentable {
+    let snapshot: TerminalReplaySnapshot
+    let accessibilityText: String
+
+    func makeNSView(context: Context) -> FrozenBlockTerminalView {
+        let terminalView = FrozenBlockTerminalView(
+            frame: .zero,
+            font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        )
+        terminalView.autoresizingMask = [.width, .height]
+        terminalView.changeScrollback(10_000)
+        terminalView.scrollerStyle = .overlay
+        terminalView.optionAsMetaKey = false
+        terminalView.allowMouseReporting = false
+        terminalView.caretViewTracksFocus = false
+        terminalView.terminalDelegate = nil
+        terminalView.setAccessibilityRole(.textArea)
+        terminalView.setAccessibilityValue(accessibilityText)
+        applyFrozenBlockTerminalPalette(to: terminalView)
+        terminalView.replay(snapshot)
+        return terminalView
+    }
+
+    func updateNSView(_ terminalView: FrozenBlockTerminalView, context: Context) {
+        applyFrozenBlockTerminalPalette(to: terminalView)
+        terminalView.setAccessibilityValue(accessibilityText)
+        if context.coordinator.snapshot != snapshot {
+            terminalView.replay(snapshot)
+            context.coordinator.snapshot = snapshot
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(snapshot: snapshot)
+    }
+
+    final class Coordinator {
+        var snapshot: TerminalReplaySnapshot
+
+        init(snapshot: TerminalReplaySnapshot) {
+            self.snapshot = snapshot
+        }
+    }
+}
+
+struct ActiveBlockAuthoritativeTerminalView: NSViewRepresentable {
+    @ObservedObject var session: TerminalSession
+
+    func makeNSView(context: Context) -> AuthoritativeTerminalMountView {
+        let mountView = AuthoritativeTerminalMountView()
+        let hostView = session.makeAuthoritativeTerminalHostView()
+        applyPaneTerminalPalette(to: hostView.terminalView)
+        mountView.mount(hostView)
+        return mountView
+    }
+
+    func updateNSView(_ mountView: AuthoritativeTerminalMountView, context: Context) {
+        let hostView = session.makeAuthoritativeTerminalHostView()
+        applyPaneTerminalPalette(to: hostView.terminalView)
+        mountView.mount(hostView)
+        hostView.terminalView.isHidden = false
+        hostView.terminalView.terminal.updateFullScreen()
+        hostView.terminalView.setNeedsDisplay(hostView.terminalView.bounds)
     }
 }

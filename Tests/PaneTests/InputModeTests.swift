@@ -106,8 +106,9 @@ extension InputModeTests {
 
 
     func testTerminalPresentationIsIndependentFromInputRequirement() {
-        XCTAssertNotEqual(ActiveTerminalPresentation.compact, .expanded)
-        XCTAssertNotEqual(ActiveTerminalPresentation.none, .compact)
+        XCTAssertNotEqual(ActiveTerminalPresentation.authoritativeInBlock, .expanded)
+        XCTAssertNotEqual(ActiveTerminalPresentation.hidden, .liveMirror)
+        XCTAssertNotEqual(ActiveTerminalPresentation.fullTerminal, .authoritativeInBlock)
     }
 
     func testSecureInputAttributionIsExplicit() {

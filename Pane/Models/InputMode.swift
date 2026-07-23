@@ -34,9 +34,11 @@ enum TerminalInputRequirement: Equatable, Sendable {
 /// A one-key confirmation and a normal-buffer TUI both need direct PTY input,
 /// but only the latter should replace the main Blocks workspace.
 enum ActiveTerminalPresentation: Equatable, Sendable {
-    case none
-    case compact
+    case hidden
+    case liveMirror
+    case authoritativeInBlock
     case expanded
+    case fullTerminal
 }
 
 enum InputModeAttribution: Equatable, Sendable {

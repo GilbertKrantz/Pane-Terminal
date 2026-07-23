@@ -451,8 +451,8 @@ private struct ActiveCommandSurface: View {
 
             if isRunning {
                 if session.shouldPresentCompactAuthoritativeTerminal {
-                    TerminalViewRepresentable(session: session)
-                        .id("authoritative-compact-\(block.id)")
+                    ActiveBlockAuthoritativeTerminalView(session: session)
+                        .id("authoritative-in-block-\(block.id)")
                         .frame(height: compactTerminalHeight)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 } else {

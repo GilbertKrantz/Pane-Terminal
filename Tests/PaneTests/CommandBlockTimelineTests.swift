@@ -105,6 +105,29 @@ final class CommandBlockTimelineTests: XCTestCase {
         XCTAssertEqual(completed.state, .completed(exitCode: 0))
     }
 
+    func testInterruptedRunningCommandRetainsMemoryOnlyTerminalSnapshot() throws {
+        var timeline = CommandBlockTimeline()
+        let id = timeline.enqueue(command: "interactive", workingDirectory: "/tmp")
+        XCTAssertEqual(timeline.beginNext(), id)
+        let snapshot = TerminalReplaySnapshot(
+            bytes: Data("\u{001B}[31mred\u{001B}[0m".utf8),
+            columns: 80,
+            rows: 24,
+            isTruncated: false
+        )
+
+        timeline.interruptUnfinished(
+            exitCode: 143,
+            activeOutput: "red",
+            activeTerminalSnapshot: snapshot
+        )
+
+        let interrupted = try XCTUnwrap(timeline.block(id: id))
+        XCTAssertEqual(interrupted.output, "red")
+        XCTAssertEqual(interrupted.terminalSnapshot, snapshot)
+        XCTAssertEqual(interrupted.state, .interrupted(exitCode: 143))
+    }
+
     func testSearchMatchesCommandOutputDirectoryAndFailureState() {
         let successful = CommandBlock(
             command: "swift test",

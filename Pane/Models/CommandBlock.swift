@@ -11,6 +11,13 @@ enum PersistedOutputKind: String, Codable, Sendable, Equatable {
     case excerpt
 }
 
+struct TerminalReplaySnapshot: Equatable, Sendable {
+    let bytes: Data
+    let columns: Int
+    let rows: Int
+    let isTruncated: Bool
+}
+
 struct CommandBlock: Identifiable, Equatable, Sendable {
     enum ExecutionState: Equatable, Sendable {
         case queued
@@ -28,6 +35,7 @@ struct CommandBlock: Identifiable, Equatable, Sendable {
     var completedAt: Date?
     var state: ExecutionState
     var output: String
+    var terminalSnapshot: TerminalReplaySnapshot?
     var isCollapsed: Bool
     var isRerunnable: Bool
     var origin: CommandBlockOrigin
@@ -42,6 +50,7 @@ struct CommandBlock: Identifiable, Equatable, Sendable {
         completedAt: Date? = nil,
         state: ExecutionState = .queued,
         output: String = "",
+        terminalSnapshot: TerminalReplaySnapshot? = nil,
         isCollapsed: Bool = false,
         isRerunnable: Bool = true,
         origin: CommandBlockOrigin = .live,
@@ -55,6 +64,7 @@ struct CommandBlock: Identifiable, Equatable, Sendable {
         self.completedAt = completedAt
         self.state = state
         self.output = output
+        self.terminalSnapshot = terminalSnapshot
         self.isCollapsed = isCollapsed
         self.isRerunnable = isRerunnable
         self.origin = origin
@@ -146,10 +156,12 @@ struct CommandBlockTimeline: Equatable, Sendable {
     mutating func finishActive(
         exitCode: Int32,
         output: String = "",
+        terminalSnapshot: TerminalReplaySnapshot? = nil,
         at date: Date = Date()
     ) -> UUID? {
         guard let activeBlockID, let index = index(of: activeBlockID) else { return nil }
         blocks[index].output = output
+        blocks[index].terminalSnapshot = terminalSnapshot
         blocks[index].completedAt = date
         blocks[index].state = .completed(exitCode: exitCode)
         self.activeBlockID = nil
@@ -159,10 +171,12 @@ struct CommandBlockTimeline: Equatable, Sendable {
     mutating func interruptActive(
         exitCode: Int32? = nil,
         output: String = "",
+        terminalSnapshot: TerminalReplaySnapshot? = nil,
         at date: Date = Date()
     ) {
         guard let activeBlockID, let index = index(of: activeBlockID) else { return }
         blocks[index].output = output
+        blocks[index].terminalSnapshot = terminalSnapshot
         blocks[index].completedAt = date
         blocks[index].state = .interrupted(exitCode: exitCode)
         self.activeBlockID = nil
@@ -171,6 +185,7 @@ struct CommandBlockTimeline: Equatable, Sendable {
     mutating func interruptUnfinished(
         exitCode: Int32? = nil,
         activeOutput: String = "",
+        activeTerminalSnapshot: TerminalReplaySnapshot? = nil,
         at date: Date = Date()
     ) {
         for index in blocks.indices {
@@ -180,6 +195,7 @@ struct CommandBlockTimeline: Equatable, Sendable {
                 blocks[index].state = .interrupted(exitCode: exitCode)
             case .running:
                 blocks[index].output = activeOutput
+                blocks[index].terminalSnapshot = activeTerminalSnapshot
                 blocks[index].completedAt = date
                 blocks[index].state = .interrupted(exitCode: exitCode)
             case .completed, .interrupted, .unknown:
@@ -271,6 +287,7 @@ struct CommandBlockTimeline: Equatable, Sendable {
             switch blocks[index].state {
             case .completed, .interrupted, .unknown:
                 blocks[index].output = ""
+                blocks[index].terminalSnapshot = nil
             case .queued, .running:
                 break
             }

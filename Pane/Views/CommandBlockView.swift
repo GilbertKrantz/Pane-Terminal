@@ -35,20 +35,8 @@ struct CommandBlockView: View {
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
 
-            if !block.isCollapsed, !block.output.isEmpty {
-                if block.outputKind == .excerpt {
-                    Text("Stored output excerpt")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
-                CommandClickableTextView(
-                    text: block.output,
-                    font: .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular),
-                    textColor: .labelColor
-                )
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 2)
-                .help("Command-click links to open them")
+            if !block.isCollapsed, hasVisibleOutput {
+                plainTextOutput
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -70,6 +58,29 @@ struct CommandBlockView: View {
         .contextMenu { overflowActions }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Command block: \(block.command), \(block.statusText)")
+    }
+
+
+    private var hasVisibleOutput: Bool {
+        !block.output.isEmpty
+    }
+
+    private var plainTextOutput: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if block.outputKind == .excerpt {
+                Text("Stored output excerpt")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            CommandClickableTextView(
+                text: block.output,
+                font: .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular),
+                textColor: .labelColor
+            )
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 2)
+            .help("Command-click links to open them")
+        }
     }
 
     private var blockSurface: Color {
