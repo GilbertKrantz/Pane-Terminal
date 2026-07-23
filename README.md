@@ -1,5 +1,9 @@
 # Pane
 
+<p align="center">
+  <img src="Design/Pane-AppIcon-transparent-master.png" alt="Pane app icon" width="160">
+</p>
+
 > A native macOS terminal for people who want a calm command line, structured command blocks, and a real persistent shell underneath.
 
 Pane takes inspiration from modern terminal projects like [Warp](https://github.com/warpdotdev/warp), [Ghostty](https://github.com/ghostty-org/ghostty), [iTerm2](https://github.com/gnachman/iTerm2), and [Tabby](https://github.com/Eugeny/tabby), then focuses that energy into one opinionated macOS app: a continuous terminal surface, a bottom-pinned multiline composer, and a timeline of commands you can read, search, rerun, and trust.
