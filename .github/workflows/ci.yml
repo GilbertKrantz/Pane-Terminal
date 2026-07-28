@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.4.app/Contents/Developer
+
+jobs:
+  swiftpm:
+    name: SwiftPM
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify pinned Xcode
+        run: |
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          swift --version
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            .build
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-swiftpm-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-swiftpm-
+
+      - name: Resolve packages
+        run: swift package resolve
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+  xcode:
+    name: Xcode app tests
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify pinned Xcode
+        run: |
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+
+      - name: Cache Xcode dependencies and build data
+        uses: actions/cache@v4
+        with:
+          path: |
+            .ci/DerivedData
+            .ci/SourcePackages
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-xcode-${{ hashFiles('Pane.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-xcode-
+
+      - name: Run app test target
+        run: |
+          xcodebuild \
+            -project Pane.xcodeproj \
+            -scheme Pane \
+            -destination 'platform=macOS' \
+            -configuration Debug \
+            -derivedDataPath .ci/DerivedData \
+            -clonedSourcePackagesDirPath .ci/SourcePackages \
+            -resultBundlePath .ci/PaneTests.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+      - name: Upload test result bundle
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pane-xcresult
+          path: .ci/PaneTests.xcresult
+          if-no-files-found: ignore
+          retention-days: 7

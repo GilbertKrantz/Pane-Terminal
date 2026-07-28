@@ -1902,6 +1902,13 @@ final class TerminalSession: NSObject, ObservableObject {
     var debugAuthoritativeHostView: NSView? { authoritativeTerminalHostView }
     var debugProcessGeneration: UInt64 { processGeneration }
     var debugPTYWindowSize: winsize { ptyController.windowSize }
+    var debugForegroundProcessName: String? {
+        guard let status = ptyController.foregroundStatus(),
+              status.processGroupID != status.shellProcessGroupID else {
+            return nil
+        }
+        return Self.processName(forProcessGroupID: status.processGroupID)
+    }
 #endif
 
     var shouldPresentExpandedAuthoritativeTerminal: Bool {

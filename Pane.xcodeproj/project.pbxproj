@@ -50,6 +50,7 @@
 		B10000000000000000000005 /* PTYController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000000000000005 /* PTYController.swift */; };
 		B10000000000000000000006 /* BlockLifecycleController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000000000000006 /* BlockLifecycleController.swift */; };
 		B10000000000000000000007 /* BlockLifecycleControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000000000000007 /* BlockLifecycleControllerTests.swift */; };
+		E10000000000000000000001 /* TerminalSessionHardeningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E200000000000000000000001 /* TerminalSessionHardeningTests.swift */; };
 		10000000000000000000001F /* WarmZshCompletionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000023 /* WarmZshCompletionClient.swift */; };
 		100000000000000000000024 /* TerminalSecurityState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000024 /* TerminalSecurityState.swift */; };
 		100000000000000000000032 /* TerminalReplaySanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000032 /* TerminalReplaySanitizer.swift */; };
@@ -123,6 +124,7 @@
 		B200000000000000000000005 /* PTYController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTYController.swift; sourceTree = "<group>"; };
 		B200000000000000000000006 /* BlockLifecycleController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockLifecycleController.swift; sourceTree = "<group>"; };
 		B200000000000000000000007 /* BlockLifecycleControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockLifecycleControllerTests.swift; sourceTree = "<group>"; };
+		E200000000000000000000001 /* TerminalSessionHardeningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessionHardeningTests.swift; sourceTree = "<group>"; };
 		200000000000000000000023 /* WarmZshCompletionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WarmZshCompletionClient.swift; sourceTree = "<group>"; };
 		200000000000000000000024 /* TerminalSecurityState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSecurityState.swift; sourceTree = "<group>"; };
 		200000000000000000000025 /* SensitiveDataSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensitiveDataSanitizer.swift; sourceTree = "<group>"; };
@@ -277,6 +279,7 @@
 				20000000000000000000000E /* CommandSerializerTests.swift */,
 				20000000000000000000000F /* ShellConfigurationTests.swift */,
 				200000000000000000000014 /* TerminalSessionIntegrationTests.swift */,
+				E200000000000000000000001 /* TerminalSessionHardeningTests.swift */,
 				20000000000000000000001B /* BlockOutputSanitizerTests.swift */,
 				20000000000000000000001C /* BlockStreamParserTests.swift */,
 				20000000000000000000001D /* CommandBlockTimelineTests.swift */,
@@ -459,6 +462,7 @@
 				10000000000000000000000E /* CommandSerializerTests.swift in Sources */,
 				10000000000000000000000F /* ShellConfigurationTests.swift in Sources */,
 				100000000000000000000010 /* TerminalSessionIntegrationTests.swift in Sources */,
+				E10000000000000000000001 /* TerminalSessionHardeningTests.swift in Sources */,
 				100000000000000000000017 /* BlockOutputSanitizerTests.swift in Sources */,
 				100000000000000000000018 /* BlockStreamParserTests.swift in Sources */,
 				100000000000000000000019 /* CommandBlockTimelineTests.swift in Sources */,
