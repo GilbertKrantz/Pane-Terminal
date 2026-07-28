@@ -21,7 +21,7 @@ let package = Package(
             name: "Pane",
             dependencies: ["SwiftTerm"],
             path: "Pane",
-            exclude: ["Info.plist", "App/PaneApp.swift", "Assets.xcassets"],
+            exclude: ["Info.plist", "App/PaneApp.swift", "AppIcons.icon"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
