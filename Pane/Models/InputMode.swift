@@ -1,6 +1,6 @@
 import Foundation
 
-enum InputMode: String, CaseIterable, Equatable, Sendable {
+enum InputMode: String, Codable, CaseIterable, Equatable, Sendable {
     case blocks
     case terminal
 

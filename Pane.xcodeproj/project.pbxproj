@@ -69,6 +69,9 @@
 		10000000000000000000002E /* RuntimeStateSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002E /* RuntimeStateSettingsView.swift */; };
 		C6E13DE4300FD1A2004ECCBE /* AppIcons.icon in Resources */ = {isa = PBXBuildFile; fileRef = C6E13DE3300FD1A2004ECCBE /* AppIcons.icon */; };
 		C6E13DE5300FD1A2004ECCBE /* AppIcons.icon in Resources */ = {isa = PBXBuildFile; fileRef = C6E13DE3300FD1A2004ECCBE /* AppIcons.icon */; };
+		F10000000000000000000001 /* TerminalWorkspaceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000001 /* TerminalWorkspaceController.swift */; };
+		F10000000000000000000002 /* TerminalWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000002 /* TerminalWorkspaceView.swift */; };
+		F10000000000000000000003 /* TerminalWorkspaceControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000003 /* TerminalWorkspaceControllerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -147,6 +150,9 @@
 		200000000000000000000032 /* TerminalReplaySanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalReplaySanitizer.swift; sourceTree = "<group>"; };
 		200000000000000000000033 /* TerminalReplaySanitizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalReplaySanitizerTests.swift; sourceTree = "<group>"; };
 		C6E13DE3300FD1A2004ECCBE /* AppIcons.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcons.icon; sourceTree = "<group>"; };
+		F200000000000000000000001 /* TerminalWorkspaceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceController.swift; sourceTree = "<group>"; };
+		F200000000000000000000002 /* TerminalWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceView.swift; sourceTree = "<group>"; };
+		F200000000000000000000003 /* TerminalWorkspaceControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceControllerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -239,6 +245,7 @@
 				200000000000000000000004 /* CommandSerializer.swift */,
 				200000000000000000000005 /* ShellConfiguration.swift */,
 				200000000000000000000006 /* TerminalSession.swift */,
+				F200000000000000000000001 /* TerminalWorkspaceController.swift */,
 				200000000000000000000007 /* TerminalViewRepresentable.swift */,
 				B200000000000000000000001 /* FocusCoordinator.swift */,
 				B200000000000000000000002 /* PTYGenerationGate.swift */,
@@ -259,6 +266,7 @@
 			isa = PBXGroup;
 			children = (
 				200000000000000000000008 /* ContentView.swift */,
+				F200000000000000000000002 /* TerminalWorkspaceView.swift */,
 				200000000000000000000009 /* CommandComposerView.swift */,
 				20000000000000000000000A /* ModeIndicatorView.swift */,
 				20000000000000000000002E /* RuntimeStateSettingsView.swift */,
@@ -280,6 +288,7 @@
 		400000000000000000000008 /* PaneTests */ = {
 			isa = PBXGroup;
 			children = (
+				F200000000000000000000003 /* TerminalWorkspaceControllerTests.swift */,
 				20000000000000000000000C /* CommandHistoryTests.swift */,
 				20000000000000000000000D /* InputModeTests.swift */,
 				20000000000000000000000E /* CommandSerializerTests.swift */,
@@ -434,8 +443,10 @@
 				100000000000000000000004 /* CommandSerializer.swift in Sources */,
 				100000000000000000000005 /* ShellConfiguration.swift in Sources */,
 				100000000000000000000006 /* TerminalSession.swift in Sources */,
+				F10000000000000000000001 /* TerminalWorkspaceController.swift in Sources */,
 				100000000000000000000007 /* TerminalViewRepresentable.swift in Sources */,
 				100000000000000000000008 /* ContentView.swift in Sources */,
+				F10000000000000000000002 /* TerminalWorkspaceView.swift in Sources */,
 				100000000000000000000009 /* CommandComposerView.swift in Sources */,
 				10000000000000000000000A /* ModeIndicatorView.swift in Sources */,
 				100000000000000000000011 /* CommandBlock.swift in Sources */,
@@ -465,6 +476,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F10000000000000000000003 /* TerminalWorkspaceControllerTests.swift in Sources */,
 				10000000000000000000000C /* CommandHistoryTests.swift in Sources */,
 				10000000000000000000000D /* InputModeTests.swift in Sources */,
 				10000000000000000000000E /* CommandSerializerTests.swift in Sources */,

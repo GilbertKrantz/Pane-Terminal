@@ -38,6 +38,8 @@ struct TerminalSessionDebugSnapshot: Equatable, Sendable {
 
 @MainActor
 final class TerminalSession: NSObject, ObservableObject {
+    let tabID: UUID
+    let sessionID = UUID()
     struct SessionBoundary: Equatable {
         let sessionID: UUID
         let lifecycle: PersistedSessionLifecycle
@@ -78,6 +80,13 @@ final class TerminalSession: NSObject, ObservableObject {
     @Published private(set) var isRestartInProgress = false
     @Published private(set) var isShuttingDown = false
     @Published private(set) var shellReadiness: ShellReadiness = .starting
+    @Published var visibilityState: SessionVisibilityState = .selected {
+        didSet {
+            if visibilityState != .selected { requestFocus(.none) }
+        }
+    }
+
+    var onMeaningfulBackgroundOutput: (() -> Void)?
 
     private(set) var history = CommandHistory()
     private let ptyController = PTYController()
@@ -89,6 +98,7 @@ final class TerminalSession: NSObject, ObservableObject {
     private var terminalView: TerminalView?
     private var authoritativeTerminalHostView: AuthoritativeTerminalHostView?
     private var suspendedCommandDraft: String?
+    private var pendingRestoredMode: InputMode?
     private var manualSecureInputActive = false
     private var behaviorallyIneligibleBlockIDs: Set<UUID> = []
     private var previousCompletedCommandSummary: CompletedCommandSummary?
@@ -139,6 +149,17 @@ final class TerminalSession: NSObject, ObservableObject {
 
     var isCommandActive: Bool {
         blockLifecycleController.isCommandActive
+    }
+
+    var hasActiveWork: Bool {
+        isCommandActive || isAlternateScreenActive || isSecureInputActive
+            || inputRequirement == .direct || inputRequirement == .secure
+            || isRestartInProgress || (lastForegroundSnapshot.map { !$0.isShellForeground } ?? false)
+    }
+
+    var foregroundProcessName: String? {
+        guard let snapshot = lastForegroundSnapshot, !snapshot.isShellForeground else { return nil }
+        return snapshot.processName
     }
 
     var isShellReadyForInput: Bool {
@@ -214,10 +235,12 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     init(
+        tabID: UUID = UUID(),
         shellConfiguration: ShellConfiguration = .loginZsh(),
         runtimeStateController: RuntimeStateController? = nil,
         commandHistoryEnabled: Bool = true
     ) {
+        self.tabID = tabID
         self.shellConfiguration = shellConfiguration
         self.runtimeStateController = runtimeStateController
         self.isCommandHistoryEnabled = commandHistoryEnabled
@@ -703,6 +726,15 @@ final class TerminalSession: NSObject, ObservableObject {
         }
     }
 
+    func restoreModeWhenReady(_ restoredMode: InputMode) {
+        guard restoredMode != .blocks else { return }
+        if isShellReadyForInput {
+            setMode(restoredMode)
+        } else {
+            pendingRestoredMode = restoredMode
+        }
+    }
+
     func selectBlock(_ id: UUID) {
         selectedBlockID = id
     }
@@ -928,6 +960,9 @@ final class TerminalSession: NSObject, ObservableObject {
 
     private func handleProcessData(_ bytes: [UInt8]) {
         guard ptyController.isRunning else { return }
+        if visibilityState == .background, !bytes.isEmpty {
+            onMeaningfulBackgroundOutput?()
+        }
         refreshForegroundProcessMode()
 
         // The persistent direct terminal is fed exactly once. The live block
@@ -978,6 +1013,10 @@ final class TerminalSession: NSObject, ObservableObject {
                 if !isShellIntegrationReady {
                     shellReadiness = .ready
                     _ = interactionController.handle(.shellReady)
+                    if let pendingRestoredMode {
+                        self.pendingRestoredMode = nil
+                        setMode(pendingRestoredMode)
+                    }
                     dispatchNextQueuedCommandIfNeeded()
                     continue
                 }
@@ -1926,6 +1965,7 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     func requestFocus(_ target: PaneFocusTarget) {
+        guard visibilityState == .selected || target == .none else { return }
         focusCoordinator.request(target)
         focusGeneration = focusCoordinator.generation
         focusTarget = focusCoordinator.target
@@ -1940,10 +1980,12 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     private func focusAuthoritativeTerminal() {
+        guard visibilityState == .selected else { return }
         requestFocus(.authoritativeTerminal)
         let generation = focusGeneration
         DispatchQueue.main.async { [weak self] in
             guard let self,
+                  self.visibilityState == .selected,
                   self.focusGeneration == generation,
                   self.focusTarget == .authoritativeTerminal,
                   self.shouldAuthoritativeTerminalOwnFocus,
@@ -1952,11 +1994,21 @@ final class TerminalSession: NSObject, ObservableObject {
         }
     }
 
+    func restoreExpectedFocus() {
+        guard visibilityState == .selected, isShellReadyForInput else { return }
+        if shouldAuthoritativeTerminalOwnFocus {
+            focusAuthoritativeTerminal()
+        } else {
+            requestFocus(.composer)
+        }
+    }
+
     /// Repairs an existing terminal focus intent after AppKit reparents the
     /// persistent host. It deliberately neither creates intent nor advances
     /// the generation, so a newer composer request always wins.
     func restoreAuthoritativeFocusAfterMount() {
-        guard focusTarget == .authoritativeTerminal,
+        guard visibilityState == .selected,
+              focusTarget == .authoritativeTerminal,
               shouldAuthoritativeTerminalOwnFocus else { return }
         let generation = focusGeneration
         DispatchQueue.main.async { [weak self] in
@@ -1975,7 +2027,8 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     private func repairAuthoritativeFocus(generation: UInt64) {
-        guard focusGeneration == generation,
+        guard visibilityState == .selected,
+              focusGeneration == generation,
               focusTarget == .authoritativeTerminal,
               shouldAuthoritativeTerminalOwnFocus,
               let terminalView,

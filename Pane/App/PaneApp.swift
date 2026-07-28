@@ -4,34 +4,39 @@ import SwiftUI
 @main
 struct PaneApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var session: TerminalSession
+    @StateObject private var workspace: TerminalWorkspaceController
     @StateObject private var runtimeStateSettings: RuntimeStateSettings
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
         let settings = RuntimeStateSettings()
-        let controller = RuntimeStateController(
-            databaseURL: Self.runtimeStateDatabaseURL,
-            configuration: settings.configuration
+        let factory = DefaultTerminalSessionFactory(
+            runtimeStateControllerProvider: {
+                RuntimeStateController(
+                    databaseURL: Self.runtimeStateDatabaseURL,
+                    configuration: settings.configuration
+                )
+            },
+            commandHistoryEnabledProvider: { settings.commandHistoryEnabled }
         )
-        let session = TerminalSession(
-            runtimeStateController: controller,
-            commandHistoryEnabled: settings.commandHistoryEnabled
+        let workspace = TerminalWorkspaceController(
+            factory: factory,
+            snapshotURL: Self.workspaceSnapshotURL
         )
         _runtimeStateSettings = StateObject(wrappedValue: settings)
-        _session = StateObject(wrappedValue: session)
-        AppDelegate.sharedSession = session
+        _workspace = StateObject(wrappedValue: workspace)
+        AppDelegate.sharedWorkspace = workspace
     }
 
     var body: some Scene {
         Window("Pane", id: "main") {
-            ContentView(session: session)
+            TerminalWorkspaceView(workspace: workspace)
                 .frame(minWidth: 760, minHeight: 520)
         }
         .defaultSize(width: 1120, height: 720)
         .windowToolbarStyle(.unifiedCompact)
         .commands {
-            TerminalCommands(session: session)
+            TerminalCommands(workspace: workspace)
             CommandGroup(after: .help) {
                 Button("Pane Onboarding") {
                     NotificationCenter.default.post(name: .showPaneOnboarding, object: nil)
@@ -40,10 +45,15 @@ struct PaneApp: App {
         }
 
         Settings {
-            RuntimeStateSettingsView(
-                settings: runtimeStateSettings,
-                session: session
-            )
+            if let session = workspace.selectedTab?.session {
+                RuntimeStateSettingsView(
+                    settings: runtimeStateSettings,
+                    session: session,
+                    applyConfigurationToAllSessions: workspace.applyRuntimeStateConfiguration
+                )
+            } else {
+                Text("Terminal workspace is starting…").padding()
+            }
         }
     }
 
@@ -56,11 +66,15 @@ struct PaneApp: App {
             .appendingPathComponent("Pane", isDirectory: true)
             .appendingPathComponent("runtime-state.sqlite")
     }
+
+    private static var workspaceSnapshotURL: URL {
+        runtimeStateDatabaseURL.deletingLastPathComponent().appendingPathComponent("workspace.json")
+    }
 }
 
 @MainActor
 private final class AppDelegate: NSObject, NSApplicationDelegate {
-    static weak var sharedSession: TerminalSession?
+    static weak var sharedWorkspace: TerminalWorkspaceController?
     private var terminalControlKeyMonitor: Any?
     private var windowIconObserver: NSObjectProtocol?
     private var applicationIcon: NSImage?
@@ -71,7 +85,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         terminalControlKeyMonitor = NSEvent.addLocalMonitorForEvents(
             matching: .keyDown
         ) { event in
-            guard let session = Self.sharedSession,
+            guard let session = Self.sharedWorkspace?.selectedTab?.session,
                   session.mode == .blocks,
                   session.isCommandActive,
                   let action = TerminalControlKeyRouter.action(for: event) else {
@@ -128,15 +142,15 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard !isFinalizingTermination, let session = Self.sharedSession else { return .terminateNow }
+        guard !isFinalizingTermination, let workspace = Self.sharedWorkspace else { return .terminateNow }
         isFinalizingTermination = true
         Task { @MainActor in
-            await session.finalizeApplicationExit()
+            await workspace.shutdown()
             replyToTerminationIfNeeded(sender)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self, weak sender] in
             guard let self, let sender else { return }
-            session.terminateForApplicationExit()
+            workspace.tabs.forEach { $0.session.terminateForApplicationExit() }
             self.replyToTerminationIfNeeded(sender)
         }
         return .terminateLater
@@ -158,7 +172,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             self.windowIconObserver = nil
         }
         if !isFinalizingTermination {
-            Self.sharedSession?.terminateForApplicationExit()
+            Self.sharedWorkspace?.tabs.forEach { $0.session.terminateForApplicationExit() }
         }
     }
 
@@ -171,10 +185,39 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 private struct TerminalCommands: Commands {
-    @ObservedObject var session: TerminalSession
+    @ObservedObject var workspace: TerminalWorkspaceController
+
+    private var session: TerminalSession? { workspace.selectedTab?.session }
 
     var body: some Commands {
+        CommandMenu("Tab") {
+            Button("New Tab") { Task { await workspace.createTab() } }
+                .keyboardShortcut("t", modifiers: [.command])
+            Button("Close Tab") {
+                guard let id = workspace.selectedTabID else { return }
+                Task { await workspace.closeTab(id: id, policy: .requestUserConfirmation) }
+            }
+            .keyboardShortcut("w", modifiers: [.command])
+            Button("Next Tab") { workspace.selectRelative(offset: 1) }
+                .keyboardShortcut("]", modifiers: [.command, .shift])
+            Button("Previous Tab") { workspace.selectRelative(offset: -1) }
+                .keyboardShortcut("[", modifiers: [.command, .shift])
+            Button("Next Tab (Control-Tab)") { workspace.selectRelative(offset: 1) }
+                .keyboardShortcut(.tab, modifiers: [.control])
+            Button("Previous Tab (Control-Shift-Tab)") { workspace.selectRelative(offset: -1) }
+                .keyboardShortcut(.tab, modifiers: [.control, .shift])
+            Divider()
+            ForEach(0..<9, id: \.self) { index in
+                Button("Select Tab \(index + 1)") {
+                    guard workspace.tabs.indices.contains(index) else { return }
+                    workspace.selectTab(id: workspace.tabs[index].id)
+                }
+                .keyboardShortcut(KeyEquivalent(Character(String(index + 1))), modifiers: [.command])
+                .disabled(!workspace.tabs.indices.contains(index))
+            }
+        }
         CommandMenu("Terminal") {
+            if let session {
             Button("Focus Composer") {
                 session.focusComposer()
             }
@@ -274,6 +317,7 @@ private struct TerminalCommands: Commands {
 
             Button("Copy Diagnostics with Sanitized Command Context") {
                 session.copyLocalDiagnostics(includeSanitizedCommandContext: true)
+            }
             }
         }
     }

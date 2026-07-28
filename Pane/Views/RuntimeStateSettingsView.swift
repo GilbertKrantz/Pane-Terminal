@@ -3,6 +3,7 @@ import SwiftUI
 struct RuntimeStateSettingsView: View {
     @ObservedObject var settings: RuntimeStateSettings
     @ObservedObject var session: TerminalSession
+    var applyConfigurationToAllSessions: ((RuntimeStateConfiguration) -> Void)?
     @State private var confirmClearAll = false
     @State private var confirmClearPrevious = false
     @State private var confirmClearCommands = false
@@ -143,7 +144,7 @@ struct RuntimeStateSettingsView: View {
             get: { isOn.wrappedValue },
             set: { value in
                 isOn.wrappedValue = value
-                session.applyRuntimeStateConfiguration(settings.configuration)
+                applyConfiguration()
             }
         ))
     }
@@ -158,6 +159,10 @@ struct RuntimeStateSettingsView: View {
     }
 
     private func applyConfiguration() {
-        session.applyRuntimeStateConfiguration(settings.configuration)
+        if let applyConfigurationToAllSessions {
+            applyConfigurationToAllSessions(settings.configuration)
+        } else {
+            session.applyRuntimeStateConfiguration(settings.configuration)
+        }
     }
 }
