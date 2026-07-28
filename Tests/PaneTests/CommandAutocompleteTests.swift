@@ -64,6 +64,61 @@ final class CommandAutocompleteTests: XCTestCase {
         )
     }
 
+    func testProjectDefinitionAndGitCachesHaveIndependentFreshness() async throws {
+        let root = try makeTemporaryDirectory()
+        let manifest = root.appendingPathComponent("Package.swift")
+        XCTAssertTrue(FileManager.default.createFile(
+            atPath: manifest.path,
+            contents: Data("// package".utf8)
+        ))
+        let provider = ProjectContextProvider()
+        let definitionCache = ProjectDefinitionCache(ttl: 300)
+        let definitionLoads = AsyncCounter()
+
+        let first = await definitionCache.value(for: root) {
+            await definitionLoads.increment()
+            return provider.definition(for: root)
+        }
+        let second = await definitionCache.value(for: root) {
+            await definitionLoads.increment()
+            return provider.definition(for: root)
+        }
+        XCTAssertEqual(first?.identity, second?.identity)
+        let initialDefinitionLoads = await definitionLoads.value
+        XCTAssertEqual(initialDefinitionLoads, 1)
+
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date().addingTimeInterval(10)],
+            ofItemAtPath: manifest.path
+        )
+        _ = await definitionCache.value(for: root) {
+            await definitionLoads.increment()
+            return provider.definition(for: root)
+        }
+        let refreshedDefinitionLoads = await definitionLoads.value
+        XCTAssertEqual(refreshedDefinitionLoads, 2)
+
+        let gitCache = GitContextCache(activeTTL: 30)
+        let gitLoads = AsyncCounter()
+        let loadGit: @Sendable () async -> GitContext? = {
+            let count = await gitLoads.increment()
+            return GitContext(
+                root: root,
+                branch: "branch-\(count)",
+                headOID: nil,
+                isDirty: false,
+                hasStagedChanges: false,
+                remoteNames: []
+            )
+        }
+        let cachedGit = await gitCache.value(for: root, loader: loadGit)
+        let stillCached = await gitCache.value(for: root, loader: loadGit)
+        XCTAssertEqual(cachedGit?.branch, stillCached?.branch)
+        await gitCache.invalidate(root: root)
+        let refreshedGit = await gitCache.value(for: root, loader: loadGit)
+        XCTAssertEqual(refreshedGit?.branch, "branch-2")
+    }
+
     func testLocalProviderCompletesProjectScriptWithoutDuplicatingCommandPrefix() async throws {
         let root = try makeTemporaryDirectory()
         try Data(
@@ -110,6 +165,75 @@ final class CommandAutocompleteTests: XCTestCase {
 
         XCTAssertEqual(suggestions.map(\.text), ["store", "status", "stash"])
         XCTAssertEqual(suggestions.map(\.source), [.history, .history, .history])
+    }
+
+    func testAcceptingFullCommandHistoryReplacesDraftInsteadOfDuplicatingPrefix() {
+        let autocomplete = CommandAutocomplete()
+        let suggestion = CommandAutocompleteSuggestion(
+            text: "cd Documents/Work/repo-github/",
+            replacementText: "cd Documents/Work/repo-github/",
+            replacementRange: NSRange(location: 0, length: 4),
+            source: .history,
+            detail: "Command history"
+        )
+
+        let edit = autocomplete.accept(
+            suggestion,
+            in: "cd D",
+            cursorUTF16Offset: 4
+        )
+
+        XCTAssertEqual(edit.draft, "cd Documents/Work/repo-github/")
+        XCTAssertEqual(
+            edit.cursorUTF16Offset,
+            ("cd Documents/Work/repo-github/" as NSString).length
+        )
+    }
+
+    func testFullCommandHistoryCarriesWholeDraftReplacementRange() async throws {
+        let directory = try makeTemporaryDirectory()
+        let provider = LocalAutocompleteProvider(maximumSuggestions: 12)
+        let draft = "cd D"
+        let suggestions = await provider.suggestions(
+            for: LocalAutocompleteContext(
+                draft: draft,
+                cursorUTF16Offset: (draft as NSString).length,
+                history: ["cd Documents/Work/repo-github/"],
+                currentDirectory: directory,
+                executableSearchPath: "",
+                shellGeneration: 1
+            )
+        )
+        let suggestion = try XCTUnwrap(suggestions.first {
+            $0.replacementText == "cd Documents/Work/repo-github/"
+        })
+
+        XCTAssertEqual(
+            suggestion.replacementRange,
+            NSRange(location: 0, length: (draft as NSString).length)
+        )
+        XCTAssertEqual(
+            CommandAutocomplete().accept(suggestion, in: draft).draft,
+            "cd Documents/Work/repo-github/"
+        )
+    }
+
+    func testAcceptingTokenHistoryStillReplacesOnlyCurrentToken() {
+        let autocomplete = CommandAutocomplete()
+        let suggestion = CommandAutocompleteSuggestion(
+            text: "status",
+            replacementText: "status",
+            source: .history
+        )
+
+        let edit = autocomplete.accept(
+            suggestion,
+            in: "git st --short",
+            cursorUTF16Offset: 6
+        )
+
+        XCTAssertEqual(edit.draft, "git status --short")
+        XCTAssertEqual(edit.cursorUTF16Offset, 10)
     }
 
     func testHistorySuggestionsSupportMultilineDrafts() throws {
@@ -396,7 +520,7 @@ final class CommandAutocompleteTests: XCTestCase {
         XCTAssertEqual(second, ["cwd-second"])
     }
 
-    func testCompletionServicePublishesLocalThenReplacesItWithValidZsh() async throws {
+    func testCompletionServicePublishesLocalThenMergesValidZsh() async throws {
         let directory = try makeTemporaryDirectory()
         let context = LocalAutocompleteContext(
             draft: "gi",
@@ -429,11 +553,50 @@ final class CommandAutocompleteTests: XCTestCase {
 
         XCTAssertGreaterThanOrEqual(received.count, 2)
         XCTAssertFalse(received[0].isEmpty)
-        XCTAssertEqual(received.last?.map(\.replacementText), ["git-from-zsh"])
-        XCTAssertEqual(received.last?.first?.source, .zsh)
+        XCTAssertEqual(received.last?.first?.replacementText, "git-from-zsh")
+        XCTAssertTrue(received.last?.contains { $0.replacementText == "git status" } == true)
     }
 
-    func testCompletionServiceTreatsValidEmptyZshAsAuthoritative() async throws {
+    func testCompletionServicePreservesWholeDraftEditForPartialHistoryPrefix() async throws {
+        let directory = try makeTemporaryDirectory()
+        let draft = "cd D"
+        let context = LocalAutocompleteContext(
+            draft: draft,
+            cursorUTF16Offset: (draft as NSString).length,
+            history: ["cd Documents/Work/Repo-gitlab/airflow-dags"],
+            currentDirectory: directory,
+            executableSearchPath: "",
+            shellGeneration: 1
+        )
+        let service = CompletionService()
+        let updates = await service.suggestions(for: context) {
+            ZshCompletionProtocol.Response(
+                requestID: "range-check",
+                status: .ok,
+                candidates: []
+            )
+        }
+
+        var finalSuggestions: [CommandAutocompleteSuggestion] = []
+        for await update in updates {
+            finalSuggestions = update
+        }
+        let suggestion = try XCTUnwrap(finalSuggestions.first {
+            $0.replacementText
+                == "cd Documents/Work/Repo-gitlab/airflow-dags"
+        })
+
+        XCTAssertEqual(
+            suggestion.replacementRange,
+            NSRange(location: 0, length: (draft as NSString).length)
+        )
+        XCTAssertEqual(
+            CommandAutocomplete().accept(suggestion, in: draft).draft,
+            "cd Documents/Work/Repo-gitlab/airflow-dags"
+        )
+    }
+
+    func testCompletionServiceTreatsValidEmptyZshAsAnEmptyContribution() async throws {
         let directory = try makeTemporaryDirectory()
         let context = LocalAutocompleteContext(
             draft: "gi",
@@ -456,7 +619,7 @@ final class CommandAutocompleteTests: XCTestCase {
         for await update in updates {
             final = update
         }
-        XCTAssertTrue(final.isEmpty)
+        XCTAssertTrue(final.contains { $0.replacementText == "git status" })
     }
 
     func testCompletionServiceDoesNotPublishAfterContextBecomesInvalid() async throws {
@@ -576,6 +739,171 @@ final class CommandAutocompleteTests: XCTestCase {
         )
     }
 
+    func testSlowProviderTimesOutWithoutBlockingUsefulResults() async throws {
+        let service = CompletionService()
+        let request = makeCompletionRequest(generation: 1)
+        let local = FakeCompletionProvider(
+            identifier: .local,
+            delay: .zero,
+            values: [
+                CompletionCandidate(
+                    displayText: "git status",
+                    replacementText: "git status",
+                    source: .history,
+                    kind: .fullCommand
+                )
+            ]
+        )
+        let slowZsh = FakeCompletionProvider(
+            identifier: .zsh,
+            delay: .milliseconds(100),
+            values: []
+        )
+
+        let stream = await service.responses(
+            for: request,
+            providers: [local, slowZsh],
+            budgets: [.zsh: .milliseconds(5)]
+        )
+        var responses: [CompletionResponse] = []
+        for await response in stream { responses.append(response) }
+
+        XCTAssertTrue(responses.contains {
+            $0.candidates.contains { $0.candidate.replacementText == "git status" }
+        })
+        XCTAssertTrue(responses.last?.diagnostics.contains {
+            $0.provider == .zsh && $0.timedOut
+        } == true)
+    }
+
+    func testLateProviderResponseCannotOverwriteNewRequest() async throws {
+        let service = CompletionService()
+        let first = await service.responses(
+            for: makeCompletionRequest(generation: 1),
+            providers: [
+                FakeCompletionProvider(
+                    identifier: .zsh,
+                    delay: .milliseconds(80),
+                    values: [
+                        CompletionCandidate(
+                            displayText: "stale",
+                            replacementText: "stale",
+                            source: .zsh
+                        )
+                    ]
+                )
+            ]
+        )
+        let firstCollector = Task {
+            var values: [CompletionResponse] = []
+            for await value in first { values.append(value) }
+            return values
+        }
+        try await Task.sleep(for: .milliseconds(5))
+        let second = await service.responses(
+            for: makeCompletionRequest(generation: 2),
+            providers: [
+                FakeCompletionProvider(
+                    identifier: .local,
+                    delay: .zero,
+                    values: [
+                        CompletionCandidate(
+                            displayText: "current",
+                            replacementText: "current",
+                            source: .history,
+                            kind: .fullCommand
+                        )
+                    ]
+                )
+            ]
+        )
+        var current: [CompletionResponse] = []
+        for await value in second { current.append(value) }
+        let stale = await firstCollector.value
+
+        XCTAssertTrue(stale.isEmpty)
+        XCTAssertEqual(current.last?.candidates.first?.candidate.replacementText, "current")
+    }
+
+    func testRecentCommandOutranksOlderCommandUsingTimestamps() {
+        let now = Date()
+        var recentEvidence = CompletionEvidence()
+        recentEvidence.globalRecency = now.timeIntervalSince(now.addingTimeInterval(-60))
+        var oldEvidence = CompletionEvidence()
+        oldEvidence.globalRecency = now.timeIntervalSince(now.addingTimeInterval(-40 * 24 * 60 * 60))
+        let ranked = CompletionRanker().rank([
+            CompletionCandidate(
+                displayText: "old",
+                replacementText: "old",
+                source: .history,
+                kind: .fullCommand,
+                evidence: oldEvidence
+            ),
+            CompletionCandidate(
+                displayText: "recent",
+                replacementText: "recent",
+                source: .history,
+                kind: .fullCommand,
+                evidence: recentEvidence
+            )
+        ])
+        XCTAssertEqual(ranked.first?.candidate.replacementText, "recent")
+    }
+
+    func testNormalizedCommandFrequencyDoesNotUseSubstringMatching() async throws {
+        let directory = try makeTemporaryDirectory()
+        let provider = LocalAutocompleteProvider()
+        let suggestions = await provider.suggestions(for: LocalAutocompleteContext(
+            draft: "te",
+            cursorUTF16Offset: 2,
+            history: ["pytest", "npm run test", "test"],
+            currentDirectory: directory,
+            executableSearchPath: "",
+            shellGeneration: 1
+        ))
+        XCTAssertEqual(
+            suggestions.first { $0.replacementText == "test" }?.text,
+            "test"
+        )
+        XCTAssertFalse(suggestions.contains {
+            $0.replacementText == "pytest" || $0.replacementText == "npm run test"
+        })
+    }
+
+    func testSecureEligibilityRejectsProviderWork() {
+        XCTAssertEqual(
+            CompletionEligibility.evaluate(
+                interactionState: .commandRunningSecure,
+                shellReady: true,
+                secureInputActive: true,
+                draft: "secret",
+                cursorUTF16Offset: 6
+            ),
+            .secureInput
+        )
+    }
+
+    private func makeCompletionRequest(generation: UInt64) -> CompletionRequest {
+        CompletionRequest(
+            id: UUID(),
+            generation: generation,
+            draft: "git",
+            cursorUTF16Offset: 3,
+            tokenContext: CommandTokenContext(
+                replacementRange: NSRange(location: 0, length: 3),
+                decodedPrefix: "git",
+                isCommandPosition: true
+            ),
+            currentDirectory: FileManager.default.temporaryDirectory,
+            projectContext: nil,
+            previousCommand: nil,
+            executableSearchPath: "",
+            shellGeneration: 1,
+            maximumResults: 12,
+            createdAt: ContinuousClock.now
+        )
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "PaneAutocompleteTests-\(UUID().uuidString)",
@@ -598,5 +926,26 @@ final class CommandAutocompleteTests: XCTestCase {
             [.posixPermissions: 0o755],
             ofItemAtPath: url.path
         )
+    }
+}
+
+private struct FakeCompletionProvider: CompletionProvider {
+    let identifier: CompletionProviderID
+    let delay: Duration
+    let values: [CompletionCandidate]
+
+    func candidates(for request: CompletionRequest) async throws -> [CompletionCandidate] {
+        if delay != .zero { try await Task.sleep(for: delay) }
+        return values
+    }
+}
+
+private actor AsyncCounter {
+    private(set) var value = 0
+
+    @discardableResult
+    func increment() -> Int {
+        value += 1
+        return value
     }
 }

@@ -76,7 +76,7 @@ struct RuntimeSession: Codable, Sendable, Equatable {
         lastActiveAt: Date,
         lifecycle: PersistedSessionLifecycle = .active,
         paneVersion: String = "0.2",
-        schemaVersion: Int = 4
+        schemaVersion: Int = 5
     ) {
         self.id = id
         self.workspaceID = workspaceID

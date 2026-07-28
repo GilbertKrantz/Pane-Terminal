@@ -43,6 +43,7 @@ actor RuntimeStateController {
     private var currentSession: RuntimeSession?
     private var recoveryDiagnostic: String?
     private var recoveryFileURL: URL?
+    private var previousBehavioralCommand: BehavioralCommandRecord?
 
     init(
         databaseURL: URL,
@@ -55,6 +56,7 @@ actor RuntimeStateController {
     }
 
     func startSession(_ session: RuntimeSession, restoreLimit: Int = 200) async -> RuntimeStateOperationResult {
+        previousBehavioralCommand = nil
         currentSession = storageSafeSession(session)
         guard let currentSession else {
             return RuntimeStateOperationResult(restoredContext: nil, diagnostic: nil)
@@ -94,6 +96,15 @@ actor RuntimeStateController {
             )
             try await store.startSession(currentSession)
             try await store.applyRetentionPolicy()
+            if configuration.predictionContextEnabled,
+               await store.needsBehavioralBackfill() {
+                Task {
+                    // Keep migration/backfill completely off the shell-start
+                    // critical path and away from the initial restore reads.
+                    try? await Task.sleep(for: .milliseconds(500))
+                    try? await store.backfillBehavioralHistory()
+                }
+            }
             return RuntimeStateOperationResult(
                 restoredContext: context,
                 diagnostic: recoveryDiagnostic,
@@ -140,7 +151,10 @@ actor RuntimeStateController {
             || configuration.predictionContextEnabled
     }
 
-    func persistCommandEvent(_ event: PersistedCommandEvent) async -> String? {
+    func persistCommandEvent(
+        _ event: PersistedCommandEvent,
+        behavioralEligible: Bool = true
+    ) async -> String? {
         guard configuration.commandHistoryEnabled || configuration.visibleSessionRecoveryEnabled else { return nil }
         let event = storageSafeEvent(event)
 
@@ -157,10 +171,78 @@ actor RuntimeStateController {
                 try await store.startSession(currentSession)
             }
             try await store.persistCommandEvent(event)
+            if configuration.predictionContextEnabled, behavioralEligible {
+                try await recordBehavioralEvidence(for: event, in: store)
+            } else if event.completion != .unknown {
+                previousBehavioralCommand = nil
+            }
             return nil
         } catch {
             return "Session history could not be saved; Pane is continuing with memory-only history."
         }
+    }
+
+    func resetBehavioralTransitionContinuity() {
+        previousBehavioralCommand = nil
+    }
+
+    func recordCompletionFeedback(_ record: CompletionFeedbackRecord) async -> String? {
+        guard configuration.persistenceEnabled, configuration.predictionContextEnabled else {
+            return nil
+        }
+        do {
+            try await durableStateStore().recordFeedback(record)
+            return nil
+        } catch {
+            return "Local completion feedback could not be saved."
+        }
+    }
+
+    private func recordBehavioralEvidence(
+        for event: PersistedCommandEvent,
+        in store: SQLiteRuntimeStateStore
+    ) async throws {
+        guard event.completion != .unknown else { return }
+        let sanitized = SensitiveDataSanitizer().sanitizeCommand(event.command)
+        let normalized = NormalizedCommand(sanitized.value)
+        guard sanitized.redactionCount == 0,
+              !normalized.full.isEmpty,
+              let commandKey = normalized.commandKey,
+              !normalized.full.contains(SensitiveDataSanitizer.redaction),
+              !normalized.full.hasPrefix("[Sensitive command"),
+              normalized.full != "[command omitted]",
+              normalized.full != "<command omitted>" else {
+            previousBehavioralCommand = nil
+            return
+        }
+        let outcome: BehavioralCommandOutcome
+        switch event.completion {
+        case .interrupted:
+            outcome = .interrupted
+        case .completed:
+            outcome = event.exitCode == 0 ? .succeeded : .failed
+        case .unknown:
+            return
+        }
+        let record = BehavioralCommandRecord(
+            eventID: event.blockID,
+            normalizedCommand: normalized.full,
+            commandKey: commandKey,
+            projectID: currentSession?.repositoryID,
+            directoryIdentity: event.workingDirectory,
+            outcome: outcome,
+            observedAt: event.timestamp
+        )
+        try await store.recordCommand(record)
+        if let previousBehavioralCommand,
+           event.timestamp.timeIntervalSince(previousBehavioralCommand.observedAt) >= 0,
+           event.timestamp.timeIntervalSince(previousBehavioralCommand.observedAt) <= 30 * 60 {
+            try await store.recordTransition(
+                previousCommandKey: previousBehavioralCommand.commandKey,
+                next: record
+            )
+        }
+        previousBehavioralCommand = record
     }
 
     func persistFeatures(_ features: [RuntimeFeature]) async -> String? {
@@ -198,6 +280,33 @@ actor RuntimeStateController {
             return nil
         } catch {
             return "Session activity could not be saved; Pane is continuing with memory-only context."
+        }
+    }
+
+    func updateCurrentProjectIdentity(_ projectID: String?) async -> String? {
+        guard let currentSession, currentSession.repositoryID != projectID else { return nil }
+        let updated = storageSafeSession(RuntimeSession(
+            id: currentSession.id,
+            workspaceID: currentSession.workspaceID,
+            repositoryID: projectID,
+            shell: currentSession.shell,
+            initialWorkingDirectory: currentSession.initialWorkingDirectory,
+            lastWorkingDirectory: currentSession.lastWorkingDirectory,
+            startedAt: currentSession.startedAt,
+            lastActiveAt: currentSession.lastActiveAt,
+            lifecycle: currentSession.lifecycle,
+            paneVersion: currentSession.paneVersion,
+            schemaVersion: currentSession.schemaVersion
+        ))
+        self.currentSession = updated
+        do {
+            try await ephemeralStore.startSession(updated)
+            if configuration.persistenceEnabled {
+                try await durableStateStore().startSession(updated)
+            }
+            return nil
+        } catch {
+            return "Project context could not be saved."
         }
     }
 
@@ -451,5 +560,86 @@ actor RuntimeStateController {
 
     nonisolated private static func workspaceIdentifier(for directory: String) -> String {
         URL(fileURLWithPath: directory, isDirectory: true).standardizedFileURL.path
+    }
+}
+
+extension RuntimeStateController: BehavioralCompletionStore {
+    func recordCommand(_ record: BehavioralCommandRecord) async throws {
+        guard configuration.persistenceEnabled, configuration.predictionContextEnabled else { return }
+        try await durableStateStore().recordCommand(record)
+    }
+
+    func recordTransition(
+        previousCommandKey: String,
+        next: BehavioralCommandRecord
+    ) async throws {
+        guard configuration.persistenceEnabled, configuration.predictionContextEnabled else { return }
+        try await durableStateStore().recordTransition(
+            previousCommandKey: previousCommandKey,
+            next: next
+        )
+    }
+
+    func commandAggregates(
+        matchingPrefix prefix: String,
+        projectID: String?,
+        directoryIdentity: String?,
+        limit: Int
+    ) async throws -> [CommandAggregate] {
+        guard configuration.persistenceEnabled, configuration.predictionContextEnabled else { return [] }
+        return try await durableStateStore().commandAggregates(
+            matchingPrefix: prefix,
+            projectID: projectID,
+            directoryIdentity: directoryIdentity,
+            limit: limit
+        )
+    }
+
+    func mostRecentCommands(
+        projectID: String?,
+        directoryIdentity: String?,
+        limit: Int
+    ) async throws -> [CommandAggregate] {
+        guard configuration.persistenceEnabled, configuration.predictionContextEnabled else { return [] }
+        return try await durableStateStore().mostRecentCommands(
+            projectID: projectID,
+            directoryIdentity: directoryIdentity,
+            limit: limit
+        )
+    }
+
+    func commandTransitions(
+        after previousCommandKey: String,
+        projectID: String?,
+        directoryIdentity: String?,
+        limit: Int
+    ) async throws -> [CommandTransitionAggregate] {
+        guard configuration.persistenceEnabled, configuration.predictionContextEnabled else { return [] }
+        return try await durableStateStore().commandTransitions(
+            after: previousCommandKey,
+            projectID: projectID,
+            directoryIdentity: directoryIdentity,
+            limit: limit
+        )
+    }
+
+    func recordFeedback(_ record: CompletionFeedbackRecord) async throws {
+        guard configuration.persistenceEnabled, configuration.predictionContextEnabled else { return }
+        try await durableStateStore().recordFeedback(record)
+    }
+
+    func feedbackAggregates(
+        candidateIdentities: [String],
+        projectID: String?,
+        directoryIdentity: String?,
+        limit: Int
+    ) async throws -> [CompletionFeedbackAggregate] {
+        guard configuration.persistenceEnabled, configuration.predictionContextEnabled else { return [] }
+        return try await durableStateStore().feedbackAggregates(
+            candidateIdentities: candidateIdentities,
+            projectID: projectID,
+            directoryIdentity: directoryIdentity,
+            limit: limit
+        )
     }
 }

@@ -404,7 +404,7 @@ final class RuntimeStateStoreTests: XCTestCase {
         let context = try await store.loadRecentContext(workspaceID: nil, repositoryID: nil, limit: 10)
         XCTAssertEqual(context.sessions.first?.lifecycle, .closedCleanly)
         XCTAssertEqual(context.sessions.first?.lastActiveAt, Date(timeIntervalSince1970: 30))
-        XCTAssertEqual(context.sessions.first?.schemaVersion, 4)
+        XCTAssertEqual(context.sessions.first?.schemaVersion, 5)
     }
 
     func testActiveSessionsAreMarkedInterruptedOnRecovery() async throws {
@@ -549,7 +549,7 @@ final class RuntimeStateStoreTests: XCTestCase {
         XCTAssertEqual(recoveryOnly.restoredContext?.commandEvents.map(\.command), ["pwd"])
     }
 
-    func testPartiallyMigratedVersionThreeDatabaseFinishesSchemaFourMigration() async throws {
+    func testPartiallyMigratedVersionThreeDatabaseFinishesSchemaFiveMigration() async throws {
         let directory = temporaryDirectory(named: "PartialMigration")
         defer { try? FileManager.default.removeItem(at: directory) }
         let databaseURL = directory.appendingPathComponent("runtime.sqlite")
@@ -631,6 +631,151 @@ final class RuntimeStateStoreTests: XCTestCase {
             withIntermediateDirectories: true
         )
         return directory
+    }
+}
+
+extension RuntimeStateStoreTests {
+    func testBehavioralAggregatesAreScopedTimestampedAndIdempotent() async throws {
+        let directory = temporaryDirectory(named: "BehavioralAggregates")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try SQLiteRuntimeStateStore(
+            databaseURL: directory.appendingPathComponent("runtime.sqlite")
+        )
+        let first = Date(timeIntervalSince1970: 1_000)
+        let record = BehavioralCommandRecord(
+            eventID: UUID(),
+            normalizedCommand: "git status --short",
+            commandKey: "git status",
+            projectID: "repo-a",
+            directoryIdentity: "/work/a",
+            outcome: .succeeded,
+            observedAt: first
+        )
+        try await store.recordCommand(record)
+        try await store.recordCommand(record)
+        try await store.recordCommand(BehavioralCommandRecord(
+            eventID: UUID(),
+            normalizedCommand: record.normalizedCommand,
+            commandKey: record.commandKey,
+            projectID: record.projectID,
+            directoryIdentity: record.directoryIdentity,
+            outcome: .failed,
+            observedAt: first.addingTimeInterval(60)
+        ))
+
+        let aggregates = try await store.commandAggregates(
+            matchingPrefix: "git st",
+            projectID: "repo-a",
+            directoryIdentity: "/work/a",
+            limit: 20
+        )
+        XCTAssertEqual(aggregates.count, 3)
+        XCTAssertTrue(aggregates.allSatisfy { $0.totalCount == 2 })
+        XCTAssertTrue(aggregates.allSatisfy { $0.successfulCount == 1 && $0.failedCount == 1 })
+        XCTAssertTrue(aggregates.allSatisfy { $0.firstUsedAt == first })
+        XCTAssertTrue(aggregates.allSatisfy { $0.lastUsedAt == first.addingTimeInterval(60) })
+    }
+
+    func testBehavioralStoreLearnsBoundedTransitionAndFeedback() async throws {
+        let directory = temporaryDirectory(named: "BehavioralTransition")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try SQLiteRuntimeStateStore(
+            databaseURL: directory.appendingPathComponent("runtime.sqlite")
+        )
+        for offset in 0..<3 {
+            let next = BehavioralCommandRecord(
+                eventID: UUID(),
+                normalizedCommand: "git commit",
+                commandKey: "git commit",
+                projectID: "repo-a",
+                directoryIdentity: "/work/a",
+                outcome: .succeeded,
+                observedAt: Date(timeIntervalSince1970: 2_000 + Double(offset))
+            )
+            try await store.recordCommand(next)
+            try await store.recordTransition(previousCommandKey: "git add", next: next)
+        }
+        let transitions = try await store.commandTransitions(
+            after: "git add",
+            projectID: "repo-a",
+            directoryIdentity: "/work/a",
+            limit: 20
+        )
+        XCTAssertEqual(transitions.count, 3)
+        XCTAssertTrue(transitions.allSatisfy { $0.totalCount == 3 })
+        let request = CompletionRequest(
+            id: UUID(),
+            generation: 1,
+            draft: "",
+            cursorUTF16Offset: 0,
+            tokenContext: CommandTokenContext(
+                replacementRange: NSRange(location: 0, length: 0),
+                decodedPrefix: "",
+                isCommandPosition: true
+            ),
+            currentDirectory: URL(fileURLWithPath: "/work/a", isDirectory: true),
+            projectContext: nil,
+            previousCommand: CompletedCommandSummary(
+                normalizedCommand: "git add .",
+                commandKey: "git add",
+                exitCode: 0,
+                projectID: nil,
+                directoryIdentity: "/work/a",
+                completedAt: Date()
+            ),
+            executableSearchPath: "",
+            shellGeneration: 1,
+            maximumResults: 12,
+            createdAt: ContinuousClock.now
+        )
+        let nextCommands = try await TransitionCompletionProvider(store: store)
+            .candidates(for: request)
+        XCTAssertEqual(nextCommands.map(\.replacementText), ["git commit"])
+        XCTAssertEqual(nextCommands.first?.kind, .nextCommand)
+
+        let identity = "fullCommand|false|git commit"
+        try await store.recordFeedback(CompletionFeedbackRecord(
+            candidateIdentity: identity,
+            normalizedReplacement: "git commit",
+            source: .transition,
+            supportingSources: [.transition, .history],
+            projectID: "repo-a",
+            directoryIdentity: "/work/a",
+            action: .accepted,
+            rank: 0,
+            timestamp: Date(timeIntervalSince1970: 3_000)
+        ))
+        let feedback = try await store.feedbackAggregates(
+            candidateIdentities: [identity, "unrelated"],
+            projectID: "repo-a",
+            directoryIdentity: "/work/a",
+            limit: 20
+        )
+        XCTAssertEqual(feedback.count, 3)
+        XCTAssertTrue(feedback.allSatisfy { $0.acceptanceCount == 1 })
+    }
+
+    func testSensitiveBehavioralCommandIsExcluded() async throws {
+        let directory = temporaryDirectory(named: "BehavioralSecurity")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try SQLiteRuntimeStateStore(
+            databaseURL: directory.appendingPathComponent("runtime.sqlite")
+        )
+        try await store.recordCommand(BehavioralCommandRecord(
+            eventID: UUID(),
+            normalizedCommand: "OPENAI_API_KEY=sk-secretsecret echo ok",
+            commandKey: "OPENAI_API_KEY=sk-secretsecret",
+            projectID: nil,
+            directoryIdentity: nil,
+            outcome: .succeeded,
+            observedAt: Date()
+        ))
+        let aggregates = try await store.mostRecentCommands(
+            projectID: nil,
+            directoryIdentity: nil,
+            limit: 20
+        )
+        XCTAssertTrue(aggregates.isEmpty)
     }
 }
 

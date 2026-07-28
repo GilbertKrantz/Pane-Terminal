@@ -14,10 +14,12 @@ struct CommandAutocompleteSuggestion: Identifiable, Equatable, Hashable, Sendabl
         case executable
         case fileSystem
         case projectScript
+        case transition
     }
 
     let text: String
     let replacementText: String
+    let replacementRange: NSRange?
     let source: Source
     let isDirectory: Bool
     let detail: String?
@@ -29,12 +31,14 @@ struct CommandAutocompleteSuggestion: Identifiable, Equatable, Hashable, Sendabl
     init(
         text: String,
         replacementText: String? = nil,
+        replacementRange: NSRange? = nil,
         source: Source,
         isDirectory: Bool = false,
         detail: String? = nil
     ) {
         self.text = text
         self.replacementText = replacementText ?? text
+        self.replacementRange = replacementRange
         self.source = source
         self.isDirectory = isDirectory
         self.detail = detail
@@ -185,6 +189,7 @@ struct CommandAutocomplete {
                 CommandAutocompleteSuggestion(
                     text: text,
                     replacementText: replacementText,
+                    replacementRange: token.range,
                     source: source,
                     isDirectory: isDirectory
                 )
@@ -246,21 +251,50 @@ struct CommandAutocomplete {
         in draft: String,
         cursorUTF16Offset: Int? = nil
     ) -> CommandAutocompleteEdit {
+        let draftText = draft as NSString
+        let cursor = min(
+            max(0, cursorUTF16Offset ?? draftText.length),
+            draftText.length
+        )
         let token = Self.tokenContext(
             in: draft,
-            cursorUTF16Offset: cursorUTF16Offset
+            cursorUTF16Offset: cursor
         )
-        let updatedDraft = (draft as NSString).replacingCharacters(
-            in: token.range,
+        let replacementRange = Self.validated(
+            suggestion.replacementRange,
+            in: draftText
+        ) ?? token.range
+        let updatedDraft = draftText.replacingCharacters(
+            in: replacementRange,
             with: suggestion.replacementText
         )
-        let updatedCursorOffset = token.range.location
+        let updatedCursorOffset = replacementRange.location
             + (suggestion.replacementText as NSString).length
 
         return CommandAutocompleteEdit(
             draft: updatedDraft,
             cursorUTF16Offset: updatedCursorOffset
         )
+    }
+
+    func replacementRange(
+        in draft: String,
+        cursorUTF16Offset: Int
+    ) -> NSRange {
+        Self.tokenContext(
+            in: draft,
+            cursorUTF16Offset: cursorUTF16Offset
+        ).range
+    }
+
+    func decodedPrefix(
+        in draft: String,
+        cursorUTF16Offset: Int
+    ) -> String {
+        Self.tokenContext(
+            in: draft,
+            cursorUTF16Offset: cursorUTF16Offset
+        ).decodedPrefix
     }
 
     func capturedSuggestions(
@@ -455,6 +489,21 @@ private extension CommandAutocomplete {
     static func isUsefulMatch(_ candidate: String, for token: TokenContext) -> Bool {
         candidate.hasPrefix(token.decodedPrefix)
             && (candidate != token.decodedPrefix || candidate != token.decodedToken)
+    }
+
+    static func validated(
+        _ range: NSRange?,
+        in text: NSString
+    ) -> NSRange? {
+        guard let range,
+              range.location != NSNotFound,
+              range.location >= 0,
+              range.length >= 0,
+              range.location <= text.length,
+              range.length <= text.length - range.location else {
+            return nil
+        }
+        return range
     }
 
     static func tokenContext(

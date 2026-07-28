@@ -35,6 +35,7 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
     private let retentionPolicy: RuntimeStateRetentionPolicy
     private let sanitizer: any SensitiveDataSanitizing
     private var database: OpaquePointer?
+    private var requiresBehavioralBackfill = false
 
     init(
         databaseURL: URL,
@@ -61,6 +62,8 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
             throw RuntimeStateStoreError.openFailed
         }
         do {
+            let version = try Self.userVersion(handle)
+            requiresBehavioralBackfill = version > 0 && version < 5
             try Self.backUpBeforeMigrationIfNeeded(handle, databaseURL: databaseURL)
             try Self.configureAndMigrate(handle)
         } catch {
@@ -338,6 +341,11 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
 
     func deleteAllState() async throws {
         try transaction {
+            try execute("DELETE FROM completion_feedback_aggregates")
+            try execute("DELETE FROM command_transitions")
+            try execute("DELETE FROM command_aggregates")
+            try execute("DELETE FROM behavioral_processed_transitions")
+            try execute("DELETE FROM behavioral_processed_commands")
             try execute("DELETE FROM runtime_features")
             try execute("DELETE FROM command_events")
             try execute("DELETE FROM runtime_sessions")
@@ -393,8 +401,14 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
 
     func applyRetentionPolicy() async throws {
         let cutoff = milliseconds(Date().addingTimeInterval(-retentionPolicy.maximumAge))
+        let behavioralCutoff = Date()
+            .addingTimeInterval(-retentionPolicy.maximumAge)
+            .timeIntervalSince1970
         try execute("DELETE FROM command_events WHERE timestamp < \(cutoff)")
         try execute("DELETE FROM runtime_features WHERE timestamp < \(cutoff)")
+        try execute("DELETE FROM command_aggregates WHERE last_used_at < \(behavioralCutoff)")
+        try execute("DELETE FROM command_transitions WHERE last_observed_at < \(behavioralCutoff)")
+        try execute("DELETE FROM completion_feedback_aggregates WHERE last_feedback_at < \(behavioralCutoff)")
 
         let maximumEvents = max(0, retentionPolicy.maximumCommandEvents)
         try execute("""
@@ -471,7 +485,8 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
             )
         }
         let currentVersion = sqlite3_column_int64(statement, 0)
-        guard currentVersion <= 4 else { return }
+        guard currentVersion <= 5 else { return }
+        guard currentVersion < 5 else { return }
         guard currentVersion == 0 else {
             try run("BEGIN IMMEDIATE", operation: "begin migration")
             do {
@@ -506,7 +521,8 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
                     try run("ALTER TABLE command_events ADD COLUMN output_kind TEXT NOT NULL DEFAULT 'none'", operation: "add output kind")
                 }
                 try run("UPDATE command_events SET output_kind = 'excerpt' WHERE output_kind = 'none' AND (sanitized_output_summary IS NOT NULL OR sanitized_error_summary IS NOT NULL)", operation: "classify stored output excerpts")
-                try run("PRAGMA user_version = 4", operation: "set schema version")
+                try createBehavioralTables(run)
+                try run("PRAGMA user_version = 5", operation: "set schema version")
                 try run("COMMIT", operation: "commit migration")
             } catch {
                 try? run("ROLLBACK", operation: "rollback migration")
@@ -565,12 +581,61 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
             )
             """, operation: "create runtime-features table")
             try run("CREATE INDEX idx_runtime_features_session_time ON runtime_features(session_id, timestamp DESC)", operation: "index runtime features")
-            try run("PRAGMA user_version = 4", operation: "set schema version")
+            try createBehavioralTables(run)
+            try run("PRAGMA user_version = 5", operation: "set schema version")
             try run("COMMIT", operation: "commit migration")
         } catch {
             try? run("ROLLBACK", operation: "rollback migration")
             throw error
         }
+    }
+
+    private static func createBehavioralTables(
+        _ run: (String, String) throws -> Void
+    ) throws {
+        try run("""
+        CREATE TABLE IF NOT EXISTS command_aggregates (
+            normalized_command TEXT NOT NULL, command_key TEXT NOT NULL,
+            project_id TEXT NOT NULL DEFAULT '', directory_id TEXT NOT NULL DEFAULT '',
+            total_count INTEGER NOT NULL, successful_count INTEGER NOT NULL,
+            failed_count INTEGER NOT NULL, interrupted_count INTEGER NOT NULL,
+            first_used_at REAL NOT NULL, last_used_at REAL NOT NULL,
+            PRIMARY KEY(normalized_command, project_id, directory_id)
+        )
+        """, "create command aggregates")
+        try run("CREATE INDEX IF NOT EXISTS idx_command_aggregates_prefix ON command_aggregates(normalized_command)", "index aggregate prefix")
+        try run("CREATE INDEX IF NOT EXISTS idx_command_aggregates_scope_time ON command_aggregates(project_id, directory_id, last_used_at DESC)", "index aggregate scope")
+        try run("CREATE INDEX IF NOT EXISTS idx_command_aggregates_key ON command_aggregates(command_key)", "index command key")
+        try run("""
+        CREATE TABLE IF NOT EXISTS command_transitions (
+            previous_command_key TEXT NOT NULL, next_normalized_command TEXT NOT NULL,
+            project_id TEXT NOT NULL DEFAULT '', directory_id TEXT NOT NULL DEFAULT '',
+            total_count INTEGER NOT NULL, successful_next_count INTEGER NOT NULL,
+            last_observed_at REAL NOT NULL,
+            PRIMARY KEY(previous_command_key, next_normalized_command, project_id, directory_id)
+        )
+        """, "create command transitions")
+        try run("CREATE INDEX IF NOT EXISTS idx_command_transitions_lookup ON command_transitions(previous_command_key, project_id, directory_id, total_count DESC)", "index transitions")
+        try run("""
+        CREATE TABLE IF NOT EXISTS completion_feedback_aggregates (
+            candidate_identity TEXT NOT NULL, project_id TEXT NOT NULL DEFAULT '',
+            directory_id TEXT NOT NULL DEFAULT '', acceptance_count INTEGER NOT NULL,
+            dismissal_count INTEGER NOT NULL, replacement_count INTEGER NOT NULL,
+            last_feedback_at REAL NOT NULL,
+            PRIMARY KEY(candidate_identity, project_id, directory_id)
+        )
+        """, "create completion feedback")
+        try run("CREATE INDEX IF NOT EXISTS idx_completion_feedback_lookup ON completion_feedback_aggregates(candidate_identity, project_id, directory_id)", "index completion feedback")
+        try run("""
+        CREATE TABLE IF NOT EXISTS behavioral_processed_commands (
+            event_id TEXT PRIMARY KEY
+        )
+        """, "create processed behavioral commands")
+        try run("""
+        CREATE TABLE IF NOT EXISTS behavioral_processed_transitions (
+            event_id TEXT PRIMARY KEY
+        )
+        """, "create processed behavioral transitions")
     }
 
     private static func backUpBeforeMigrationIfNeeded(
@@ -583,7 +648,7 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
         defer { sqlite3_finalize(statement) }
         guard sqlite3_step(statement) == SQLITE_ROW else { return }
         let version = sqlite3_column_int64(statement, 0)
-        guard version > 0, version < 4 else { return }
+        guard version > 0, version < 5 else { return }
 
         let backupURL = databaseURL.deletingPathExtension()
             .appendingPathExtension("v\(version)-\(UUID().uuidString).backup.sqlite")
@@ -606,6 +671,25 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
         guard result == SQLITE_DONE else {
             throw RuntimeStateStoreError.databaseFailure(operation: "write migration backup", code: result)
         }
+    }
+
+    private static func userVersion(_ database: OpaquePointer) throws -> Int64 {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, "PRAGMA user_version", -1, &statement, nil) == SQLITE_OK,
+              let statement else {
+            throw RuntimeStateStoreError.databaseFailure(
+                operation: "read schema version",
+                code: sqlite3_errcode(database)
+            )
+        }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            throw RuntimeStateStoreError.databaseFailure(
+                operation: "read schema version",
+                code: sqlite3_errcode(database)
+            )
+        }
+        return sqlite3_column_int64(statement, 0)
     }
 
     private func transaction(_ body: () throws -> Void) throws {
@@ -682,6 +766,12 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
         guard result == SQLITE_OK else { throw failure("bind integer") }
     }
 
+    private func bind(_ value: Double, at index: Int32, to statement: OpaquePointer) throws {
+        guard sqlite3_bind_double(statement, index, value) == SQLITE_OK else {
+            throw failure("bind real")
+        }
+    }
+
     private func stepDone(_ statement: OpaquePointer, operation: String) throws {
         guard sqlite3_step(statement) == SQLITE_DONE else { throw failure(operation) }
     }
@@ -710,5 +800,411 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
 
     private func date(_ milliseconds: Int64) -> Date {
         Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
+    }
+}
+
+extension SQLiteRuntimeStateStore: BehavioralCompletionStore {
+    func needsBehavioralBackfill() -> Bool {
+        requiresBehavioralBackfill
+    }
+
+    func backfillBehavioralHistory(
+        maximumCommands: Int = 10_000,
+        batchSize: Int = 500
+    ) async throws {
+        let maximum = min(10_000, max(0, maximumCommands))
+        let batch = min(500, max(1, batchSize))
+        guard maximum > 0 else { return }
+        var offset = 0
+        while offset < maximum, !Task.isCancelled {
+            var records: [BehavioralCommandRecord] = []
+            var fetchedCount = 0
+            try withStatement("""
+                SELECT e.block_id, e.command, e.working_directory, e.exit_code,
+                       e.completion_state, e.timestamp, s.repository_id
+                FROM command_events e
+                LEFT JOIN runtime_sessions s ON s.id = e.session_id
+                WHERE e.completion_state IN ('completed', 'interrupted')
+                ORDER BY e.timestamp DESC, e.id DESC
+                LIMIT ? OFFSET ?
+                """, operation: "read behavioral backfill batch") { statement in
+                try bind(Int64(min(batch, maximum - offset)), at: 1, to: statement)
+                try bind(Int64(offset), at: 2, to: statement)
+                while sqlite3_step(statement) == SQLITE_ROW {
+                    fetchedCount += 1
+                    guard let rawID = columnText(statement, 0),
+                          let eventID = UUID(uuidString: rawID),
+                          let command = columnText(statement, 1) else { continue }
+                    let normalized = NormalizedCommand(command)
+                    guard let commandKey = normalized.commandKey else { continue }
+                    let completion = columnText(statement, 4)
+                    let exitCode = columnInt(statement, 3)
+                    let outcome: BehavioralCommandOutcome = completion == "interrupted"
+                        ? .interrupted
+                        : (exitCode == 0 ? .succeeded : .failed)
+                    records.append(BehavioralCommandRecord(
+                        eventID: eventID,
+                        normalizedCommand: normalized.full,
+                        commandKey: commandKey,
+                        projectID: columnText(statement, 6),
+                        directoryIdentity: columnText(statement, 2),
+                        outcome: outcome,
+                        observedAt: date(sqlite3_column_int64(statement, 5))
+                    ))
+                }
+            }
+            guard fetchedCount > 0 else { break }
+            for record in records {
+                try Task.checkCancellation()
+                try await recordCommand(record)
+            }
+            offset += fetchedCount
+            await Task.yield()
+        }
+        if !Task.isCancelled {
+            requiresBehavioralBackfill = false
+        }
+    }
+
+    func recordCommand(_ record: BehavioralCommandRecord) async throws {
+        let sanitized = sanitizer.sanitizeCommand(record.normalizedCommand)
+        let normalized = NormalizedCommand(sanitized.value)
+        guard sanitized.redactionCount == 0,
+              !normalized.full.isEmpty,
+              !normalized.full.contains(SensitiveDataSanitizer.redaction),
+              normalized.full.count <= 4_096,
+              normalized.commandKey == record.commandKey else { return }
+
+        try transaction {
+            try withStatement(
+                "INSERT OR IGNORE INTO behavioral_processed_commands(event_id) VALUES (?)",
+                operation: "claim behavioral command"
+            ) { statement in
+                try bind(record.eventID.uuidString, at: 1, to: statement)
+                try stepDone(statement, operation: "claim behavioral command")
+            }
+            guard sqlite3_changes(database) == 1 else { return }
+
+            let counts: (Int64, Int64, Int64)
+            switch record.outcome {
+            case .succeeded: counts = (1, 0, 0)
+            case .failed: counts = (0, 1, 0)
+            case .interrupted: counts = (0, 0, 1)
+            }
+            for scope in behavioralScopes(
+                projectID: record.projectID,
+                directoryIdentity: record.directoryIdentity
+            ) {
+                try withStatement("""
+                    INSERT INTO command_aggregates (
+                        normalized_command, command_key, project_id, directory_id,
+                        total_count, successful_count, failed_count, interrupted_count,
+                        first_used_at, last_used_at
+                    ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+                    ON CONFLICT(normalized_command, project_id, directory_id) DO UPDATE SET
+                        command_key = excluded.command_key,
+                        total_count = total_count + 1,
+                        successful_count = successful_count + excluded.successful_count,
+                        failed_count = failed_count + excluded.failed_count,
+                        interrupted_count = interrupted_count + excluded.interrupted_count,
+                        first_used_at = MIN(first_used_at, excluded.first_used_at),
+                        last_used_at = MAX(last_used_at, excluded.last_used_at)
+                    """, operation: "record command aggregate") { statement in
+                    try bind(normalized.full, at: 1, to: statement)
+                    try bind(record.commandKey, at: 2, to: statement)
+                    try bind(scope.project, at: 3, to: statement)
+                    try bind(scope.directory, at: 4, to: statement)
+                    try bind(counts.0, at: 5, to: statement)
+                    try bind(counts.1, at: 6, to: statement)
+                    try bind(counts.2, at: 7, to: statement)
+                    try bind(record.observedAt.timeIntervalSince1970, at: 8, to: statement)
+                    try bind(record.observedAt.timeIntervalSince1970, at: 9, to: statement)
+                    try stepDone(statement, operation: "record command aggregate")
+                }
+            }
+        }
+    }
+
+    func recordTransition(
+        previousCommandKey: String,
+        next: BehavioralCommandRecord
+    ) async throws {
+        let previous = NormalizedCommand(previousCommandKey)
+        let sanitized = sanitizer.sanitizeCommand(next.normalizedCommand)
+        let normalizedNext = NormalizedCommand(sanitized.value)
+        guard sanitized.redactionCount == 0,
+              let previousKey = previous.commandKey,
+              previous.full == previousCommandKey,
+              !normalizedNext.full.isEmpty,
+              normalizedNext.commandKey == next.commandKey else { return }
+
+        try transaction {
+            try withStatement(
+                "INSERT OR IGNORE INTO behavioral_processed_transitions(event_id) VALUES (?)",
+                operation: "claim behavioral transition"
+            ) { statement in
+                try bind(next.eventID.uuidString, at: 1, to: statement)
+                try stepDone(statement, operation: "claim behavioral transition")
+            }
+            guard sqlite3_changes(database) == 1 else { return }
+            for scope in behavioralScopes(
+                projectID: next.projectID,
+                directoryIdentity: next.directoryIdentity
+            ) {
+                try withStatement("""
+                    INSERT INTO command_transitions (
+                        previous_command_key, next_normalized_command, project_id,
+                        directory_id, total_count, successful_next_count, last_observed_at
+                    ) VALUES (?, ?, ?, ?, 1, ?, ?)
+                    ON CONFLICT(previous_command_key, next_normalized_command, project_id, directory_id)
+                    DO UPDATE SET
+                        total_count = total_count + 1,
+                        successful_next_count = successful_next_count + excluded.successful_next_count,
+                        last_observed_at = MAX(last_observed_at, excluded.last_observed_at)
+                    """, operation: "record command transition") { statement in
+                    try bind(previousKey, at: 1, to: statement)
+                    try bind(normalizedNext.full, at: 2, to: statement)
+                    try bind(scope.project, at: 3, to: statement)
+                    try bind(scope.directory, at: 4, to: statement)
+                    try bind(next.outcome == .succeeded ? Int64(1) : Int64(0), at: 5, to: statement)
+                    try bind(next.observedAt.timeIntervalSince1970, at: 6, to: statement)
+                    try stepDone(statement, operation: "record command transition")
+                }
+            }
+        }
+    }
+
+    func commandAggregates(
+        matchingPrefix prefix: String,
+        projectID: String?,
+        directoryIdentity: String?,
+        limit: Int
+    ) async throws -> [CommandAggregate] {
+        let normalizedPrefix = NormalizedCommand(prefix).full
+        guard !normalizedPrefix.isEmpty else { return [] }
+        return try readCommandAggregates(
+            whereClause: "normalized_command LIKE ? ESCAPE '\\'",
+            firstValue: escapeLike(normalizedPrefix) + "%",
+            projectID: projectID,
+            directoryIdentity: directoryIdentity,
+            limit: limit
+        )
+    }
+
+    func mostRecentCommands(
+        projectID: String?,
+        directoryIdentity: String?,
+        limit: Int
+    ) async throws -> [CommandAggregate] {
+        try readCommandAggregates(
+            whereClause: "1 = 1",
+            firstValue: nil,
+            projectID: projectID,
+            directoryIdentity: directoryIdentity,
+            limit: limit
+        )
+    }
+
+    func commandTransitions(
+        after previousCommandKey: String,
+        projectID: String?,
+        directoryIdentity: String?,
+        limit: Int
+    ) async throws -> [CommandTransitionAggregate] {
+        let boundedLimit = min(100, max(0, limit))
+        guard boundedLimit > 0 else { return [] }
+        let project = sanitizedScope(projectID)
+        let directory = sanitizedScope(directoryIdentity)
+        var values: [CommandTransitionAggregate] = []
+        try withStatement("""
+            SELECT previous_command_key, next_normalized_command, project_id, directory_id,
+                   total_count, successful_next_count, last_observed_at
+            FROM command_transitions
+            WHERE previous_command_key = ?
+              AND ((project_id = '' AND directory_id = '')
+                OR (project_id = ? AND directory_id = '')
+                OR (project_id = ? AND directory_id = ?))
+            ORDER BY total_count DESC, last_observed_at DESC, next_normalized_command ASC
+            LIMIT ?
+            """, operation: "query command transitions") { statement in
+            try bind(previousCommandKey, at: 1, to: statement)
+            try bind(project, at: 2, to: statement)
+            try bind(project, at: 3, to: statement)
+            try bind(directory, at: 4, to: statement)
+            try bind(Int64(boundedLimit), at: 5, to: statement)
+            while sqlite3_step(statement) == SQLITE_ROW {
+                values.append(CommandTransitionAggregate(
+                    previousCommandKey: columnText(statement, 0) ?? "",
+                    nextNormalizedCommand: columnText(statement, 1) ?? "",
+                    projectID: emptyToNil(columnText(statement, 2)),
+                    directoryIdentity: emptyToNil(columnText(statement, 3)),
+                    totalCount: columnInt(statement, 4) ?? 0,
+                    successfulNextCount: columnInt(statement, 5) ?? 0,
+                    lastObservedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 6))
+                ))
+            }
+        }
+        return values
+    }
+
+    func recordFeedback(_ record: CompletionFeedbackRecord) async throws {
+        let identity = sanitizer.sanitizeCommand(record.candidateIdentity)
+        guard identity.redactionCount == 0, !identity.value.isEmpty, identity.value.count <= 4_096 else {
+            return
+        }
+        let accepted: Int64 = record.action == .accepted || record.action == .partiallyAccepted ? 1 : 0
+        let dismissed: Int64 = record.action == .dismissed ? 1 : 0
+        let replaced: Int64 = record.action == .replaced ? 1 : 0
+        for scope in behavioralScopes(
+            projectID: record.projectID,
+            directoryIdentity: record.directoryIdentity
+        ) {
+            try withStatement("""
+                INSERT INTO completion_feedback_aggregates (
+                    candidate_identity, project_id, directory_id, acceptance_count,
+                    dismissal_count, replacement_count, last_feedback_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(candidate_identity, project_id, directory_id) DO UPDATE SET
+                    acceptance_count = acceptance_count + excluded.acceptance_count,
+                    dismissal_count = dismissal_count + excluded.dismissal_count,
+                    replacement_count = replacement_count + excluded.replacement_count,
+                    last_feedback_at = MAX(last_feedback_at, excluded.last_feedback_at)
+                """, operation: "record completion feedback") { statement in
+                try bind(identity.value, at: 1, to: statement)
+                try bind(scope.project, at: 2, to: statement)
+                try bind(scope.directory, at: 3, to: statement)
+                try bind(accepted, at: 4, to: statement)
+                try bind(dismissed, at: 5, to: statement)
+                try bind(replaced, at: 6, to: statement)
+                try bind(record.timestamp.timeIntervalSince1970, at: 7, to: statement)
+                try stepDone(statement, operation: "record completion feedback")
+            }
+        }
+    }
+
+    func feedbackAggregates(
+        candidateIdentities: [String],
+        projectID: String?,
+        directoryIdentity: String?,
+        limit: Int
+    ) async throws -> [CompletionFeedbackAggregate] {
+        let identities = Array(Set(candidateIdentities.prefix(500))).sorted()
+        let boundedLimit = min(500, max(0, limit))
+        guard !identities.isEmpty, boundedLimit > 0 else { return [] }
+        let placeholders = Array(repeating: "?", count: identities.count).joined(separator: ",")
+        let project = sanitizedScope(projectID)
+        let directory = sanitizedScope(directoryIdentity)
+        var values: [CompletionFeedbackAggregate] = []
+        try withStatement("""
+            SELECT candidate_identity, project_id, directory_id, acceptance_count,
+                   dismissal_count, replacement_count, last_feedback_at
+            FROM completion_feedback_aggregates
+            WHERE candidate_identity IN (\(placeholders))
+              AND ((project_id = '' AND directory_id = '')
+                OR (project_id = ? AND directory_id = '')
+                OR (project_id = ? AND directory_id = ?))
+            ORDER BY candidate_identity, project_id, directory_id
+            LIMIT ?
+            """, operation: "batch feedback lookup") { statement in
+            for (offset, identity) in identities.enumerated() {
+                try bind(identity, at: Int32(offset + 1), to: statement)
+            }
+            var index = Int32(identities.count + 1)
+            try bind(project, at: index, to: statement); index += 1
+            try bind(project, at: index, to: statement); index += 1
+            try bind(directory, at: index, to: statement); index += 1
+            try bind(Int64(boundedLimit), at: index, to: statement)
+            while sqlite3_step(statement) == SQLITE_ROW {
+                values.append(CompletionFeedbackAggregate(
+                    candidateIdentity: columnText(statement, 0) ?? "",
+                    projectID: emptyToNil(columnText(statement, 1)),
+                    directoryIdentity: emptyToNil(columnText(statement, 2)),
+                    acceptanceCount: columnInt(statement, 3) ?? 0,
+                    dismissalCount: columnInt(statement, 4) ?? 0,
+                    replacementCount: columnInt(statement, 5) ?? 0,
+                    lastFeedbackAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 6))
+                ))
+            }
+        }
+        return values
+    }
+
+    private func readCommandAggregates(
+        whereClause: String,
+        firstValue: String?,
+        projectID: String?,
+        directoryIdentity: String?,
+        limit: Int
+    ) throws -> [CommandAggregate] {
+        let boundedLimit = min(300, max(0, limit))
+        guard boundedLimit > 0 else { return [] }
+        let project = sanitizedScope(projectID)
+        let directory = sanitizedScope(directoryIdentity)
+        var values: [CommandAggregate] = []
+        try withStatement("""
+            SELECT normalized_command, command_key, project_id, directory_id, total_count,
+                   successful_count, failed_count, interrupted_count, first_used_at, last_used_at
+            FROM command_aggregates
+            WHERE \(whereClause)
+              AND ((project_id = '' AND directory_id = '')
+                OR (project_id = ? AND directory_id = '')
+                OR (project_id = ? AND directory_id = ?))
+            ORDER BY last_used_at DESC, total_count DESC, normalized_command ASC
+            LIMIT ?
+            """, operation: "query command aggregates") { statement in
+            var index: Int32 = 1
+            if let firstValue {
+                try bind(firstValue, at: index, to: statement); index += 1
+            }
+            try bind(project, at: index, to: statement); index += 1
+            try bind(project, at: index, to: statement); index += 1
+            try bind(directory, at: index, to: statement); index += 1
+            try bind(Int64(boundedLimit), at: index, to: statement)
+            while sqlite3_step(statement) == SQLITE_ROW {
+                values.append(CommandAggregate(
+                    normalizedCommand: columnText(statement, 0) ?? "",
+                    commandKey: columnText(statement, 1) ?? "",
+                    projectID: emptyToNil(columnText(statement, 2)),
+                    directoryIdentity: emptyToNil(columnText(statement, 3)),
+                    totalCount: columnInt(statement, 4) ?? 0,
+                    successfulCount: columnInt(statement, 5) ?? 0,
+                    failedCount: columnInt(statement, 6) ?? 0,
+                    interruptedCount: columnInt(statement, 7) ?? 0,
+                    firstUsedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 8)),
+                    lastUsedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 9))
+                ))
+            }
+        }
+        return values
+    }
+
+    private func behavioralScopes(
+        projectID: String?,
+        directoryIdentity: String?
+    ) -> [(project: String, directory: String)] {
+        let project = sanitizedScope(projectID)
+        let directory = sanitizedScope(directoryIdentity)
+        var scopes = [(project: "", directory: "")]
+        if !project.isEmpty { scopes.append((project: project, directory: "")) }
+        if !directory.isEmpty { scopes.append((project: project, directory: directory)) }
+        return scopes
+    }
+
+    private func sanitizedScope(_ value: String?) -> String {
+        guard let value else { return "" }
+        let sanitized = sanitizer.sanitizeCommand(value)
+        return sanitized.redactionCount == 0 ? String(sanitized.value.prefix(4_096)) : ""
+    }
+
+    private func emptyToNil(_ value: String?) -> String? {
+        guard let value, !value.isEmpty else { return nil }
+        return value
+    }
+
+    private func escapeLike(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
     }
 }

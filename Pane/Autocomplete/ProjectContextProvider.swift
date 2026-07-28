@@ -1,5 +1,9 @@
 import Foundation
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 
 private final class BoundedProcessOutput: @unchecked Sendable {
     private let lock = NSLock()
@@ -60,7 +64,7 @@ struct ProjectContext: Equatable, Sendable {
     let discoveredAt: Date
 }
 
-actor ProjectContextCache {
+actor ProjectDefinitionCache {
     private struct Entry { let context: ProjectContext?; let createdAt: Date }
     private var entries: [String: Entry] = [:]
     private let ttl: TimeInterval
@@ -78,8 +82,43 @@ actor ProjectContextCache {
     private static func manifestsAreCurrent(_ context: ProjectContext?) -> Bool {
         guard let context else { return true }
         return context.manifests.allSatisfy {
-            (try? $0.url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) == $0.modificationDate
+            let attributes = try? FileManager.default.attributesOfItem(atPath: $0.url.path)
+            return attributes?[.modificationDate] as? Date == $0.modificationDate
         }
+    }
+}
+
+actor GitContextCache {
+    private struct Entry { let context: GitContext?; let createdAt: Date }
+    private var entries: [String: Entry] = [:]
+    private let activeTTL: TimeInterval
+
+    init(activeTTL: TimeInterval = 5) {
+        self.activeTTL = min(30, max(1, activeTTL))
+    }
+
+    func value(
+        for root: URL,
+        loader: @Sendable () async -> GitContext?
+    ) async -> GitContext? {
+        let key = root.standardizedFileURL.resolvingSymlinksInPath().path
+        if let entry = entries[key],
+           Date().timeIntervalSince(entry.createdAt) < activeTTL {
+            return entry.context
+        }
+        let context = await loader()
+        entries[key] = Entry(context: context, createdAt: Date())
+        return context
+    }
+
+    func invalidate(root: URL? = nil) {
+        guard let root else {
+            entries.removeAll()
+            return
+        }
+        entries.removeValue(
+            forKey: root.standardizedFileURL.resolvingSymlinksInPath().path
+        )
     }
 }
 
@@ -90,18 +129,33 @@ struct ProjectContextProvider: Sendable {
     init(maximumParentDepth: Int = 12) { self.maximumParentDepth = max(0, maximumParentDepth) }
 
     func context(for directory: URL) async -> ProjectContext? {
+        guard let definition = definition(for: directory) else { return nil }
+        let git = await gitContext(root: definition.root)
+        return ProjectContext(
+            root: definition.root,
+            identity: definition.identity,
+            kind: definition.kind,
+            git: git,
+            manifests: definition.manifests,
+            scripts: definition.scripts,
+            detectedLanguages: definition.detectedLanguages,
+            discoveredAt: definition.discoveredAt
+        )
+    }
+
+    func definition(for directory: URL) -> ProjectContext? {
         guard let root = detectRoot(from: directory) else { return nil }
         let files = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
         let manifests = manifestNames(in: files).map { name -> ProjectManifest in
             let url = root.appendingPathComponent(name)
-            let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+            let date = attributes?[.modificationDate] as? Date
             return ProjectManifest(url: url, modificationDate: date)
         }
         let scripts = projectScripts(root: root, files: files)
         let languages = detectedLanguages(files: files)
         let kind = projectKind(files: files, languages: languages)
-        let git = await gitContext(root: root)
-        return ProjectContext(root: root, identity: stableIdentity(root), kind: kind, git: git,
+        return ProjectContext(root: root, identity: stableIdentity(root), kind: kind, git: nil,
             manifests: manifests, scripts: scripts, detectedLanguages: languages, discoveredAt: Date())
     }
 
@@ -217,7 +271,7 @@ struct ProjectContextProvider: Sendable {
         for byte in root.standardizedFileURL.resolvingSymlinksInPath().path.utf8 { hash ^= UInt64(byte); hash &*= 1_099_511_628_211 }
         return String(hash, radix: 16)
     }
-    private func gitContext(root: URL) async -> GitContext? {
+    func gitContext(root: URL) async -> GitContext? {
         guard FileManager.default.fileExists(atPath: root.appendingPathComponent(".git").path) else { return nil }
         guard let output = await runGit(["status", "--porcelain=v1", "--branch"], at: root) else { return nil }
         let lines = output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
@@ -272,6 +326,7 @@ struct ProjectContextProvider: Sendable {
         var environment = ProcessInfo.processInfo.environment
         environment["GIT_TERMINAL_PROMPT"] = "0"
         environment["GIT_CONFIG_NOSYSTEM"] = "1"
+        environment["GIT_OPTIONAL_LOCKS"] = "0"
         process.environment = environment
         pipe.fileHandleForReading.readabilityHandler = { handle in
             output.append(handle.availableData)
@@ -297,7 +352,7 @@ struct ProjectContextProvider: Sendable {
             }
         }
         if process.isRunning {
-            _ = Darwin.kill(process.processIdentifier, SIGKILL)
+            _ = kill(process.processIdentifier, SIGKILL)
         }
         process.waitUntilExit()
         pipe.fileHandleForReading.readabilityHandler = nil

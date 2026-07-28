@@ -32,7 +32,9 @@ struct CompletionCandidate: Identifiable, Sendable {
     let id: String
     let displayText: String
     let replacementText: String
+    let replacementRange: NSRange?
     let source: CompletionSource
+    var supportingSources: Set<CompletionSource>
     let kind: CompletionKind
     let detail: String?
     let isDirectory: Bool
@@ -42,16 +44,29 @@ struct CompletionCandidate: Identifiable, Sendable {
         id: String? = nil,
         displayText: String,
         replacementText: String,
+        replacementRange: NSRange? = nil,
         source: CompletionSource,
         kind: CompletionKind = .command,
         detail: String? = nil,
         isDirectory: Bool = false,
-        evidence: CompletionEvidence = CompletionEvidence()
+        evidence: CompletionEvidence = CompletionEvidence(),
+        supportingSources: Set<CompletionSource>? = nil
     ) {
-        self.id = id ?? "\(source.rawValue):\(kind.rawValue):\(replacementText)"
+        let normalizedIDText = replacementText.replacingOccurrences(
+            of: #"\s+$"#,
+            with: "",
+            options: .regularExpression
+        )
+        let rangeIdentity = replacementRange.map {
+            "\($0.location):\($0.length)"
+        } ?? "default"
+        self.id = id
+            ?? "\(kind.rawValue):\(isDirectory):\(rangeIdentity):\(normalizedIDText)"
         self.displayText = displayText
         self.replacementText = replacementText
+        self.replacementRange = replacementRange
         self.source = source
+        self.supportingSources = supportingSources ?? [source]
         self.kind = kind
         self.detail = detail
         self.isDirectory = isDirectory
@@ -116,11 +131,16 @@ struct CompletionRanker: Sendable {
             let evidence = merge(existing.evidence, candidate.evidence)
             var merged = stronger
             merged.evidence = evidence
+            merged.supportingSources.formUnion(existing.supportingSources)
+            merged.supportingSources.formUnion(candidate.supportingSources)
             // Prefer useful provider detail without changing executable text.
             if stronger.detail == nil, let detail = (stronger.id == existing.id ? candidate : existing).detail {
                 merged = CompletionCandidate(id: stronger.id, displayText: stronger.displayText,
-                    replacementText: stronger.replacementText, source: stronger.source, kind: stronger.kind,
-                    detail: detail, isDirectory: stronger.isDirectory, evidence: evidence)
+                    replacementText: stronger.replacementText,
+                    replacementRange: stronger.replacementRange,
+                    source: stronger.source, kind: stronger.kind,
+                    detail: detail, isDirectory: stronger.isDirectory, evidence: evidence,
+                    supportingSources: merged.supportingSources)
             }
             values[key] = merged
         }
@@ -130,7 +150,10 @@ struct CompletionRanker: Sendable {
     private func identity(for candidate: CompletionCandidate) -> String {
         let trimmed = candidate.replacementText.replacingOccurrences(
             of: #"\s+$"#, with: "", options: .regularExpression)
-        return "\(candidate.kind.rawValue)|\(candidate.isDirectory)|\(trimmed)"
+        let range = candidate.replacementRange.map {
+            "\($0.location):\($0.length)"
+        } ?? "default"
+        return "\(candidate.kind.rawValue)|\(candidate.isDirectory)|\(range)|\(trimmed)"
     }
 
     private func merge(_ a: CompletionEvidence, _ b: CompletionEvidence) -> CompletionEvidence {

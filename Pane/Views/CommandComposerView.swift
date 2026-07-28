@@ -35,7 +35,7 @@ struct CommandComposerView: View {
         let query = autocompleteQuery
         guard !session.isSecureInputActive,
               !query.isCommandActive,
-              query.hasCurrentToken,
+              (query.hasCurrentToken || (query.draft.isEmpty && session.canSuggestNextCommand)),
               suggestionsQuery == query,
               dismissedQuery != query else { return [] }
         return autocompleteSuggestions
@@ -234,7 +234,7 @@ struct CommandComposerView: View {
     private func refreshAutocomplete(for query: AutocompleteQuery) async {
         guard !session.isSecureInputActive,
               !query.isCommandActive,
-              query.hasCurrentToken,
+              (query.hasCurrentToken || (query.draft.isEmpty && session.canSuggestNextCommand)),
               dismissedQuery != query else {
             if suggestionsQuery != nil || !autocompleteSuggestions.isEmpty {
                 suggestionsQuery = nil
@@ -281,6 +281,13 @@ struct CommandComposerView: View {
         case .cycle:
             return .cycle
         case .accept(let suggestion):
+            if let rank = visibleSuggestions.firstIndex(of: suggestion) {
+                session.recordCompletionFeedback(
+                    for: suggestion,
+                    action: .accepted,
+                    rank: rank
+                )
+            }
             autocompleteSuggestions = []
             suggestionsQuery = nil
             let query = autocompleteQuery
@@ -303,13 +310,20 @@ struct CommandComposerView: View {
         )
         guard !session.isSecureInputActive,
               !query.isCommandActive,
-              query.hasCurrentToken,
+              (query.hasCurrentToken || (query.draft.isEmpty && session.canSuggestNextCommand)),
               suggestionsQuery == query,
               dismissedQuery != query,
               let suggestion = autocompleteSelection.selected(
                 from: autocompleteSuggestions
               ) else { return nil }
 
+        if let rank = autocompleteSuggestions.firstIndex(of: suggestion) {
+            session.recordCompletionFeedback(
+                for: suggestion,
+                action: .accepted,
+                rank: rank
+            )
+        }
         autocompleteSelection.reset()
         autocompleteSuggestions = []
         suggestionsQuery = nil
@@ -324,6 +338,16 @@ struct CommandComposerView: View {
     private func dismissAutocomplete() -> Bool {
         let query = autocompleteQuery
         guard !visibleSuggestions.isEmpty else { return false }
+        let dismissed = autocompleteSelection.selected(from: visibleSuggestions)
+            ?? visibleSuggestions.first
+        if let dismissed,
+           let rank = visibleSuggestions.firstIndex(of: dismissed) {
+            session.recordCompletionFeedback(
+                for: dismissed,
+                action: .dismissed,
+                rank: rank
+            )
+        }
         if dismissedQuery != query {
             dismissedQuery = query
         }
@@ -335,6 +359,22 @@ struct CommandComposerView: View {
         let query = autocompleteQuery
         guard !query.isCommandActive else { return }
 
+        if let selected = autocompleteSelection.selected(from: visibleSuggestions),
+           selected != suggestion,
+           let selectedRank = visibleSuggestions.firstIndex(of: selected) {
+            session.recordCompletionFeedback(
+                for: selected,
+                action: .replaced,
+                rank: selectedRank
+            )
+        }
+        if let rank = visibleSuggestions.firstIndex(of: suggestion) {
+            session.recordCompletionFeedback(
+                for: suggestion,
+                action: .accepted,
+                rank: rank
+            )
+        }
         let edit = session.autocompleteEdit(
             for: suggestion,
             in: query.draft,
@@ -626,6 +666,8 @@ private struct AutocompleteSuggestionButton: View {
             return "doc"
         case .projectScript:
             return "shippingbox"
+        case .transition:
+            return "arrow.turn.down.right"
         }
     }
 }

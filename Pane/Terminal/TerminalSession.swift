@@ -90,6 +90,8 @@ final class TerminalSession: NSObject, ObservableObject {
     private var authoritativeTerminalHostView: AuthoritativeTerminalHostView?
     private var suspendedCommandDraft: String?
     private var manualSecureInputActive = false
+    private var behaviorallyIneligibleBlockIDs: Set<UUID> = []
+    private var previousCompletedCommandSummary: CompletedCommandSummary?
     private var modeBeforeManualSecureInput: InputMode?
     private weak var liveCommandTerminalView: TerminalView?
     private var liveCommandTerminalBlockID: UUID?
@@ -400,6 +402,9 @@ final class TerminalSession: NSObject, ObservableObject {
                 self.isRestartInProgress = false
             }
             await self.finalizeUnfinishedCommand(reason: .shellRestart)
+            await self.runtimeStateController?.resetBehavioralTransitionContinuity()
+            self.previousCompletedCommandSummary = nil
+            await self.completionService.shellDidRestart()
             self.isShellRunning = false
             self.ptyController.terminate()
             self.invalidateCompletionEndpoint()
@@ -561,6 +566,10 @@ final class TerminalSession: NSObject, ObservableObject {
             isDirectory: true
         )
         let generation = processGeneration
+        let projectContext = await completionService.projectDefinition(for: directory)
+        if let runtimeStateController {
+            _ = await runtimeStateController.updateCurrentProjectIdentity(projectContext?.identity)
+        }
         let context = LocalAutocompleteContext(
             draft: draft,
             cursorUTF16Offset: cursorUTF16Offset,
@@ -578,6 +587,9 @@ final class TerminalSession: NSObject, ObservableObject {
                     endpoint: endpoint
                 )
             },
+            behavioralStore: runtimeStateController,
+            previousCommand: previousCompletedCommandSummary,
+            projectContext: projectContext,
             isValid: { [weak self] in
                 guard let self else { return false }
                 return self.mode == .blocks
@@ -588,6 +600,55 @@ final class TerminalSession: NSObject, ObservableObject {
                     && self.terminalSecurityState.inputMode == .normal
             }
         )
+    }
+
+    var canSuggestNextCommand: Bool {
+        previousCompletedCommandSummary != nil
+            && !isCommandActive
+            && terminalSecurityState.inputMode == .normal
+            && interactionController.state == .shellIdle
+    }
+
+    func recordCompletionFeedback(
+        for suggestion: CommandAutocompleteSuggestion,
+        action: CompletionFeedbackAction,
+        rank: Int
+    ) {
+        guard !isSecureInputActive, let runtimeStateController else { return }
+        let kind: CompletionKind
+        switch suggestion.source {
+        case .zsh: kind = .argument
+        case .history, .projectScript: kind = .fullCommand
+        case .builtIn, .executable: kind = .command
+        case .fileSystem: kind = .path
+        case .transition: kind = .nextCommand
+        }
+        let source: CompletionSource
+        switch suggestion.source {
+        case .zsh: source = .zsh
+        case .history: source = .history
+        case .builtIn: source = .builtIn
+        case .executable: source = .executable
+        case .fileSystem: source = .fileSystem
+        case .projectScript: source = .projectScript
+        case .transition: source = .transition
+        }
+        let record = CompletionFeedbackRecord(
+            candidateIdentity: "\(kind.rawValue)|\(suggestion.isDirectory)|\(suggestion.replacementText)",
+            normalizedReplacement: suggestion.replacementText,
+            source: source,
+            supportingSources: [source],
+            projectID: nil,
+            directoryIdentity: currentDirectory ?? shellConfiguration.workingDirectory,
+            action: action,
+            rank: max(0, rank),
+            timestamp: Date()
+        )
+        Task { [weak self] in
+            if let diagnostic = await runtimeStateController.recordCompletionFeedback(record) {
+                self?.runtimeStateDiagnostic = diagnostic
+            }
+        }
     }
 
     func authoritativeTerminalDidLayout() {
@@ -930,6 +991,9 @@ final class TerminalSession: NSObject, ObservableObject {
                         rows: Int(windowSize.ws_row)
                     ) {
                         selectedBlockID = id
+                        if let command = blockTimeline.block(id: id)?.command {
+                            Task { await completionService.commandDidComplete(command) }
+                        }
                         persistCompletedBlock(id: id)
                     }
                     clearActiveBlockCapture()
@@ -1061,7 +1125,15 @@ final class TerminalSession: NSObject, ObservableObject {
         )
         let startTask = runtimeStateStartTask
         await startTask?.value
-        runtimeStateDiagnostic = await runtimeStateController.persistCommandEvent(event)
+        let behavioralEligible = behaviorallyIneligibleBlockIDs.remove(block.id) == nil
+        updatePreviousCommandSummary(
+            for: event,
+            behavioralEligible: behavioralEligible
+        )
+        runtimeStateDiagnostic = await runtimeStateController.persistCommandEvent(
+            event,
+            behavioralEligible: behavioralEligible
+        )
     }
 
     private func beginActiveBlockCapture(blockID: UUID) {
@@ -1304,12 +1376,49 @@ final class TerminalSession: NSObject, ObservableObject {
             outputKind: summary == nil ? .none : .excerpt
         )
 
+        let behavioralEligible = behaviorallyIneligibleBlockIDs.remove(block.id) == nil
+        updatePreviousCommandSummary(
+            for: event,
+            behavioralEligible: behavioralEligible
+        )
         let startTask = runtimeStateStartTask
         Task { [weak self] in
             await startTask?.value
-            let diagnostic = await runtimeStateController.persistCommandEvent(event)
+            let directory = URL(
+                fileURLWithPath: event.workingDirectory,
+                isDirectory: true
+            )
+            let project = await self?.completionService.projectDefinition(for: directory)
+            _ = await runtimeStateController.updateCurrentProjectIdentity(project?.identity)
+            let diagnostic = await runtimeStateController.persistCommandEvent(
+                event,
+                behavioralEligible: behavioralEligible
+            )
             self?.runtimeStateDiagnostic = diagnostic
         }
+    }
+
+    private func updatePreviousCommandSummary(
+        for event: PersistedCommandEvent,
+        behavioralEligible: Bool
+    ) {
+        guard behavioralEligible, event.completion != .unknown else {
+            previousCompletedCommandSummary = nil
+            return
+        }
+        let normalized = NormalizedCommand(event.command)
+        guard !normalized.full.isEmpty, let commandKey = normalized.commandKey else {
+            previousCompletedCommandSummary = nil
+            return
+        }
+        previousCompletedCommandSummary = CompletedCommandSummary(
+            normalizedCommand: normalized.full,
+            commandKey: commandKey,
+            exitCode: event.exitCode.map(Int32.init),
+            projectID: nil,
+            directoryIdentity: event.workingDirectory,
+            completedAt: event.timestamp
+        )
     }
 
     private static func isRestoredCommandRerunnable(_ command: String) -> Bool {
@@ -1773,6 +1882,13 @@ final class TerminalSession: NSObject, ObservableObject {
             _ = interactionController.handle(.secureInputRequired)
         }
         if !wasSecure {
+            if let blockID = blockLifecycleController.activeOrAwaitingBlockID {
+                behaviorallyIneligibleBlockIDs.insert(blockID)
+            }
+            Task { [weak self] in
+                await self?.runtimeStateController?.resetBehavioralTransitionContinuity()
+            }
+            previousCompletedCommandSummary = nil
             if !commandDraft.isEmpty {
                 suspendedCommandDraft = commandDraft
             }
