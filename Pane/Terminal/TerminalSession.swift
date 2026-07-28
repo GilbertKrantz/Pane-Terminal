@@ -4,96 +4,6 @@ import Darwin
 import Foundation
 @preconcurrency import SwiftTerm
 
-struct BoundedByteTail {
-    private let limit: Int
-    private var storage = Data()
-    private var discardedCount = 0
-    private var hasDiscardedBytes = false
-
-    init(limit: Int) {
-        self.limit = limit
-    }
-
-    var isEmpty: Bool {
-        storage.count == discardedCount
-    }
-
-    var isTruncated: Bool {
-        hasDiscardedBytes
-    }
-
-    var data: Data {
-        Data(storage.dropFirst(discardedCount))
-    }
-
-    mutating func append(_ data: Data) {
-        guard !data.isEmpty else { return }
-
-        if data.count >= limit {
-            let replacingRetainedBytes = !isEmpty
-            storage = Data(data.suffix(limit))
-            discardedCount = 0
-            hasDiscardedBytes = hasDiscardedBytes || replacingRetainedBytes || data.count > limit
-            return
-        }
-
-        storage.append(data)
-        let retainedCount = storage.count - discardedCount
-        if retainedCount > limit {
-            let overflow = retainedCount - limit
-            discardedCount += overflow
-            hasDiscardedBytes = true
-        }
-
-        // Compact in coarse batches so a long download does not copy the
-        // entire tail for every small PTY chunk.
-        if discardedCount >= 1_048_576 {
-            storage = Data(storage.dropFirst(discardedCount))
-            discardedCount = 0
-        }
-    }
-
-    mutating func removeAll() {
-        storage.removeAll(keepingCapacity: true)
-        discardedCount = 0
-        hasDiscardedBytes = false
-    }
-}
-
-/// SwiftTerm's delegate does not identify the source process for data events.
-/// Give each shell generation its own bridge so bytes already queued by a
-/// restarted shell can never be mistaken for output from the replacement.
-private final class PTYProcessDelegateBridge: LocalProcessDelegate {
-    let generation: UInt64
-    private let dataHandler: ([UInt8], UInt64) -> Void
-    private let terminationHandler: (LocalProcess, Int32?, UInt64) -> Void
-    private let windowSizeProvider: () -> winsize
-
-    init(
-        generation: UInt64,
-        dataHandler: @escaping ([UInt8], UInt64) -> Void,
-        terminationHandler: @escaping (LocalProcess, Int32?, UInt64) -> Void,
-        windowSizeProvider: @escaping () -> winsize
-    ) {
-        self.generation = generation
-        self.dataHandler = dataHandler
-        self.terminationHandler = terminationHandler
-        self.windowSizeProvider = windowSizeProvider
-    }
-
-    func dataReceived(slice: ArraySlice<UInt8>) {
-        dataHandler(Array(slice), generation)
-    }
-
-    func processTerminated(_ source: LocalProcess, exitCode: Int32?) {
-        terminationHandler(source, exitCode, generation)
-    }
-
-    func getWindowSize() -> winsize {
-        windowSizeProvider()
-    }
-}
-
 enum PaneFocusTarget: Equatable, Sendable {
     case composer
     case authoritativeTerminal
@@ -112,6 +22,18 @@ enum ShellReadiness: Equatable, Sendable {
     case initializing
     case ready
     case stopped
+}
+
+struct TerminalSessionDebugSnapshot: Equatable, Sendable {
+    let interactionState: TerminalInteractionState
+    let shellReadiness: ShellReadiness
+    let processGeneration: UInt64
+    let activeBlockID: UUID?
+    let alternateScreenActive: Bool
+    let keyboardOwner: PaneFocusTarget
+    let terminalMount: ActiveTerminalPresentation
+    let focusGeneration: UInt64
+    let securityState: TerminalSecurityState
 }
 
 @MainActor
@@ -138,14 +60,7 @@ final class TerminalSession: NSObject, ObservableObject {
     @Published private(set) var blockTimeline = CommandBlockTimeline()
     @Published private(set) var isAlternateScreenActive = false
     @Published private(set) var modeAttribution: InputModeAttribution = .manual
-    @Published private(set) var inputRequirement: TerminalInputRequirement = .shellIdle {
-        didSet {
-            guard blockTimeline.activeBlockID != nil,
-                  !isAlternateScreenActive,
-                  inputRequirement == .direct || inputRequirement == .secure else { return }
-            activeBlockUsedNonAlternateDirectInteraction = true
-        }
-    }
+    @Published private(set) var inputRequirement: TerminalInputRequirement = .unknown
     @Published private(set) var terminalSecurityState: TerminalSecurityState = .normal
     @Published private(set) var runtimeStateDiagnostic: String?
     @Published private(set) var activeCommandVisibleLineCount = 1
@@ -159,15 +74,18 @@ final class TerminalSession: NSObject, ObservableObject {
     @Published private(set) var restoredBlockIDs: Set<UUID> = []
     @Published var isRestartConfirmationPresented = false
     @Published private(set) var lastShellRestartAt: Date?
-    @Published private(set) var focusTarget: PaneFocusTarget = .composer
+    @Published private(set) var focusTarget: PaneFocusTarget = .none
     @Published private(set) var isRestartInProgress = false
     @Published private(set) var isShuttingDown = false
     @Published private(set) var shellReadiness: ShellReadiness = .starting
 
     private(set) var history = CommandHistory()
-    private var process: LocalProcess?
-    private var processBridge: PTYProcessDelegateBridge?
-    private var processGeneration: UInt64 = 0
+    private let ptyController = PTYController()
+    private let blockLifecycleController = BlockLifecycleController()
+    private let focusCoordinator = FocusCoordinator()
+    private let interactionController = TerminalInteractionController(
+        debugLoggingEnabled: true
+    )
     private var terminalView: TerminalView?
     private var authoritativeTerminalHostView: AuthoritativeTerminalHostView?
     private var suspendedCommandDraft: String?
@@ -177,18 +95,14 @@ final class TerminalSession: NSObject, ObservableObject {
     private var liveCommandTerminalBlockID: UUID?
     private var streamParser = BlockStreamParser()
     private var transcriptFilter = AlternateScreenTranscriptFilter()
-    private var activeBlockOutput = BoundedByteTail(limit: 4 * 1_024 * 1_024)
-    private var activeBlockTerminalBytes = BoundedByteTail(limit: 4 * 1_024 * 1_024)
-    private var activeBlockUsedNonAlternateDirectInteraction = false
-    private var activeBlockEnteredAlternateScreen = false
     private var pendingLiveCommandOutput = Data()
     private var isLiveCommandFlushScheduled = false
     private var activeCommandCompletedLineCount = 0
     private var activeCommandHasCurrentLineContent = false
-    private var windowSize = winsize(ws_row: 25, ws_col: 80, ws_xpixel: 0, ws_ypixel: 0)
     private var shellConfiguration: ShellConfiguration
     private let commandAutocomplete = CommandAutocomplete()
     private let zshCompletionClient = WarmZshCompletionClient()
+    private let completionService = CompletionService()
     private let runtimeStateController: RuntimeStateController?
     private let runtimeSessionID = UUID()
     private let runtimeSessionStartedAt = Date()
@@ -199,7 +113,6 @@ final class TerminalSession: NSObject, ObservableObject {
     private var isRuntimeStatePrepared: Bool
     private var zshCompletionEndpoint: WarmZshCompletionEndpoint?
     private var isApplicationExitFinalized = false
-    private var commandAwaitingStartID: UUID?
     private var shouldReturnToBlocksAfterAlternateScreen = false
     private var shouldRestoreBlocksViewportAfterAlternateScreen = false
     private var foregroundProcessTimer: Timer?
@@ -223,7 +136,7 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     var isCommandActive: Bool {
-        blockTimeline.activeBlockID != nil || commandAwaitingStartID != nil
+        blockLifecycleController.isCommandActive
     }
 
     var isShellReadyForInput: Bool {
@@ -233,16 +146,42 @@ final class TerminalSession: NSObject, ObservableObject {
             && !isShuttingDown
     }
 
+    var interactionState: TerminalInteractionState {
+        interactionController.state
+    }
+
+    var composerEnabled: Bool {
+        interactionController.composerEnabled
+    }
+
+    var terminalAcceptsInput: Bool {
+        interactionController.state.terminalAcceptsInput
+    }
+
+    private var processGeneration: UInt64 {
+        ptyController.generation
+    }
+
+    var debugSnapshot: TerminalSessionDebugSnapshot {
+        TerminalSessionDebugSnapshot(
+            interactionState: interactionState,
+            shellReadiness: shellReadiness,
+            processGeneration: processGeneration,
+            activeBlockID: blockLifecycleController.activeOrAwaitingBlockID,
+            alternateScreenActive: isAlternateScreenActive,
+            keyboardOwner: focusTarget,
+            terminalMount: activeTerminalPresentation,
+            focusGeneration: focusGeneration,
+            securityState: terminalSecurityState
+        )
+    }
+
     private var isShellIntegrationReady: Bool {
         shellReadiness == .ready
     }
 
     var activeCommandBlock: CommandBlock? {
-        if let activeBlockID = blockTimeline.activeBlockID {
-            return blockTimeline.block(id: activeBlockID)
-        }
-        guard let commandAwaitingStartID else { return nil }
-        return blockTimeline.block(id: commandAwaitingStartID)
+        blockLifecycleController.activeBlock
     }
 
     var isSecureInputActive: Bool {
@@ -283,6 +222,33 @@ final class TerminalSession: NSObject, ObservableObject {
         self.isRuntimeStatePrepared = runtimeStateController == nil
         self.currentDirectory = shellConfiguration.workingDirectory
         super.init()
+        ptyController.onEvent = { [weak self] event in
+            self?.handlePTYEvent(event)
+        }
+        blockLifecycleController.onTimelineChanged = { [weak self] timeline in
+            self?.blockTimeline = timeline
+        }
+        interactionController.onTransition = { [weak self] _, _, nextState in
+            self?.applyInteractionProjection(nextState)
+        }
+        applyInteractionProjection(interactionController.state)
+    }
+
+    private func applyInteractionProjection(_ state: TerminalInteractionState) {
+        let projectedMode = interactionController.presentationMode
+        let projectedInput = interactionController.effectiveInputRequirement
+        if mode != projectedMode {
+            mode = projectedMode
+        }
+        if inputRequirement != projectedInput {
+            inputRequirement = projectedInput
+        }
+        if blockTimeline.activeBlockID != nil,
+           !isAlternateScreenActive,
+           projectedInput == .direct || projectedInput == .secure {
+            blockLifecycleController.markDirectInteraction()
+        }
+        requestFocus(state.focusTarget)
     }
 
     func makeAuthoritativeTerminalView() -> PaneTerminalView {
@@ -327,7 +293,7 @@ final class TerminalSession: NSObject, ObservableObject {
         }
         updateWindowSize(from: terminalView)
 
-        if process == nil, !isShuttingDown {
+        if !ptyController.isRunning, !isShuttingDown {
             startShell()
         }
     }
@@ -356,8 +322,10 @@ final class TerminalSession: NSObject, ObservableObject {
         terminalView.terminalDelegate = nil
         terminalView.terminal.resetToInitialState()
 
-        if !activeBlockOutput.isEmpty {
-            terminalView.feed(byteArray: Array(activeBlockOutput.data)[...])
+        if !blockLifecycleController.capturedOutputData.isEmpty {
+            terminalView.feed(
+                byteArray: Array(blockLifecycleController.capturedOutputData)[...]
+            )
         }
     }
 
@@ -371,7 +339,8 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     func startShell(in workingDirectory: String? = nil) {
-        guard !isShuttingDown, process?.running != true else { return }
+        guard !isShuttingDown, !ptyController.isRunning else { return }
+        _ = interactionController.handle(.shellStarted)
         shellReadiness = .starting
         guard isRuntimeStatePrepared else {
             prepareRuntimeStateAndStartShell()
@@ -386,50 +355,18 @@ final class TerminalSession: NSObject, ObservableObject {
             ?? Self.validatedWorkingDirectory(shellConfiguration.workingDirectory)
             ?? FileManager.default.homeDirectoryForCurrentUser.path
         currentDirectory = effectiveDirectory
-        processGeneration &+= 1
-        let generation = processGeneration
+        let startResult = ptyController.start(
+            configuration: shellConfiguration,
+            workingDirectory: effectiveDirectory
+        )
+        let generation = startResult.generation
         let completionEndpoint = try? zshCompletionClient.makeEndpoint(
             for: generation
         )
         zshCompletionEndpoint = completionEndpoint
-        let bridge = PTYProcessDelegateBridge(
-            generation: generation,
-            dataHandler: { [weak self] bytes, generation in
-                assert(Thread.isMainThread)
-                MainActor.assumeIsolated {
-                    self?.handleProcessData(bytes, generation: generation)
-                }
-            },
-            terminationHandler: { [weak self] source, waitStatus, generation in
-                assert(Thread.isMainThread)
-                MainActor.assumeIsolated {
-                    self?.scheduleProcessTermination(
-                        source,
-                        waitStatus: waitStatus,
-                        generation: generation
-                    )
-                }
-            },
-            windowSizeProvider: { [weak self] in
-                assert(Thread.isMainThread)
-                return MainActor.assumeIsolated {
-                    self?.windowSize
-                        ?? winsize(ws_row: 25, ws_col: 80, ws_xpixel: 0, ws_ypixel: 0)
-                }
-            }
-        )
-        let newProcess = LocalProcess(delegate: bridge, dispatchQueue: .main)
-        processBridge = bridge
-        process = newProcess
-        newProcess.startProcess(
-            executable: shellConfiguration.executable,
-            args: shellConfiguration.arguments,
-            environment: shellConfiguration.environment,
-            currentDirectory: effectiveDirectory
-        )
-        isShellRunning = newProcess.running
+        isShellRunning = startResult.isRunning
 
-        if newProcess.running {
+        if startResult.isRunning {
             shellReadiness = .initializing
             startForegroundProcessMonitoring()
             let installationCommand: String
@@ -440,15 +377,12 @@ final class TerminalSession: NSObject, ObservableObject {
             } else {
                 installationCommand = ShellIntegration.installationCommand
             }
-            newProcess.send(
-                data: CommandSerializer.serializeCommand(
-                    installationCommand
-                )[...]
+            _ = ptyController.write(
+                CommandSerializer.serializeCommand(installationCommand)
             )
         } else {
             shellReadiness = .stopped
-            process = nil
-            processBridge = nil
+            _ = interactionController.handle(.shellExited)
             invalidateCompletionEndpoint()
             terminalView?.feed(text: "\r\n[Unable to start \(shellConfiguration.executable)]\r\n")
         }
@@ -456,6 +390,7 @@ final class TerminalSession: NSObject, ObservableObject {
 
     func restartShell() {
         guard restartTask == nil, !isShuttingDown else { return }
+        _ = interactionController.handle(.restartRequested)
         isRestartInProgress = true
         shellReadiness = .starting
         restartTask = Task { @MainActor [weak self] in
@@ -465,11 +400,8 @@ final class TerminalSession: NSObject, ObservableObject {
                 self.isRestartInProgress = false
             }
             await self.finalizeUnfinishedCommand(reason: .shellRestart)
-            let oldProcess = self.process
-            self.process = nil
-            self.processBridge = nil
             self.isShellRunning = false
-            self.terminateAndReap(oldProcess)
+            self.ptyController.terminate()
             self.invalidateCompletionEndpoint()
             self.stopForegroundProcessMonitoring()
             self.leaveAlternateScreenIfNeeded()
@@ -494,6 +426,7 @@ final class TerminalSession: NSObject, ObservableObject {
 
     func shutdown() {
         guard shutdownTask == nil, !isShuttingDown else { return }
+        _ = interactionController.handle(.applicationClosing)
         isShuttingDown = true
         shutdownTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -506,23 +439,21 @@ final class TerminalSession: NSObject, ObservableObject {
 
     private func stopProcessForShutdown() {
         clearActiveBlockCapture()
-        let oldProcess = process
-        process = nil
-        processBridge = nil
         isShellRunning = false
-        commandAwaitingStartID = nil
+        blockLifecycleController.markAwaitingStart(nil)
         shellReadiness = .stopped
-        terminateAndReap(oldProcess)
+        ptyController.terminate()
         invalidateCompletionEndpoint()
         stopForegroundProcessMonitoring()
         zshCompletionClient.shutdown()
     }
 
     /// App termination does not need to repaint status into a disappearing
-    /// SwiftUI hierarchy.  Clearing the process reference first also makes a
-    /// later LocalProcess callback a no-op.
+    /// SwiftUI hierarchy. The PTY controller invalidates the active generation
+    /// before terminating it, so a later process callback is a no-op.
     func terminateForApplicationExit() {
-        guard !isShuttingDown || process != nil else { return }
+        guard !isShuttingDown || ptyController.isRunning else { return }
+        _ = interactionController.handle(.applicationClosing)
         isShuttingDown = true
         stopProcessForShutdown()
     }
@@ -530,6 +461,7 @@ final class TerminalSession: NSObject, ObservableObject {
     func finalizeApplicationExit() async {
         guard !isApplicationExitFinalized else { return }
         isApplicationExitFinalized = true
+        _ = interactionController.handle(.applicationClosing)
         isShuttingDown = true
         await finalizeUnfinishedCommand(reason: .applicationExit)
         _ = await runtimeStateController?.closeCurrentSessionCleanly()
@@ -551,12 +483,11 @@ final class TerminalSession: NSObject, ObservableObject {
             return
         }
 
-        if let awaitingID = commandAwaitingStartID {
+        if blockLifecycleController.awaitingStartID != nil {
             let continuation = commandDraft
             guard send(bytes: CommandSerializer.serializeInputLine(continuation)) else { return }
-            if let fullCommand = blockTimeline.appendContinuation(
-                continuation,
-                to: awaitingID
+            if let fullCommand = blockLifecycleController.appendContinuation(
+                continuation
             ) {
                 let sanitized = sensitiveDataSanitizer.sanitizeCommand(fullCommand)
                 if isCommandHistoryEnabled, sanitized.redactionCount == 0 {
@@ -576,7 +507,7 @@ final class TerminalSession: NSObject, ObservableObject {
         guard !isShuttingDown,
               !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
-        let blockID = blockTimeline.enqueue(
+        let blockID = blockLifecycleController.queue(
             command: command,
             workingDirectory: currentDirectory ?? shellConfiguration.workingDirectory,
             isRerunnable: sensitiveDataSanitizer.sanitizeCommand(command).redactionCount == 0
@@ -584,14 +515,14 @@ final class TerminalSession: NSObject, ObservableObject {
 
         if !isCommandActive, isShellIntegrationReady {
             guard send(bytes: CommandSerializer.serializeCommand(command)) else {
-                blockTimeline.remove(id: blockID)
+                blockLifecycleController.remove(id: blockID)
                 return
             }
-            commandAwaitingStartID = blockID
+            _ = interactionController.handle(.commandSubmitted)
+            blockLifecycleController.markAwaitingStart(blockID)
         }
 
         selectedBlockID = blockID
-        inputRequirement = .lineOriented
         let sanitizedCommand = sensitiveDataSanitizer.sanitizeCommand(command)
         if isCommandHistoryEnabled, sanitizedCommand.redactionCount == 0 {
             history.append(sanitizedCommand.value)
@@ -612,7 +543,7 @@ final class TerminalSession: NSObject, ObservableObject {
     func autocompleteSuggestions(
         for draft: String,
         cursorUTF16Offset: Int
-    ) async -> [CommandAutocompleteSuggestion] {
+    ) async -> AsyncStream<[CommandAutocompleteSuggestion]> {
         guard terminalSecurityState.inputMode == .normal,
               mode == .blocks,
               isShellRunning,
@@ -622,7 +553,7 @@ final class TerminalSession: NSObject, ObservableObject {
               terminalView?.terminal.isCurrentBufferAlternate != true,
               let endpoint = zshCompletionEndpoint,
               endpoint.generation == processGeneration else {
-            return []
+            return AsyncStream { $0.finish() }
         }
 
         let directory = URL(
@@ -630,42 +561,41 @@ final class TerminalSession: NSObject, ObservableObject {
             isDirectory: true
         )
         let generation = processGeneration
-        let response = await zshCompletionClient.completions(
-            for: draft,
-            cursorUTF16Offset: cursorUTF16Offset,
-            endpoint: endpoint
-        )
-        guard !Task.isCancelled,
-              mode == .blocks,
-              processGeneration == generation,
-              zshCompletionEndpoint == endpoint,
-              !isCommandActive,
-              !isAlternateScreenActive,
-              terminalSecurityState.inputMode == .normal else {
-            return []
-        }
-
-        if let response, response.status == .ok {
-            let captured = response.candidates.map {
-                ZshCompletionCandidate(
-                    replacementText: $0.replacementText,
-                    detail: $0.detail,
-                    isDirectory: $0.isDirectory
-                )
-            }
-            return commandAutocomplete.capturedSuggestions(captured)
-        }
-
-        // If zsh startup, zpty, or a completion function fails, keep the
-        // composer useful with the bounded local engine. A valid empty zsh
-        // result remains empty and never falls through to heuristic matches.
-        return commandAutocomplete.suggestions(
-            for: draft,
+        let context = LocalAutocompleteContext(
+            draft: draft,
             cursorUTF16Offset: cursorUTF16Offset,
             history: history.commands,
             currentDirectory: directory,
-            executableSearchPath: shellEnvironmentValue(named: "PATH")
+            executableSearchPath: shellEnvironmentValue(named: "PATH") ?? "",
+            shellGeneration: generation
         )
+        return await completionService.suggestions(
+            for: context,
+            zsh: { [zshCompletionClient] in
+                await zshCompletionClient.completions(
+                    for: draft,
+                    cursorUTF16Offset: cursorUTF16Offset,
+                    endpoint: endpoint
+                )
+            },
+            isValid: { [weak self] in
+                guard let self else { return false }
+                return self.mode == .blocks
+                    && self.processGeneration == generation
+                    && self.zshCompletionEndpoint == endpoint
+                    && !self.isCommandActive
+                    && !self.isAlternateScreenActive
+                    && self.terminalSecurityState.inputMode == .normal
+            }
+        )
+    }
+
+    func authoritativeTerminalDidLayout() {
+        guard let terminalView else { return }
+        updateWindowSize(from: terminalView)
+        terminalView.terminal.updateFullScreen()
+        terminalView.setNeedsDisplay(terminalView.bounds)
+        if shouldAuthoritativeTerminalOwnFocus { focusAuthoritativeTerminal() }
     }
 
     func autocompleteEdit(
@@ -683,31 +613,32 @@ final class TerminalSession: NSObject, ObservableObject {
     func toggleMode() {
         guard isShellReadyForInput else { return }
         shouldReturnToBlocksAfterAlternateScreen = false
-        modeAttribution = .manual
-        mode.toggle()
-        inputRequirement = mode == .terminal
-            ? (isSecureInputActive ? .secure : .direct)
-            : (isCommandActive ? .lineOriented : .shellIdle)
-        if mode == .terminal {
-            focusAuthoritativeTerminal()
-        } else {
-            requestFocus(.composer)
-        }
+        setMode(mode == .terminal ? .blocks : .terminal)
     }
 
     func setMode(_ newMode: InputMode) {
         guard newMode == .blocks || isShellReadyForInput else { return }
         guard mode != newMode else { return }
+        _ = interactionController.handle(
+            newMode == .terminal ? .userOpenedFullTerminal : .userReturnedToBlocks
+        )
         shouldReturnToBlocksAfterAlternateScreen = false
-        modeAttribution = .manual
-        mode = newMode
-        inputRequirement = newMode == .terminal
-            ? (isSecureInputActive ? .secure : .direct)
-            : (isCommandActive ? .lineOriented : .shellIdle)
         if newMode == .terminal {
             focusAuthoritativeTerminal()
         } else {
-            requestFocus(.composer)
+            // Re-evaluate the still-running foreground process even when the
+            // timer last observed the same snapshot in Full Terminal.
+            lastForegroundSnapshot = nil
+            refreshForegroundProcessMode()
+            let interactionRemainsTerminalOwned = inputRequirement == .direct
+                || inputRequirement == .secure
+                || isAlternateScreenActive
+            if interactionRemainsTerminalOwned {
+                requestFocus(.authoritativeTerminal)
+            } else {
+                modeAttribution = .manual
+                requestFocus(.composer)
+            }
         }
     }
 
@@ -779,7 +710,7 @@ final class TerminalSession: NSObject, ObservableObject {
         guard let block = blockTimeline.block(id: id), block.isRerunnable else { return }
         commandDraft = block.command
         modeAttribution = .manual
-        mode = .blocks
+        setMode(.blocks)
     }
 
     func editSelectedBlock() {
@@ -788,7 +719,7 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     func toggleBlockCollapsed(id: UUID) {
-        blockTimeline.toggleCollapsed(id: id)
+        blockLifecycleController.toggleCollapsed(id: id)
         guard let block = blockTimeline.block(id: id), let runtimeStateController else { return }
         Task { [weak self] in
             self?.runtimeStateDiagnostic = await runtimeStateController.updateCommandEventCollapsed(
@@ -805,7 +736,7 @@ final class TerminalSession: NSObject, ObservableObject {
             case .queued, .running: return false
             }
         }.map(\.id)
-        blockTimeline.setAllCompletedCollapsed(collapsed)
+        blockLifecycleController.setAllCompletedCollapsed(collapsed)
         guard let runtimeStateController else { return }
         Task { [weak self] in
             for id in ids {
@@ -828,14 +759,14 @@ final class TerminalSession: NSObject, ObservableObject {
         if blockTimeline.activeBlockID == id {
             clearActiveBlockCapture()
         }
-        blockTimeline.remove(id: id)
+        blockLifecycleController.remove(id: id)
         if selectedBlockID == id {
             selectedBlockID = blockTimeline.blocks.last?.id
         }
     }
 
     func clearBlocks() {
-        blockTimeline.clearFinalized()
+        blockLifecycleController.clearFinalized()
         if let selectedBlockID,
            blockTimeline.block(id: selectedBlockID) == nil {
             self.selectedBlockID = nil
@@ -854,18 +785,16 @@ final class TerminalSession: NSObject, ObservableObject {
 
     func enterDirectInput() {
         guard isShellReadyForInput else { return }
+        _ = interactionController.handle(
+            isCommandActive ? .directInputRequired : .userOpenedFullTerminal
+        )
         modeAttribution = .manual
-        inputRequirement = terminalSecurityState.inputMode == .secure ? .secure : .direct
-        if !isCommandActive {
-            mode = .terminal
-        }
         focusAuthoritativeTerminal()
     }
 
     func focusComposer() {
         guard !isSecureInputActive else { return }
         setMode(.blocks)
-        inputRequirement = isCommandActive ? .lineOriented : .shellIdle
         requestFocus(.composer)
     }
 
@@ -877,6 +806,7 @@ final class TerminalSession: NSObject, ObservableObject {
         let paneVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.2"
         let persistenceStatus = runtimeStateDiagnostic == nil ? "available" : "degraded"
         let databaseHealth = runtimeStateDiagnostic == nil ? "healthy" : "warning"
+        let windowSize = ptyController.windowSize
         var lines = [
             "Pane version: \(paneVersion)",
             "macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)",
@@ -899,16 +829,16 @@ final class TerminalSession: NSObject, ObservableObject {
 
     func enterSecureInput() {
         guard isShellReadyForInput else { return }
+        let previousMode = mode
         if !manualSecureInputActive {
-            modeBeforeManualSecureInput = mode
+            modeBeforeManualSecureInput = previousMode
+        }
+        if !isCommandActive {
+            _ = interactionController.handle(.userOpenedFullTerminal)
         }
         manualSecureInputActive = true
         activateSecureInput(source: .manualOverride)
         modeAttribution = .secureInput
-        inputRequirement = .secure
-        if !isCommandActive {
-            mode = .terminal
-        }
         focusAuthoritativeTerminal()
     }
 
@@ -926,8 +856,17 @@ final class TerminalSession: NSObject, ObservableObject {
         terminalView?.feed(text: "\u{001B}[2J\u{001B}[3J\u{001B}[H")
     }
 
-    private func handleProcessData(_ bytes: [UInt8], generation: UInt64) {
-        guard generation == processGeneration, process != nil else { return }
+    private func handlePTYEvent(_ event: PTYController.Event) {
+        switch event {
+        case .received(let data):
+            handleProcessData(Array(data))
+        case .terminated(let waitStatus):
+            handleProcessTermination(waitStatus: waitStatus)
+        }
+    }
+
+    private func handleProcessData(_ bytes: [UInt8]) {
+        guard ptyController.isRunning else { return }
         refreshForegroundProcessMode()
 
         // The persistent direct terminal is fed exactly once. The live block
@@ -943,10 +882,7 @@ final class TerminalSession: NSObject, ObservableObject {
         for event in events {
             switch event {
             case .output(let data):
-                if data.range(of: AlternateScreenTranscriptFilter.transitionPlaceholder) != nil {
-                    activeBlockEnteredAlternateScreen = true
-                }
-                activeBlockTerminalBytes.append(data)
+                blockLifecycleController.consumeTerminalBytes(data)
                 routeActiveBlockOutput(data)
 
             case .commandStarted(let command):
@@ -954,11 +890,11 @@ final class TerminalSession: NSObject, ObservableObject {
                 // in a user's zshrc may emit START for that bootstrap itself;
                 // it is intentionally not represented as a user block.
                 guard isShellIntegrationReady else { continue }
-                if commandAwaitingStartID == nil, let command {
+                if blockLifecycleController.awaitingStartID == nil, let command {
                     enqueueDirectTerminalCommand(command)
                 }
-                if let id = blockTimeline.beginNext() {
-                    commandAwaitingStartID = nil
+                if let id = blockLifecycleController.commandStarted() {
+                    _ = interactionController.handle(.commandStarted)
                     beginActiveBlockCapture(blockID: id)
                     selectedBlockID = id
                 }
@@ -980,73 +916,40 @@ final class TerminalSession: NSObject, ObservableObject {
 
                 if !isShellIntegrationReady {
                     shellReadiness = .ready
+                    _ = interactionController.handle(.shellReady)
                     dispatchNextQueuedCommandIfNeeded()
                     continue
                 }
 
                 if blockTimeline.activeBlockID != nil {
-                    let output = finalizedActiveBlockOutput()
-                    let terminalSnapshot = finalizedActiveTerminalSnapshot()
-                    if exitCode == 128 + SIGINT,
-                       let activeID = blockTimeline.activeBlockID {
-                        blockTimeline.interruptActive(
-                            exitCode: exitCode,
-                            output: output,
-                            terminalSnapshot: terminalSnapshot
-                        )
-                        selectedBlockID = activeID
-                        persistCompletedBlock(id: activeID)
-                    } else {
-                        if let id = blockTimeline.finishActive(
-                            exitCode: exitCode,
-                            output: output,
-                            terminalSnapshot: terminalSnapshot
-                        ) {
-                            selectedBlockID = id
-                            persistCompletedBlock(id: id)
-                        }
+                    let windowSize = ptyController.windowSize
+                    if let id = blockLifecycleController.completeActive(
+                        exitCode: exitCode,
+                        renderedOutput: renderedActiveBlockOutput(),
+                        columns: Int(windowSize.ws_col),
+                        rows: Int(windowSize.ws_row)
+                    ) {
+                        selectedBlockID = id
+                        persistCompletedBlock(id: id)
                     }
                     clearActiveBlockCapture()
-                } else if let awaitingID = commandAwaitingStartID {
+                } else if blockLifecycleController.awaitingStartID != nil {
                     // zsh emits precmd after an interrupted/incomplete buffer
                     // without ever running preexec. Finalize that pending
                     // command so the local queue cannot remain wedged.
-                    blockTimeline.interruptQueued(
-                        id: awaitingID,
+                    selectedBlockID = blockLifecycleController.interruptAwaiting(
                         exitCode: exitCode
                     )
-                    commandAwaitingStartID = nil
-                    selectedBlockID = awaitingID
                 }
+                _ = interactionController.handle(
+                    exitCode == 128 + SIGINT ? .commandInterrupted : .commandCompleted
+                )
                 dispatchNextQueuedCommandIfNeeded()
             }
         }
     }
 
-    private func scheduleProcessTermination(
-        _ source: LocalProcess,
-        waitStatus: Int32?,
-        generation: UInt64
-    ) {
-        // SwiftTerm's process monitor can fire before its already-read PTY
-        // chunks have drained onto the main queue. One short turn preserves
-        // the final prompt/output without keeping terminal frames in SwiftUI.
-        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(40)) { [weak self, weak source] in
-            guard let self, let source else { return }
-            self.handleProcessTermination(
-                source,
-                waitStatus: waitStatus,
-                generation: generation
-            )
-        }
-    }
-
-    private func handleProcessTermination(
-        _ source: LocalProcess,
-        waitStatus: Int32?,
-        generation: UInt64
-    ) {
-        guard generation == processGeneration, process === source else { return }
+    private func handleProcessTermination(waitStatus: Int32?) {
         let exitCode = Self.normalizedExitCode(fromWaitStatus: waitStatus)
 
         let transcriptRemainder = transcriptFilter.flush()
@@ -1061,10 +964,9 @@ final class TerminalSession: NSObject, ObservableObject {
                 reason: .shellExit
             )
         }
-        process = nil
-        processBridge = nil
         isShellRunning = false
         shellReadiness = .stopped
+        _ = interactionController.handle(.shellExited)
         invalidateCompletionEndpoint()
         stopForegroundProcessMonitoring()
         shellExitStatus = exitCode
@@ -1092,25 +994,25 @@ final class TerminalSession: NSObject, ObservableObject {
         exitCode: Int32? = nil,
         reason: CommandInterruptionReason
     ) async {
-        let blockID = blockTimeline.activeBlockID ?? commandAwaitingStartID
+        let blockID = blockLifecycleController.activeOrAwaitingBlockID
 
         guard let blockID else {
             clearActiveBlockCapture()
-            commandAwaitingStartID = nil
+            blockLifecycleController.markAwaitingStart(nil)
             return
         }
 
-        let output = finalizedActiveBlockOutput()
-        let terminalSnapshot = finalizedActiveTerminalSnapshot()
-        blockTimeline.interruptUnfinished(
+        let windowSize = ptyController.windowSize
+        _ = blockLifecycleController.interruptUnfinished(
             exitCode: exitCode,
-            activeOutput: output,
-            activeTerminalSnapshot: terminalSnapshot
+            renderedOutput: renderedActiveBlockOutput(),
+            columns: Int(windowSize.ws_col),
+            rows: Int(windowSize.ws_row)
         )
 
         defer {
             clearActiveBlockCapture()
-            commandAwaitingStartID = nil
+            blockLifecycleController.markAwaitingStart(nil)
         }
 
         guard let block = blockTimeline.block(id: blockID),
@@ -1162,29 +1064,8 @@ final class TerminalSession: NSObject, ObservableObject {
         runtimeStateDiagnostic = await runtimeStateController.persistCommandEvent(event)
     }
 
-    private func terminateAndReap(_ process: LocalProcess?) {
-        guard let process else { return }
-        let pid = process.shellPid
-        process.terminate()
-        guard pid > 0 else { return }
-
-        // LocalProcess.cancel() removes its process monitor before it can call
-        // waitpid. Reap explicit restarts/shutdowns off the main actor so they
-        // cannot leave zombie shells or stall AppKit teardown.
-        DispatchQueue.global(qos: .utility).async {
-            var status: Int32 = 0
-            while Darwin.waitpid(pid, &status, 0) == -1 {
-                guard errno == EINTR else { return }
-            }
-        }
-    }
-
     private func beginActiveBlockCapture(blockID: UUID) {
         guard blockTimeline.activeBlockID == blockID else { return }
-        activeBlockOutput.removeAll()
-        activeBlockTerminalBytes.removeAll()
-        activeBlockUsedNonAlternateDirectInteraction = false
-        activeBlockEnteredAlternateScreen = false
         resetActiveCommandLineEstimate()
         pendingLiveCommandOutput.removeAll(keepingCapacity: true)
         isLiveCommandFlushScheduled = false
@@ -1227,10 +1108,8 @@ final class TerminalSession: NSObject, ObservableObject {
         }) else { return }
 
         guard send(bytes: CommandSerializer.serializeCommand(nextCommand.command)) else { return }
-        commandAwaitingStartID = nextCommand.id
-        if mode == .blocks {
-            inputRequirement = .lineOriented
-        }
+        _ = interactionController.handle(.commandSubmitted)
+        blockLifecycleController.markAwaitingStart(nextCommand.id)
     }
 
     private func prepareRuntimeStateAndStartShell() {
@@ -1334,7 +1213,7 @@ final class TerminalSession: NSObject, ObservableObject {
                     outputKind: event.outputKind
                 )
             }
-        blockTimeline.restore(restoredBlocks)
+        blockLifecycleController.restore(restoredBlocks)
         restoredBlockIDs.formUnion(restoredBlocks.map(\.id))
         sessionBoundaries = Dictionary(uniqueKeysWithValues: previousSessions.map { session in
             let workingDirectory = session.lastWorkingDirectory.isEmpty
@@ -1499,7 +1378,7 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     func clearPreviousSessions() {
-        for id in restoredBlockIDs { blockTimeline.remove(id: id) }
+        for id in restoredBlockIDs { blockLifecycleController.remove(id: id) }
         restoredBlockIDs.removeAll()
         sessionBoundaries.removeAll()
         restoredSessionOrder.removeAll()
@@ -1512,7 +1391,7 @@ final class TerminalSession: NSObject, ObservableObject {
 
     func clearExactCommandHistory() {
         history = CommandHistory()
-        blockTimeline.clearFinalized()
+        blockLifecycleController.clearFinalized()
         restoredBlockIDs.removeAll()
         sessionBoundaries.removeAll()
         restoredSessionOrder.removeAll()
@@ -1524,7 +1403,7 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     func clearPersistedBlockOutput() {
-        blockTimeline.clearFinalizedOutput()
+        blockLifecycleController.clearFinalizedOutput()
         guard let runtimeStateController else { return }
         Task { [weak self] in
             self?.runtimeStateDiagnostic = await runtimeStateController.clearPersistedBlockOutput()
@@ -1572,7 +1451,6 @@ final class TerminalSession: NSObject, ObservableObject {
 
     private func routeActiveBlockOutput(_ data: Data) {
         guard !data.isEmpty, let activeBlockID = blockTimeline.activeBlockID else { return }
-        activeBlockOutput.append(data)
         updateActiveCommandLineEstimate(with: data)
 
         guard liveCommandTerminalBlockID == activeBlockID,
@@ -1581,62 +1459,21 @@ final class TerminalSession: NSObject, ObservableObject {
         scheduleLiveCommandOutputFlush()
     }
 
-    private func finalizedActiveBlockOutput() -> String {
-        guard blockTimeline.activeBlockID != nil else { return "" }
-
+    private func renderedActiveBlockOutput() -> String? {
         flushPendingLiveCommandOutput()
-
         if liveCommandTerminalBlockID == blockTimeline.activeBlockID,
            let liveCommandTerminalView {
             return Self.renderedTranscript(from: liveCommandTerminalView)
         }
-
-        return BlockOutputSanitizer.sanitize(activeBlockOutput.data)
-    }
-
-
-    private func finalizedActiveTerminalSnapshot() -> TerminalReplaySnapshot? {
-        guard blockTimeline.activeBlockID != nil else { return nil }
-        let rawBytes = activeBlockTerminalBytes.data
-        let requiresRichRendering = Self.requiresRichTerminalRendering(rawBytes)
-            || (activeBlockUsedNonAlternateDirectInteraction && !activeBlockEnteredAlternateScreen)
-        guard requiresRichRendering else { return nil }
-
-        let safeBytes = TerminalReplaySanitizer.sanitize(rawBytes)
-        guard !safeBytes.isEmpty else { return nil }
-        return TerminalReplaySnapshot(
-            bytes: safeBytes,
-            columns: max(1, Int(windowSize.ws_col)),
-            rows: max(1, Int(windowSize.ws_row)),
-            isTruncated: activeBlockTerminalBytes.isTruncated
-        )
+        return nil
     }
 
     nonisolated static func requiresRichTerminalRendering(_ data: Data) -> Bool {
-        guard !data.isEmpty else { return false }
-        var sawCarriageReturn = false
-        var previousWasCarriageReturn = false
-
-        for byte in data {
-            if byte == 0x1B || byte == 0x9B { return true }
-            if byte == 0x08 { return true }
-            if byte == 0x0D {
-                sawCarriageReturn = true
-                previousWasCarriageReturn = true
-                continue
-            }
-            if previousWasCarriageReturn, byte != 0x0A { return true }
-            previousWasCarriageReturn = false
-        }
-
-        return sawCarriageReturn && !data.contains(0x0A)
+        BlockLifecycleController.requiresRichTerminalRendering(data)
     }
 
     private func clearActiveBlockCapture() {
-        activeBlockOutput.removeAll()
-        activeBlockTerminalBytes.removeAll()
-        activeBlockUsedNonAlternateDirectInteraction = false
-        activeBlockEnteredAlternateScreen = false
+        blockLifecycleController.clearCapture()
         resetActiveCommandLineEstimate()
         pendingLiveCommandOutput.removeAll(keepingCapacity: true)
         isLiveCommandFlushScheduled = false
@@ -1770,11 +1607,14 @@ final class TerminalSession: NSObject, ObservableObject {
 
     private func handleAlternateScreenChanged(_ isActive: Bool) {
         guard isAlternateScreenActive != isActive else { return }
+        _ = interactionController.handle(
+            isActive ? .alternateScreenEntered : .alternateScreenExited
+        )
         isAlternateScreenActive = isActive
 
         if isActive {
             if blockTimeline.activeBlockID != nil {
-                activeBlockEnteredAlternateScreen = true
+                blockLifecycleController.markAlternateScreenEntered()
             }
             if mode == .blocks {
                 shouldReturnToBlocksAfterAlternateScreen = true
@@ -1791,7 +1631,6 @@ final class TerminalSession: NSObject, ObservableObject {
                     )
                 }
                 modeAttribution = .alternateScreen
-                inputRequirement = .direct
                 announceAccessibility("Direct terminal input activated")
                 focusAuthoritativeTerminal()
             } else {
@@ -1801,7 +1640,6 @@ final class TerminalSession: NSObject, ObservableObject {
             if shouldReturnToBlocksAfterAlternateScreen {
                 shouldRestoreBlocksViewportAfterAlternateScreen = true
                 modeAttribution = .manual
-                inputRequirement = isCommandActive ? .lineOriented : .shellIdle
                 requestFocus(.composer)
                 // Re-evaluate immediately after the protocol-owned mode ends.
                 // The same foreground process may still require raw input.
@@ -1859,9 +1697,16 @@ final class TerminalSession: NSObject, ObservableObject {
         lastForegroundSnapshot = snapshot
 
         if let attribution = snapshot.terminalModeAttribution {
+            if terminalSecurityState.inputMode == .normal,
+               (
+                   interactionController.state == .commandRunningLineInput
+                       || interactionController.state == .commandRunningSecure
+                       || interactionController.state == .fullTerminal
+               ) {
+                _ = interactionController.handle(.directInputRequired)
+            }
             if mode != .terminal {
                 let wasDirect = inputRequirement == .direct || inputRequirement == .secure
-                inputRequirement = terminalSecurityState.inputMode == .secure ? .secure : .direct
                 modeAttribution = terminalSecurityState.inputMode == .secure
                     ? .secureInput
                     : attribution
@@ -1876,9 +1721,15 @@ final class TerminalSession: NSObject, ObservableObject {
             }
         } else if snapshot.isShellForeground, modeAttribution != .manual {
             modeAttribution = .manual
-            inputRequirement = isCommandActive ? .lineOriented : .shellIdle
+            if isCommandActive,
+               terminalSecurityState.inputMode == .normal {
+                _ = interactionController.handle(.lineInputRequired)
+            }
         } else if snapshot.isShellForeground {
-            inputRequirement = isCommandActive ? .lineOriented : .shellIdle
+            if isCommandActive,
+               terminalSecurityState.inputMode == .normal {
+                _ = interactionController.handle(.lineInputRequired)
+            }
         }
     }
 
@@ -1897,11 +1748,11 @@ final class TerminalSession: NSObject, ObservableObject {
             activateSecureInput(source: source)
             return
         } else if !manualSecureInputActive, terminalSecurityState.inputMode == .secure {
+            _ = interactionController.handle(.secureInputEnded)
             if commandDraft.isEmpty, let suspendedCommandDraft {
                 commandDraft = suspendedCommandDraft
             }
             suspendedCommandDraft = nil
-            inputRequirement = isCommandActive ? .lineOriented : .shellIdle
         }
         terminalSecurityState = TerminalSecurityState(
             inputMode: inputMode,
@@ -1919,6 +1770,9 @@ final class TerminalSession: NSObject, ObservableObject {
     private func activateSecureInput(source: SecureInputDetectionSource) {
         let wasSecure = terminalSecurityState.inputMode == .secure
         if !wasSecure {
+            _ = interactionController.handle(.secureInputRequired)
+        }
+        if !wasSecure {
             if !commandDraft.isEmpty {
                 suspendedCommandDraft = commandDraft
             }
@@ -1926,7 +1780,6 @@ final class TerminalSession: NSObject, ObservableObject {
             history.resetNavigation()
         }
         modeAttribution = .secureInput
-        inputRequirement = .secure
         terminalSecurityState = TerminalSecurityState(
             inputMode: .secure,
             echoEnabled: false,
@@ -1957,8 +1810,13 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     func requestFocus(_ target: PaneFocusTarget) {
-        focusGeneration &+= 1
-        focusTarget = target
+        focusCoordinator.request(target)
+        focusGeneration = focusCoordinator.generation
+        focusTarget = focusCoordinator.target
+    }
+
+    func isCurrentTerminalMountGeneration(_ generation: UInt64) -> Bool {
+        generation == focusGeneration
     }
 
     var shouldAuthoritativeTerminalOwnFocus: Bool {
@@ -1978,6 +1836,52 @@ final class TerminalSession: NSObject, ObservableObject {
         }
     }
 
+    /// Repairs an existing terminal focus intent after AppKit reparents the
+    /// persistent host. It deliberately neither creates intent nor advances
+    /// the generation, so a newer composer request always wins.
+    func restoreAuthoritativeFocusAfterMount() {
+        guard focusTarget == .authoritativeTerminal,
+              shouldAuthoritativeTerminalOwnFocus else { return }
+        let generation = focusGeneration
+        DispatchQueue.main.async { [weak self] in
+            self?.repairAuthoritativeFocus(generation: generation)
+        }
+        // Returning to compact Blocks can mount the terminal before SwiftUI
+        // finishes inserting the adjacent composer. AppKit may reset the
+        // responder while that sibling hierarchy settles, so revalidate the
+        // same intent once more after the transaction has completed.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.repairAuthoritativeFocus(generation: generation)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.repairAuthoritativeFocus(generation: generation)
+        }
+    }
+
+    private func repairAuthoritativeFocus(generation: UInt64) {
+        guard focusGeneration == generation,
+              focusTarget == .authoritativeTerminal,
+              shouldAuthoritativeTerminalOwnFocus,
+              let terminalView,
+              let window = terminalView.window else { return }
+        if window.firstResponder !== terminalView {
+            window.makeFirstResponder(terminalView)
+        }
+    }
+
+    /// Recomputes emulator and PTY geometry after the persistent terminal host
+    /// has acquired the bounds of its new presentation container.
+    func authoritativeTerminalDidRemount() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  let terminalView = self.terminalView,
+                  terminalView.window != nil else { return }
+            terminalView.layoutSubtreeIfNeeded()
+            terminalView.terminal.updateFullScreen()
+            self.updateWindowSize(from: terminalView)
+        }
+    }
+
     var shouldEmbedAuthoritativeTerminalInActiveBlock: Bool {
         activeTerminalPresentation == .authoritativeInBlock
             || activeTerminalPresentation == .expanded
@@ -1985,13 +1889,20 @@ final class TerminalSession: NSObject, ObservableObject {
 
     var activeTerminalPresentation: ActiveTerminalPresentation {
         guard isCommandActive else { return mode == .terminal ? .fullTerminal : .hidden }
-        if isAlternateScreenActive { return .expanded }
         if mode == .terminal { return .fullTerminal }
+        if isAlternateScreenActive { return .expanded }
         if inputRequirement == .direct || inputRequirement == .secure {
             return .authoritativeInBlock
         }
         return .liveMirror
     }
+
+#if DEBUG
+    var debugAuthoritativeTerminalView: TerminalView? { terminalView }
+    var debugAuthoritativeHostView: NSView? { authoritativeTerminalHostView }
+    var debugProcessGeneration: UInt64 { processGeneration }
+    var debugPTYWindowSize: winsize { ptyController.windowSize }
+#endif
 
     var shouldPresentExpandedAuthoritativeTerminal: Bool {
         activeTerminalPresentation == .expanded
@@ -2017,11 +1928,9 @@ final class TerminalSession: NSObject, ObservableObject {
 
         guard !isAlternateScreenActive else { return }
         if mode == .terminal {
-            inputRequirement = .direct
             return
         }
         modeAttribution = .manual
-        inputRequirement = .shellIdle
         requestFocus(.composer)
     }
 
@@ -2030,12 +1939,12 @@ final class TerminalSession: NSObject, ObservableObject {
         let visibleCommand = sanitized.redactionCount == 0
             ? sanitized.value
             : "[Sensitive command omitted]"
-        let id = blockTimeline.enqueue(
+        let id = blockLifecycleController.queue(
             command: visibleCommand,
             workingDirectory: currentDirectory ?? shellConfiguration.workingDirectory,
             isRerunnable: sanitized.redactionCount == 0
         )
-        commandAwaitingStartID = id
+        blockLifecycleController.markAwaitingStart(id)
         selectedBlockID = id
         if isCommandHistoryEnabled, sanitized.redactionCount == 0 {
             history.append(sanitized.value)
@@ -2045,24 +1954,14 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     private func foregroundProcessSnapshot() -> ForegroundProcessSnapshot? {
-        guard let process, process.childfd >= 0 else { return nil }
-        let foregroundPGID = tcgetpgrp(process.childfd)
-        guard foregroundPGID > 0 else { return nil }
-
-        var termiosState = termios()
-        let hasTermios = tcgetattr(process.childfd, &termiosState) == 0
-        let localFlags = hasTermios ? termiosState.c_lflag : 0
-        let echoEnabled = !hasTermios || (localFlags & tcflag_t(ECHO) != 0)
-        let isRawInput = hasTermios
-            && (localFlags & tcflag_t(ICANON) == 0 || !echoEnabled)
-        let shellPGID = process.shellPid > 0 ? getpgid(process.shellPid) : -1
+        guard let status = ptyController.foregroundStatus() else { return nil }
 
         return ForegroundProcessSnapshot(
-            processGroupID: foregroundPGID,
-            shellProcessGroupID: shellPGID > 0 ? shellPGID : nil,
-            processName: Self.processName(forProcessGroupID: foregroundPGID),
-            isRawInput: isRawInput,
-            echoEnabled: echoEnabled
+            processGroupID: status.processGroupID,
+            shellProcessGroupID: status.shellProcessGroupID,
+            processName: Self.processName(forProcessGroupID: status.processGroupID),
+            isRawInput: status.isRawInput,
+            echoEnabled: status.echoEnabled
         )
     }
 
@@ -2112,9 +2011,7 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     private func send(bytes: [UInt8]) -> Bool {
-        guard let process, process.running else { return false }
-        process.send(data: bytes[...])
-        return true
+        ptyController.write(bytes)
     }
 
     private func shellEnvironmentValue(named name: String) -> String? {
@@ -2145,20 +2042,7 @@ final class TerminalSession: NSObject, ObservableObject {
             ws_ypixel: UInt16(pixelHeight)
         )
 
-        guard newWindowSize.ws_row != windowSize.ws_row
-            || newWindowSize.ws_col != windowSize.ws_col
-            || newWindowSize.ws_xpixel != windowSize.ws_xpixel
-            || newWindowSize.ws_ypixel != windowSize.ws_ypixel else { return }
-
-        windowSize = newWindowSize
-
-        if let process, process.running, process.childfd >= 0 {
-            var size = windowSize
-            _ = PseudoTerminalHelpers.setWinSize(
-                masterPtyDescriptor: process.childfd,
-                windowSize: &size
-            )
-        }
+        _ = ptyController.resize(to: newWindowSize)
     }
 }
 

@@ -160,7 +160,8 @@ struct CommandAutocomplete {
         cursorUTF16Offset: Int? = nil,
         history: [String],
         currentDirectory: URL,
-        executableSearchPath: String? = ProcessInfo.processInfo.environment["PATH"]
+        executableSearchPath: String? = ProcessInfo.processInfo.environment["PATH"],
+        indexedExecutables: [String]? = nil
     ) -> [CommandAutocompleteSuggestion] {
         guard maximumSuggestions > 0 else { return [] }
 
@@ -208,11 +209,12 @@ struct CommandAutocomplete {
                 if results.count == maximumSuggestions { return results }
             }
 
-            for executable in executableCandidates(
+            let executables = indexedExecutables ?? executableCandidates(
                 matching: token.decodedPrefix,
                 currentDirectory: currentDirectory,
                 searchPath: executableSearchPath
-            ) where Self.isUsefulMatch(executable, for: token) {
+            )
+            for executable in executables where Self.isUsefulMatch(executable, for: token) {
                 append(
                     text: executable,
                     replacementText: Self.shellEscape(executable),

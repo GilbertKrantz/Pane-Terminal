@@ -90,10 +90,11 @@ struct ContentView: View {
                         .transition(.identity)
                 }
             } else {
-                TerminalViewRepresentable(session: session)
-                    .padding(.leading, PaneMetrics.contentTextColumn)
-                    .padding(.trailing, PaneMetrics.contentTextColumn)
-                    .padding(.top, 8)
+                TerminalViewRepresentable(
+                    session: session,
+                    presentation: .fullTerminal,
+                    mountGeneration: session.focusGeneration
+                )
             }
 
         }

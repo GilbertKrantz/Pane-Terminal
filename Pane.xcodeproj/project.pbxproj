@@ -39,6 +39,17 @@
 		10000000000000000000001B /* AlternateScreenTranscriptFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001F /* AlternateScreenTranscriptFilterTests.swift */; };
 		10000000000000000000001D /* CommandAutocomplete.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000021 /* CommandAutocomplete.swift */; };
 		10000000000000000000001E /* CommandAutocompleteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000022 /* CommandAutocompleteTests.swift */; };
+		A10000000000000000000001 /* CompletionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000001 /* CompletionService.swift */; };
+		A10000000000000000000002 /* LocalAutocompleteProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000002 /* LocalAutocompleteProvider.swift */; };
+		A10000000000000000000003 /* ExecutableIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000003 /* ExecutableIndex.swift */; };
+		A10000000000000000000004 /* CompletionRanker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000004 /* CompletionRanker.swift */; };
+		B10000000000000000000001 /* FocusCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000000000000001 /* FocusCoordinator.swift */; };
+		B10000000000000000000002 /* PTYGenerationGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000000000000002 /* PTYGenerationGate.swift */; };
+		B10000000000000000000003 /* TerminalInteractionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000000000000003 /* TerminalInteractionController.swift */; };
+		B10000000000000000000004 /* TerminalInteractionControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000000000000004 /* TerminalInteractionControllerTests.swift */; };
+		B10000000000000000000005 /* PTYController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000000000000005 /* PTYController.swift */; };
+		B10000000000000000000006 /* BlockLifecycleController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000000000000006 /* BlockLifecycleController.swift */; };
+		B10000000000000000000007 /* BlockLifecycleControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000000000000007 /* BlockLifecycleControllerTests.swift */; };
 		10000000000000000000001F /* WarmZshCompletionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000023 /* WarmZshCompletionClient.swift */; };
 		100000000000000000000024 /* TerminalSecurityState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000024 /* TerminalSecurityState.swift */; };
 		100000000000000000000032 /* TerminalReplaySanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000032 /* TerminalReplaySanitizer.swift */; };
@@ -101,6 +112,17 @@
 		20000000000000000000001F /* AlternateScreenTranscriptFilterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlternateScreenTranscriptFilterTests.swift; sourceTree = "<group>"; };
 		200000000000000000000021 /* CommandAutocomplete.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandAutocomplete.swift; sourceTree = "<group>"; };
 		200000000000000000000022 /* CommandAutocompleteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandAutocompleteTests.swift; sourceTree = "<group>"; };
+		A200000000000000000000001 /* CompletionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionService.swift; sourceTree = "<group>"; };
+		A200000000000000000000002 /* LocalAutocompleteProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalAutocompleteProvider.swift; sourceTree = "<group>"; };
+		A200000000000000000000003 /* ExecutableIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExecutableIndex.swift; sourceTree = "<group>"; };
+		A200000000000000000000004 /* CompletionRanker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionRanker.swift; sourceTree = "<group>"; };
+		B200000000000000000000001 /* FocusCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusCoordinator.swift; sourceTree = "<group>"; };
+		B200000000000000000000002 /* PTYGenerationGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTYGenerationGate.swift; sourceTree = "<group>"; };
+		B200000000000000000000003 /* TerminalInteractionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalInteractionController.swift; sourceTree = "<group>"; };
+		B200000000000000000000004 /* TerminalInteractionControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalInteractionControllerTests.swift; sourceTree = "<group>"; };
+		B200000000000000000000005 /* PTYController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTYController.swift; sourceTree = "<group>"; };
+		B200000000000000000000006 /* BlockLifecycleController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockLifecycleController.swift; sourceTree = "<group>"; };
+		B200000000000000000000007 /* BlockLifecycleControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockLifecycleControllerTests.swift; sourceTree = "<group>"; };
 		200000000000000000000023 /* WarmZshCompletionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WarmZshCompletionClient.swift; sourceTree = "<group>"; };
 		200000000000000000000024 /* TerminalSecurityState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSecurityState.swift; sourceTree = "<group>"; };
 		200000000000000000000025 /* SensitiveDataSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensitiveDataSanitizer.swift; sourceTree = "<group>"; };
@@ -156,12 +178,24 @@
 			children = (
 				C6E13DE3300FD1A2004ECCBE /* AppIcons.icon */,
 				400000000000000000000003 /* App */,
+				A400000000000000000000001 /* Autocomplete */,
 				400000000000000000000004 /* Models */,
 				400000000000000000000005 /* Terminal */,
 				400000000000000000000006 /* Views */,
 				20000000000000000000000B /* Info.plist */,
 			);
 			path = Pane;
+			sourceTree = "<group>";
+		};
+		A400000000000000000000001 /* Autocomplete */ = {
+			isa = PBXGroup;
+			children = (
+				A200000000000000000000001 /* CompletionService.swift */,
+				A200000000000000000000002 /* LocalAutocompleteProvider.swift */,
+				A200000000000000000000003 /* ExecutableIndex.swift */,
+				A200000000000000000000004 /* CompletionRanker.swift */,
+			);
+			path = Autocomplete;
 			sourceTree = "<group>";
 		};
 		400000000000000000000003 /* App */ = {
@@ -198,6 +232,11 @@
 				200000000000000000000005 /* ShellConfiguration.swift */,
 				200000000000000000000006 /* TerminalSession.swift */,
 				200000000000000000000007 /* TerminalViewRepresentable.swift */,
+				B200000000000000000000001 /* FocusCoordinator.swift */,
+				B200000000000000000000002 /* PTYGenerationGate.swift */,
+				B200000000000000000000005 /* PTYController.swift */,
+				B200000000000000000000006 /* BlockLifecycleController.swift */,
+				B200000000000000000000003 /* TerminalInteractionController.swift */,
 				200000000000000000000016 /* BlockOutputSanitizer.swift */,
 				200000000000000000000032 /* TerminalReplaySanitizer.swift */,
 				200000000000000000000017 /* BlockStreamParser.swift */,
@@ -248,6 +287,8 @@
 				200000000000000000000030 /* CommandClickableTextViewTests.swift */,
 				200000000000000000000031 /* BlocksViewScrollTests.swift */,
 				200000000000000000000033 /* TerminalReplaySanitizerTests.swift */,
+				B200000000000000000000004 /* TerminalInteractionControllerTests.swift */,
+				B200000000000000000000007 /* BlockLifecycleControllerTests.swift */,
 			);
 			path = PaneTests;
 			sourceTree = "<group>";
@@ -368,6 +409,15 @@
 			buildActionMask = 2147483647;
 			files = (
 				100000000000000000000001 /* PaneApp.swift in Sources */,
+				A10000000000000000000001 /* CompletionService.swift in Sources */,
+				A10000000000000000000002 /* LocalAutocompleteProvider.swift in Sources */,
+				A10000000000000000000003 /* ExecutableIndex.swift in Sources */,
+				A10000000000000000000004 /* CompletionRanker.swift in Sources */,
+				B10000000000000000000001 /* FocusCoordinator.swift in Sources */,
+				B10000000000000000000002 /* PTYGenerationGate.swift in Sources */,
+				B10000000000000000000005 /* PTYController.swift in Sources */,
+				B10000000000000000000006 /* BlockLifecycleController.swift in Sources */,
+				B10000000000000000000003 /* TerminalInteractionController.swift in Sources */,
 				100000000000000000000002 /* InputMode.swift in Sources */,
 				100000000000000000000003 /* CommandHistory.swift in Sources */,
 				100000000000000000000004 /* CommandSerializer.swift in Sources */,
@@ -419,6 +469,8 @@
 				100000000000000000000030 /* CommandClickableTextViewTests.swift in Sources */,
 				100000000000000000000031 /* BlocksViewScrollTests.swift in Sources */,
 				100000000000000000000033 /* TerminalReplaySanitizerTests.swift in Sources */,
+				B10000000000000000000004 /* TerminalInteractionControllerTests.swift in Sources */,
+				B10000000000000000000007 /* BlockLifecycleControllerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

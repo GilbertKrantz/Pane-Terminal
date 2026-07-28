@@ -278,6 +278,130 @@ final class CommandAutocompleteTests: XCTestCase {
         XCTAssertEqual(suggestions.map(\.detail), ["detail-0", "detail-2", "detail-3"])
     }
 
+    func testExecutableIndexInvalidatesWhenPATHChanges() async throws {
+        let root = try makeTemporaryDirectory()
+        let first = root.appendingPathComponent("first", isDirectory: true)
+        let second = root.appendingPathComponent("second", isDirectory: true)
+        try FileManager.default.createDirectory(at: first, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
+        try makeExecutable(named: "pane-first", in: first)
+        try makeExecutable(named: "pane-second", in: second)
+        let index = ExecutableIndex(ttl: 120)
+
+        let initial = await index.candidates(prefix: "pane-", path: first.path, currentDirectory: root, shellGeneration: 1)
+        let changed = await index.candidates(prefix: "pane-", path: second.path, currentDirectory: root, shellGeneration: 1)
+
+        XCTAssertEqual(initial, ["pane-first"])
+        XCTAssertEqual(changed, ["pane-second"])
+    }
+
+    func testExecutableIndexDoesNotReuseRelativePATHAcrossDirectories() async throws {
+        let firstCWD = try makeTemporaryDirectory()
+        let secondCWD = try makeTemporaryDirectory()
+        try makeExecutable(named: "cwd-first", in: firstCWD)
+        try makeExecutable(named: "cwd-second", in: secondCWD)
+        let index = ExecutableIndex(ttl: 120)
+
+        let first = await index.candidates(prefix: "cwd-", path: "", currentDirectory: firstCWD, shellGeneration: 1)
+        let second = await index.candidates(prefix: "cwd-", path: "", currentDirectory: secondCWD, shellGeneration: 1)
+
+        XCTAssertEqual(first, ["cwd-first"])
+        XCTAssertEqual(second, ["cwd-second"])
+    }
+
+    func testCompletionServicePublishesLocalThenReplacesItWithValidZsh() async throws {
+        let directory = try makeTemporaryDirectory()
+        let context = LocalAutocompleteContext(
+            draft: "gi",
+            cursorUTF16Offset: 2,
+            history: ["git status"],
+            currentDirectory: directory,
+            executableSearchPath: "",
+            shellGeneration: 1
+        )
+        let service = CompletionService()
+        let updates = await service.suggestions(for: context) {
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            return ZshCompletionProtocol.Response(
+                requestID: "request-1",
+                status: .ok,
+                candidates: [
+                    .init(
+                        replacementText: "git-from-zsh",
+                        detail: "zsh",
+                        isDirectory: false
+                    )
+                ]
+            )
+        }
+
+        var received: [[CommandAutocompleteSuggestion]] = []
+        for await update in updates {
+            received.append(update)
+        }
+
+        XCTAssertGreaterThanOrEqual(received.count, 2)
+        XCTAssertFalse(received[0].isEmpty)
+        XCTAssertEqual(received.last?.map(\.replacementText), ["git-from-zsh"])
+        XCTAssertEqual(received.last?.first?.source, .zsh)
+    }
+
+    func testCompletionServiceTreatsValidEmptyZshAsAuthoritative() async throws {
+        let directory = try makeTemporaryDirectory()
+        let context = LocalAutocompleteContext(
+            draft: "gi",
+            cursorUTF16Offset: 2,
+            history: ["git status"],
+            currentDirectory: directory,
+            executableSearchPath: "",
+            shellGeneration: 1
+        )
+        let service = CompletionService()
+        let updates = await service.suggestions(for: context) {
+            ZshCompletionProtocol.Response(
+                requestID: "request-2",
+                status: .ok,
+                candidates: []
+            )
+        }
+
+        var final: [CommandAutocompleteSuggestion] = []
+        for await update in updates {
+            final = update
+        }
+        XCTAssertTrue(final.isEmpty)
+    }
+
+    func testCompletionServiceDoesNotPublishAfterContextBecomesInvalid() async throws {
+        let directory = try makeTemporaryDirectory()
+        let context = LocalAutocompleteContext(
+            draft: "gi",
+            cursorUTF16Offset: 2,
+            history: ["git status"],
+            currentDirectory: directory,
+            executableSearchPath: "",
+            shellGeneration: 1
+        )
+        let service = CompletionService()
+        let updates = await service.suggestions(
+            for: context,
+            zsh: {
+                ZshCompletionProtocol.Response(
+                    requestID: "request-3",
+                    status: .ok,
+                    candidates: []
+                )
+            },
+            isValid: { false }
+        )
+
+        var received: [[CommandAutocompleteSuggestion]] = []
+        for await update in updates {
+            received.append(update)
+        }
+        XCTAssertTrue(received.isEmpty)
+    }
+
     func testValidEmptyCapturedResultDoesNotBecomeLocalHeuristicSuggestions() throws {
         let root = try makeTemporaryDirectory()
         _ = FileManager.default.createFile(

@@ -37,35 +37,144 @@ private func applyFrozenBlockTerminalPalette(to terminalView: TerminalView) {
 }
 
 
+struct TerminalViewportInsets: Equatable, Sendable {
+    var top: CGFloat
+    var leading: CGFloat
+    var bottom: CGFloat
+    var trailing: CGFloat
+
+    static let zero = TerminalViewportInsets(top: 0, leading: 0, bottom: 0, trailing: 0)
+    static let fullTerminal = TerminalViewportInsets(top: 8, leading: 10, bottom: 8, trailing: 10)
+    static let embeddedDirect = TerminalViewportInsets(top: 6, leading: 6, bottom: 6, trailing: 6)
+}
+
+enum AuthoritativeTerminalPresentation: Equatable {
+    case embeddedDirect
+    case fullTerminal
+
+    var viewportInsets: TerminalViewportInsets {
+        switch self {
+        case .embeddedDirect: .embeddedDirect
+        case .fullTerminal: .fullTerminal
+        }
+    }
+}
+
 final class AuthoritativeTerminalHostView: NSView {
     let terminalView: PaneTerminalView
+    var onMountedIntoWindow: (() -> Void)?
+    private var leadingConstraint: NSLayoutConstraint!
+    private var trailingConstraint: NSLayoutConstraint!
+    private var topConstraint: NSLayoutConstraint!
+    private var bottomConstraint: NSLayoutConstraint!
+    private(set) var viewportInsets = TerminalViewportInsets.zero
 
     init(terminalView: PaneTerminalView) {
         self.terminalView = terminalView
         super.init(frame: .zero)
         addSubview(terminalView)
         terminalView.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            terminalView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            terminalView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            terminalView.topAnchor.constraint(equalTo: topAnchor),
-            terminalView.bottomAnchor.constraint(equalTo: bottomAnchor)
-        ])
+        leadingConstraint = terminalView.leadingAnchor.constraint(equalTo: leadingAnchor)
+        trailingConstraint = terminalView.trailingAnchor.constraint(equalTo: trailingAnchor)
+        topConstraint = terminalView.topAnchor.constraint(equalTo: topAnchor)
+        bottomConstraint = terminalView.bottomAnchor.constraint(equalTo: bottomAnchor)
+        NSLayoutConstraint.activate([leadingConstraint, trailingConstraint, topConstraint, bottomConstraint])
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.window != nil else { return }
+            self.onMountedIntoWindow?()
+        }
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
+    func setViewportInsets(_ insets: TerminalViewportInsets) {
+        guard viewportInsets != insets else { return }
+        viewportInsets = insets
+        leadingConstraint.constant = insets.leading
+        trailingConstraint.constant = -insets.trailing
+        topConstraint.constant = insets.top
+        bottomConstraint.constant = -insets.bottom
+        needsLayout = true
+    }
+
 }
 
 final class AuthoritativeTerminalMountView: NSView {
-    func mount(_ hostView: AuthoritativeTerminalHostView) {
-        guard hostView.superview !== self else { return }
+    var onMountedIntoWindow: (() -> Void)?
+    private weak var mountedHostView: AuthoritativeTerminalHostView?
+    private var hasPendingWindowMountCallback = false
+    private var isWindowMountCallbackScheduled = false
+    private var hasPendingPostMountLayoutCallback = false
+    private var isPostMountLayoutCallbackScheduled = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        scheduleWindowMountCallbackIfNeeded()
+    }
+
+    override func layout() {
+        super.layout()
+        schedulePostMountLayoutCallbackIfNeeded()
+    }
+
+    @discardableResult
+    func mount(_ hostView: AuthoritativeTerminalHostView) -> Bool {
+        guard hostView.superview !== self else { return false }
         hostView.removeFromSuperview()
         hostView.frame = bounds
         hostView.autoresizingMask = [.width, .height]
         addSubview(hostView)
+        mountedHostView = hostView
+        hasPendingWindowMountCallback = true
+        hasPendingPostMountLayoutCallback = true
+        scheduleWindowMountCallbackIfNeeded()
+        return true
+    }
+
+    func requestPostMountLayoutCallback() {
+        hasPendingPostMountLayoutCallback = true
+        needsLayout = true
+    }
+
+    private func scheduleWindowMountCallbackIfNeeded() {
+        guard window != nil,
+              hasPendingWindowMountCallback,
+              !isWindowMountCallbackScheduled else { return }
+        isWindowMountCallbackScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isWindowMountCallbackScheduled = false
+            guard self.window != nil,
+                  self.hasPendingWindowMountCallback,
+                  let hostView = self.mountedHostView,
+                  hostView.superview === self else { return }
+            self.hasPendingWindowMountCallback = false
+            self.onMountedIntoWindow?()
+        }
+    }
+
+    private func schedulePostMountLayoutCallbackIfNeeded() {
+        guard window != nil,
+              hasPendingPostMountLayoutCallback,
+              !isPostMountLayoutCallbackScheduled else { return }
+        isPostMountLayoutCallbackScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isPostMountLayoutCallbackScheduled = false
+            guard self.window != nil,
+                  self.hasPendingPostMountLayoutCallback,
+                  let hostView = self.mountedHostView,
+                  hostView.superview === self else { return }
+            self.hasPendingPostMountLayoutCallback = false
+            self.onMountedIntoWindow?()
+        }
     }
 }
 
@@ -117,26 +226,57 @@ final class PaneTerminalView: TerminalView {
 
 struct TerminalViewRepresentable: NSViewRepresentable {
     @ObservedObject var session: TerminalSession
+    let presentation: AuthoritativeTerminalPresentation
+    let mountGeneration: UInt64
 
     func makeNSView(context: Context) -> AuthoritativeTerminalMountView {
         let mountView = AuthoritativeTerminalMountView()
+        mountView.onMountedIntoWindow = { [weak session] in
+            session?.authoritativeTerminalDidRemount()
+            session?.restoreAuthoritativeFocusAfterMount()
+        }
+        guard session.isCurrentTerminalMountGeneration(mountGeneration) else {
+            return mountView
+        }
         let hostView = session.makeAuthoritativeTerminalHostView()
+        hostView.onMountedIntoWindow = { [weak session] in
+            session?.authoritativeTerminalDidRemount()
+            session?.restoreAuthoritativeFocusAfterMount()
+        }
         applyPaneTerminalPalette(to: hostView.terminalView)
         mountView.mount(hostView)
+        hostView.setViewportInsets(presentation.viewportInsets)
+        mountView.requestPostMountLayoutCallback()
+        session.restoreAuthoritativeFocusAfterMount()
         return mountView
     }
 
     func updateNSView(_ mountView: AuthoritativeTerminalMountView, context: Context) {
+        guard session.isCurrentTerminalMountGeneration(mountGeneration) else {
+            return
+        }
         let hostView = session.makeAuthoritativeTerminalHostView()
-        mountView.mount(hostView)
+        hostView.onMountedIntoWindow = { [weak session] in
+            session?.authoritativeTerminalDidRemount()
+            session?.restoreAuthoritativeFocusAfterMount()
+        }
+        let didReparent = mountView.mount(hostView)
+        hostView.setViewportInsets(presentation.viewportInsets)
+        mountView.requestPostMountLayoutCallback()
         applyPaneTerminalPalette(to: hostView.terminalView)
         hostView.terminalView.isHidden = false
         hostView.terminalView.terminal.updateFullScreen()
         hostView.terminalView.setNeedsDisplay(hostView.terminalView.bounds)
         hostView.terminalView.layer?.setNeedsDisplay()
+        if didReparent {
+            session.authoritativeTerminalDidRemount()
+        }
+        session.restoreAuthoritativeFocusAfterMount()
     }
 
-    static func dismantleNSView(_ mountView: AuthoritativeTerminalMountView, coordinator: ()) {}
+    static func dismantleNSView(_ mountView: AuthoritativeTerminalMountView, coordinator: ()) {
+        mountView.onMountedIntoWindow = nil
+    }
 }
 
 /// A read-only terminal emulator used only while a block command is active.
@@ -395,18 +535,44 @@ struct ActiveBlockAuthoritativeTerminalView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> AuthoritativeTerminalMountView {
         let mountView = AuthoritativeTerminalMountView()
+        mountView.onMountedIntoWindow = { [weak session] in
+            session?.authoritativeTerminalDidRemount()
+            session?.restoreAuthoritativeFocusAfterMount()
+        }
         let hostView = session.makeAuthoritativeTerminalHostView()
+        hostView.onMountedIntoWindow = { [weak session] in
+            session?.authoritativeTerminalDidRemount()
+            session?.restoreAuthoritativeFocusAfterMount()
+        }
         applyPaneTerminalPalette(to: hostView.terminalView)
         mountView.mount(hostView)
+        hostView.setViewportInsets(.embeddedDirect)
+        mountView.requestPostMountLayoutCallback()
+        session.restoreAuthoritativeFocusAfterMount()
         return mountView
     }
 
     func updateNSView(_ mountView: AuthoritativeTerminalMountView, context: Context) {
         let hostView = session.makeAuthoritativeTerminalHostView()
+        hostView.onMountedIntoWindow = { [weak session] in
+            session?.authoritativeTerminalDidRemount()
+            session?.restoreAuthoritativeFocusAfterMount()
+        }
         applyPaneTerminalPalette(to: hostView.terminalView)
-        mountView.mount(hostView)
+        let didReparent = mountView.mount(hostView)
+        hostView.setViewportInsets(.embeddedDirect)
+        mountView.requestPostMountLayoutCallback()
         hostView.terminalView.isHidden = false
         hostView.terminalView.terminal.updateFullScreen()
         hostView.terminalView.setNeedsDisplay(hostView.terminalView.bounds)
+        hostView.terminalView.layer?.setNeedsDisplay()
+        if didReparent {
+            session.authoritativeTerminalDidRemount()
+        }
+        session.restoreAuthoritativeFocusAfterMount()
+    }
+
+    static func dismantleNSView(_ mountView: AuthoritativeTerminalMountView, coordinator: ()) {
+        mountView.onMountedIntoWindow = nil
     }
 }

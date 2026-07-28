@@ -410,7 +410,7 @@ final class TerminalSessionIntegrationTests: XCTestCase {
     }
 
     @MainActor
-    func testRawTermiosAutomaticallyUsesEmbeddedDirectInput() async throws {
+    func testRawTermiosAutomaticallyUsesCompactDirectInput() async throws {
         let session = makeTestSession()
         let terminalView = PaneTerminalView(
             frame: NSRect(x: 0, y: 0, width: 800, height: 400)
@@ -429,6 +429,18 @@ final class TerminalSessionIntegrationTests: XCTestCase {
             return false
         }
         XCTAssertEqual(session.activeTerminalPresentation, .authoritativeInBlock)
+
+        let terminalIdentity = session.debugAuthoritativeTerminalView
+        let hostIdentity = session.makeAuthoritativeTerminalHostView()
+        let processGeneration = session.debugProcessGeneration
+        session.setMode(.terminal)
+        XCTAssertEqual(session.activeTerminalPresentation, .fullTerminal)
+        session.setMode(.blocks)
+        XCTAssertEqual(session.activeTerminalPresentation, .authoritativeInBlock)
+        XCTAssertEqual(session.focusTarget, .authoritativeTerminal)
+        XCTAssertTrue(session.debugAuthoritativeTerminalView === terminalIdentity)
+        XCTAssertTrue(session.debugAuthoritativeHostView === hostIdentity)
+        XCTAssertEqual(session.debugProcessGeneration, processGeneration)
 
         session.sendInterrupt()
         try await waitUntil("canonical shell input to restore Blocks mode", timeout: 8) {
@@ -501,6 +513,113 @@ final class TerminalSessionIntegrationTests: XCTestCase {
     }
 
     @MainActor
+    func testAlternateScreenInputSurvivesRapidBlocksTerminalReparenting() async throws {
+        NSWindow.allowsAutomaticWindowTabbing = false
+        let session = makeTestSession()
+        let defaultsSuiteName = "PaneTests.AlternateScreenReparent.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuiteName))
+        defaults.set(true, forKey: "hasCompletedOnboarding")
+        let hostingView = NSHostingView(
+            rootView: ContentView(session: session)
+                .defaultAppStorage(defaults)
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            session.shutdown()
+            defaults.removePersistentDomain(forName: defaultsSuiteName)
+        }
+
+        try await waitUntil("shell and Blocks composer to mount", timeout: 5) {
+            hostingView.layoutSubtreeIfNeeded()
+            return session.isShellReadyForInput
+                && self.findTextView(in: hostingView) != nil
+        }
+
+        let terminalIdentity = session.makeAuthoritativeTerminalView()
+        let hostIdentity = session.makeAuthoritativeTerminalHostView()
+        let processGeneration = session.debugProcessGeneration
+        let command = #"trap 'printf "\033[?1049l"; stty echo icanon; exit 130' INT TERM; stty -echo -icanon min 1 time 0; printf '\033[?1049hPANE_ALT_READY\n'; read -k 1 pane_a; printf 'PANE_ALT_A=%s\n' "$pane_a"; read -k 1 pane_b; printf 'PANE_ALT_B=%s\n' "$pane_b"; read -k 1 pane_c; printf 'PANE_ALT_C=%s\n' "$pane_c"; printf '\033[?1049l'; stty echo icanon"#
+        session.submit(command: command)
+
+        try await waitUntil("alternate-screen authoritative Block mount", timeout: 8) {
+            hostingView.layoutSubtreeIfNeeded()
+            return session.isAlternateScreenActive
+                && session.activeTerminalPresentation == .expanded
+                && session.focusTarget == .authoritativeTerminal
+                && terminalIdentity.window === window
+                && window.firstResponder === terminalIdentity
+        }
+        _ = try await waitFor("PANE_ALT_READY", in: terminalIdentity, timeout: 5)
+
+        terminalIdentity.send(data: [Character("A").asciiValue!][...])
+        _ = try await waitFor("PANE_ALT_A=A", in: terminalIdentity, timeout: 5)
+
+        session.setMode(.terminal)
+        try await waitUntil("Full Terminal remount and focus repair", timeout: 8) {
+            hostingView.layoutSubtreeIfNeeded()
+            return session.activeTerminalPresentation == .fullTerminal
+                && terminalIdentity.window === window
+                && window.firstResponder === terminalIdentity
+        }
+        terminalIdentity.send(data: [Character("B").asciiValue!][...])
+        _ = try await waitFor("PANE_ALT_B=B", in: terminalIdentity, timeout: 5)
+
+        for expectedMode in [
+            InputMode.blocks,
+            .terminal,
+            .blocks,
+            .terminal,
+            .blocks
+        ] {
+            session.setMode(expectedMode)
+            try await waitUntil(
+                "\(expectedMode.rawValue) remount during rapid transition",
+                timeout: 8,
+                diagnostics: {
+                    "mode=\(session.mode.rawValue), "
+                        + "presentation=\(session.activeTerminalPresentation), "
+                        + "alternate=\(session.isAlternateScreenActive), "
+                        + "terminalWindowMatches=\(terminalIdentity.window === window), "
+                        + "hostSuperview=\(String(describing: hostIdentity.superview))"
+                }
+            ) {
+                hostingView.layoutSubtreeIfNeeded()
+                let expectedPresentation: ActiveTerminalPresentation =
+                    expectedMode == .terminal ? .fullTerminal : .expanded
+                return session.mode == expectedMode
+                    && session.activeTerminalPresentation == expectedPresentation
+                    && terminalIdentity.window === window
+            }
+            XCTAssertTrue(session.debugAuthoritativeTerminalView === terminalIdentity)
+            XCTAssertTrue(session.debugAuthoritativeHostView === hostIdentity)
+            XCTAssertEqual(session.debugProcessGeneration, processGeneration)
+        }
+
+        try await waitUntil("terminal focus after final rapid Blocks remount", timeout: 8) {
+            window.firstResponder === terminalIdentity
+                && session.focusTarget == .authoritativeTerminal
+        }
+        terminalIdentity.send(data: [Character("C").asciiValue!][...])
+        _ = try await waitFor("PANE_ALT_C=C", in: terminalIdentity, timeout: 5)
+        try await waitUntil("alternate-screen fixture to finish", timeout: 8) {
+            !session.isAlternateScreenActive && !session.isCommandActive
+        }
+
+        XCTAssertTrue(session.debugAuthoritativeTerminalView === terminalIdentity)
+        XCTAssertTrue(session.debugAuthoritativeHostView === hostIdentity)
+        XCTAssertEqual(session.debugProcessGeneration, processGeneration)
+    }
+
+    @MainActor
     func testCharacterChoiceUsesCompactAuthoritativeBlockAndPreservesPrompt() async throws {
         NSWindow.allowsAutomaticWindowTabbing = false
         let session = makeTestSession()
@@ -523,7 +642,7 @@ final class TerminalSessionIntegrationTests: XCTestCase {
             session.isShellRunning
         }
 
-        let command = #"/bin/sh -c 'trap "stty icanon; exit 130" INT TERM; stty -icanon echo min 1 time 0; printf "PANE_CHOICE [y/n]"; sleep 30'"#
+        let command = #"/bin/sh -c 'trap "stty icanon; exit 130" INT TERM; stty -icanon echo min 1 time 0; printf "PANE_CHOICE [y/n]"; pane_choice=$(dd bs=1 count=1 2>/dev/null); printf "\nPANE_CHOICE=%s\n" "$pane_choice"; stty icanon'"#
         session.submit(command: command)
 
         try await waitUntil("character choice compact input classification", timeout: 8) {
@@ -533,6 +652,9 @@ final class TerminalSessionIntegrationTests: XCTestCase {
                 && session.shouldPresentCompactAuthoritativeTerminal
                 && !session.shouldPresentExpandedAuthoritativeTerminal
         }
+        XCTAssertEqual(session.debugSnapshot.interactionState, .commandRunningDirect)
+        XCTAssertEqual(session.debugSnapshot.keyboardOwner, .authoritativeTerminal)
+        XCTAssertEqual(session.debugSnapshot.terminalMount, .authoritativeInBlock)
         try await waitUntil("compact authoritative terminal mount", timeout: 8) {
             hostingView.layoutSubtreeIfNeeded()
             return self.findTerminalView(in: hostingView) != nil
@@ -544,16 +666,38 @@ final class TerminalSessionIntegrationTests: XCTestCase {
                 .contains("PANE_CHOICE [y/n]")
         }
 
-        session.sendInterrupt()
+        let hostIdentity = session.makeAuthoritativeTerminalHostView()
+        let processGeneration = session.debugProcessGeneration
+        session.setMode(.terminal)
+        try await waitUntil("normal-buffer direct input to mount in Full Terminal", timeout: 5) {
+            hostingView.layoutSubtreeIfNeeded()
+            return session.activeTerminalPresentation == .fullTerminal
+                && mountedTerminal.window === window
+                && window.firstResponder === mountedTerminal
+        }
+        session.setMode(.blocks)
+        try await waitUntil("normal-buffer direct input to remount in Blocks", timeout: 5) {
+            hostingView.layoutSubtreeIfNeeded()
+            return session.activeTerminalPresentation == .authoritativeInBlock
+                && session.focusTarget == .authoritativeTerminal
+                && mountedTerminal.window === window
+                && window.firstResponder === mountedTerminal
+        }
+
+        mountedTerminal.send(data: [Character("y").asciiValue!][...])
+        _ = try await waitFor("PANE_CHOICE=y", in: mountedTerminal, timeout: 5)
         try await waitUntil("interactive block to finish and return focus", timeout: 8) {
             guard let block = session.blocks.first(where: { $0.command == command }) else {
                 return false
             }
-            if case .interrupted = block.state {
+            if case .completed(exitCode: 0) = block.state {
                 return session.focusTarget == .composer
             }
             return false
         }
+        XCTAssertTrue(session.debugAuthoritativeTerminalView === mountedTerminal)
+        XCTAssertTrue(session.debugAuthoritativeHostView === hostIdentity)
+        XCTAssertEqual(session.debugProcessGeneration, processGeneration)
     }
 
     @MainActor
@@ -581,10 +725,11 @@ final class TerminalSessionIntegrationTests: XCTestCase {
             timeout: 5
         )
         XCTAssertTrue(readyOutput.contains("PANE_SECURE_READY"), readyOutput)
-        let suggestions = await session.autocompleteSuggestions(
+        let updates = await session.autocompleteSuggestions(
             for: "git",
             cursorUTF16Offset: 3
         )
+        let suggestions = await finalSuggestions(from: updates)
         XCTAssertTrue(suggestions.isEmpty)
         XCTAssertTrue(session.commandDraft.isEmpty)
 
@@ -1241,10 +1386,11 @@ final class TerminalSessionIntegrationTests: XCTestCase {
         }
 
         let draft = "pane-warm-fixture --f"
-        let suggestions = await session.autocompleteSuggestions(
+        let updates = await session.autocompleteSuggestions(
             for: draft,
             cursorUTF16Offset: (draft as NSString).length
         )
+        let suggestions = await finalSuggestions(from: updates)
 
         let warmSuggestion = try XCTUnwrap(
             suggestions.first(where: { $0.replacementText == "--from-warm-state" }),
@@ -1340,6 +1486,7 @@ final class TerminalSessionIntegrationTests: XCTestCase {
     private func waitUntil(
         _ description: String,
         timeout: TimeInterval = 2,
+        diagnostics: (@MainActor () -> String)? = nil,
         condition: @escaping @MainActor () -> Bool
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)
@@ -1351,7 +1498,8 @@ final class TerminalSessionIntegrationTests: XCTestCase {
             try await Task.sleep(nanoseconds: 5_000_000)
         }
 
-        XCTFail("Timed out waiting for \(description)")
+        let diagnosticText = diagnostics.map { "; \($0())" } ?? ""
+        XCTFail("Timed out waiting for \(description)\(diagnosticText)")
         throw CocoaError(.coderReadCorrupt)
     }
 
@@ -1449,9 +1597,103 @@ extension TerminalSessionIntegrationTests {
     }
 
     @MainActor
+    func testAuthoritativeHostAppliesViewportInsetsWithoutRecreatingTerminal() {
+        let terminal = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 200, height: 100)
+        )
+        let host = AuthoritativeTerminalHostView(terminalView: terminal)
+        host.frame = NSRect(x: 0, y: 0, width: 200, height: 100)
+
+        host.setViewportInsets(.fullTerminal)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(host.viewportInsets, .fullTerminal)
+        XCTAssertEqual(terminal.frame, NSRect(x: 10, y: 8, width: 180, height: 84))
+
+        host.setViewportInsets(.embeddedDirect)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(host.viewportInsets, .embeddedDirect)
+        XCTAssertEqual(terminal.frame, NSRect(x: 6, y: 6, width: 188, height: 88))
+        XCTAssertTrue(host.terminalView === terminal)
+    }
+
+    @MainActor
+    func testMountReportsReparentingAndRepairsOnlyTerminalFocusIntent() async throws {
+        let session = makeTestSession()
+        let host = session.makeAuthoritativeTerminalHostView()
+        let firstMount = AuthoritativeTerminalMountView(
+            frame: NSRect(x: 0, y: 0, width: 320, height: 160)
+        )
+        let secondMount = AuthoritativeTerminalMountView(
+            frame: NSRect(x: 0, y: 0, width: 640, height: 320)
+        )
+        let searchField = NSSearchField(frame: NSRect(x: 0, y: 330, width: 200, height: 24))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 640, height: 360))
+        container.addSubview(firstMount)
+        container.addSubview(secondMount)
+        container.addSubview(searchField)
+        let window = NSWindow(
+            contentRect: container.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = container
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            session.shutdown()
+        }
+
+        try await waitUntil("shell readiness before terminal focus intent", timeout: 5) {
+            session.isShellReadyForInput
+        }
+        host.setViewportInsets(.embeddedDirect)
+        XCTAssertTrue(firstMount.mount(host))
+        XCTAssertFalse(firstMount.mount(host))
+        firstMount.layoutSubtreeIfNeeded()
+        host.layoutSubtreeIfNeeded()
+        session.authoritativeTerminalDidRemount()
+        await drainMainQueue(turns: 2)
+        let compactWindowSize = session.debugPTYWindowSize
+        session.enterSecureInput()
+        session.restoreAuthoritativeFocusAfterMount()
+        await drainMainQueue(turns: 2)
+        XCTAssertTrue(window.firstResponder === host.terminalView)
+
+        host.setViewportInsets(.fullTerminal)
+        XCTAssertTrue(secondMount.mount(host))
+        secondMount.layoutSubtreeIfNeeded()
+        host.layoutSubtreeIfNeeded()
+        session.authoritativeTerminalDidRemount()
+        session.restoreAuthoritativeFocusAfterMount()
+        await drainMainQueue(turns: 2)
+        XCTAssertTrue(window.firstResponder === host.terminalView)
+        XCTAssertTrue(session.debugAuthoritativeTerminalView === host.terminalView)
+        XCTAssertTrue(session.debugAuthoritativeHostView === host)
+        XCTAssertGreaterThan(session.debugPTYWindowSize.ws_col, compactWindowSize.ws_col)
+        XCTAssertGreaterThan(session.debugPTYWindowSize.ws_row, compactWindowSize.ws_row)
+        XCTAssertGreaterThan(session.debugPTYWindowSize.ws_xpixel, compactWindowSize.ws_xpixel)
+        XCTAssertGreaterThan(session.debugPTYWindowSize.ws_ypixel, compactWindowSize.ws_ypixel)
+
+        session.requestFocus(.composer)
+        XCTAssertTrue(window.makeFirstResponder(searchField))
+        XCTAssertTrue(firstMount.mount(host))
+        session.restoreAuthoritativeFocusAfterMount()
+        await drainMainQueue(turns: 2)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertTrue(window.firstResponder === searchField.currentEditor())
+    }
+
+    @MainActor
     func testTerminalRepresentableUpdatePreservesSearchFieldFocus() async throws {
         let session = TerminalSession()
-        let terminalHost = NSHostingView(rootView: TerminalViewRepresentable(session: session))
+        let terminalHost = NSHostingView(
+            rootView: TerminalViewRepresentable(
+                session: session,
+                presentation: .fullTerminal,
+                mountGeneration: session.focusGeneration
+            )
+        )
         let searchField = NSSearchField(frame: NSRect(x: 12, y: 212, width: 280, height: 28))
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 640, height: 240))
         terminalHost.frame = NSRect(x: 0, y: 0, width: 640, height: 200)
@@ -1474,7 +1716,11 @@ extension TerminalSessionIntegrationTests {
         XCTAssertTrue(window.makeFirstResponder(searchField))
 
         session.requestFocus(.none)
-        terminalHost.rootView = TerminalViewRepresentable(session: session)
+        terminalHost.rootView = TerminalViewRepresentable(
+            session: session,
+            presentation: .fullTerminal,
+            mountGeneration: session.focusGeneration
+        )
         container.layoutSubtreeIfNeeded()
         await drainMainQueue(turns: 2)
 
@@ -1748,6 +1994,16 @@ extension TerminalSessionIntegrationTests {
             ],
             homeDirectory: URL(fileURLWithPath: "/tmp")
         )
+    }
+
+    private func finalSuggestions(
+        from updates: AsyncStream<[CommandAutocompleteSuggestion]>
+    ) async -> [CommandAutocompleteSuggestion] {
+        var suggestions: [CommandAutocompleteSuggestion] = []
+        for await update in updates {
+            suggestions = update
+        }
+        return suggestions
     }
 
     private var persistenceTestConfiguration: RuntimeStateConfiguration {

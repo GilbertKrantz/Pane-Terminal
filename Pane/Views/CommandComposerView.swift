@@ -148,10 +148,8 @@ struct CommandComposerView: View {
             measuredHeight: $editorHeight,
             selectionUTF16Offset: $caretUTF16Offset,
             selectionRequest: selectionRequest,
-            shouldFocus: session.mode == .blocks
+            shouldFocus: session.composerEnabled
                 && session.isShellReadyForInput
-                && session.inputRequirement != .direct
-                && session.inputRequirement != .secure
                 && session.focusTarget == .composer,
             focusGeneration: session.focusGeneration,
             shouldRouteTerminalControlKeys: session.isCommandActive,
@@ -253,20 +251,21 @@ struct CommandComposerView: View {
         }
         guard !Task.isCancelled, autocompleteQuery == query else { return }
 
-        let suggestions = await session.autocompleteSuggestions(
+        let updates = await session.autocompleteSuggestions(
             for: query.draft,
             cursorUTF16Offset: query.caretUTF16Offset
         )
-        guard !Task.isCancelled, autocompleteQuery == query else { return }
-
-        if suggestionsQuery != query {
-            suggestionsQuery = query
-            autocompleteSelection.reset()
-        }
-        if autocompleteSuggestions != suggestions {
-            autocompleteSuggestions = suggestions
-            if autocompleteSelection.selected(from: suggestions) == nil {
+        for await suggestions in updates {
+            guard !Task.isCancelled, autocompleteQuery == query else { return }
+            if suggestionsQuery != query {
+                suggestionsQuery = query
                 autocompleteSelection.reset()
+            }
+            if autocompleteSuggestions != suggestions {
+                autocompleteSuggestions = suggestions
+                if autocompleteSelection.selected(from: suggestions) == nil {
+                    autocompleteSelection.reset()
+                }
             }
         }
     }

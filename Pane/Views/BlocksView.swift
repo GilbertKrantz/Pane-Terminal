@@ -281,7 +281,11 @@ struct AuthoritativeInputCommandView: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Running \(inputLabel.lowercased()) command \(block.command)")
 
-            TerminalViewRepresentable(session: session)
+            TerminalViewRepresentable(
+                session: session,
+                presentation: .embeddedDirect,
+                mountGeneration: session.focusGeneration
+            )
                 .id("authoritative-active-input")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
