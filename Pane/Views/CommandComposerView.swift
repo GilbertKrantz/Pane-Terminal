@@ -624,6 +624,8 @@ private struct AutocompleteSuggestionButton: View {
             return "gearshape"
         case .fileSystem:
             return "doc"
+        case .projectScript:
+            return "shippingbox"
         }
     }
 }

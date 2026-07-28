@@ -3,6 +3,93 @@ import XCTest
 @testable import Pane
 
 final class CommandAutocompleteTests: XCTestCase {
+    func testCompletionRankerMergesEvidenceAndPrefersProjectProvider() {
+        var historyEvidence = CompletionEvidence()
+        historyEvidence.sessionFrequency = 4
+        var projectEvidence = CompletionEvidence()
+        projectEvidence.projectMatch = true
+        projectEvidence.workingDirectoryMatch = true
+
+        let ranked = CompletionRanker().rank([
+            CompletionCandidate(
+                displayText: "npm run test",
+                replacementText: "npm run test",
+                source: .history,
+                kind: .fullCommand,
+                evidence: historyEvidence
+            ),
+            CompletionCandidate(
+                displayText: "npm run test",
+                replacementText: "npm run test",
+                source: .projectScript,
+                kind: .fullCommand,
+                detail: "package.json",
+                evidence: projectEvidence
+            )
+        ])
+
+        XCTAssertEqual(ranked.count, 1)
+        XCTAssertEqual(ranked[0].candidate.source, .projectScript)
+        XCTAssertEqual(ranked[0].candidate.detail, "package.json")
+        XCTAssertEqual(ranked[0].candidate.evidence.sessionFrequency, 4)
+        XCTAssertTrue(ranked[0].candidate.evidence.projectMatch)
+    }
+
+    func testProjectContextFindsNestedPackageScriptsAndMakeTargets() async throws {
+        let root = try makeTemporaryDirectory()
+        let nested = root.appendingPathComponent("Sources/Feature", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try Data(
+            #"{"scripts":{"test":"vitest","dev":"vite"}}"#.utf8
+        ).write(to: root.appendingPathComponent("package.json"))
+        try Data("build:\n\t@echo build\nclean:\n\t@echo clean\n".utf8)
+            .write(to: root.appendingPathComponent("Makefile"))
+
+        let provider = ProjectContextProvider()
+        let discoveredContext = await provider.context(for: nested)
+        let context = try XCTUnwrap(discoveredContext)
+
+        XCTAssertEqual(context.root.standardizedFileURL, root.standardizedFileURL)
+        XCTAssertEqual(context.kind, .node)
+        XCTAssertTrue(context.detectedLanguages.contains(.javaScript))
+        XCTAssertEqual(
+            Set(context.scripts.map(\.command)),
+            ["npm run dev", "npm run test", "make build", "make clean"]
+        )
+        let discoveredRootContext = await provider.context(for: root)
+        let rootContext = try XCTUnwrap(discoveredRootContext)
+        XCTAssertEqual(
+            context.identity,
+            rootContext.identity
+        )
+    }
+
+    func testLocalProviderCompletesProjectScriptWithoutDuplicatingCommandPrefix() async throws {
+        let root = try makeTemporaryDirectory()
+        try Data(
+            #"{"scripts":{"test":"vitest","typecheck":"tsc --noEmit"}}"#.utf8
+        ).write(to: root.appendingPathComponent("package.json"))
+        let provider = LocalAutocompleteProvider(maximumSuggestions: 12)
+        let context = LocalAutocompleteContext(
+            draft: "npm r",
+            cursorUTF16Offset: 5,
+            history: [],
+            currentDirectory: root,
+            executableSearchPath: "",
+            shellGeneration: 1
+        )
+
+        let suggestions = await provider.suggestions(for: context)
+        let test = try XCTUnwrap(suggestions.first {
+            $0.source == .projectScript && $0.text == "npm run test"
+        })
+        let edit = CommandAutocomplete().accept(test, in: "npm r")
+
+        XCTAssertEqual(test.replacementText, "run test")
+        XCTAssertEqual(test.detail, "package.json")
+        XCTAssertEqual(edit.draft, "npm run test")
+    }
+
     func testHistorySuggestionsUseCurrentSessionRecencyAndCommandContext() throws {
         let currentDirectory = try makeTemporaryDirectory()
         let autocomplete = CommandAutocomplete(

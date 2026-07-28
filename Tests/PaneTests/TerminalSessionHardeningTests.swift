@@ -34,12 +34,15 @@ final class TerminalSessionHardeningTests: XCTestCase {
         }
 
         for index in 0..<4 {
-            let command = "caffeinate"
+            // Keep the foreground process portable and deterministic. `caffeinate`
+            // can exit immediately on headless CI runners when its power assertion
+            // cannot be created, which made this interrupt test race the process.
+            let command = "sleep 30"
             session.submit(command: command)
             try await waitUntil("interrupt fixture \(index) to run", session: session) {
                 session.activeCommandBlock?.command == command
                     && session.activeCommandBlock?.state == .running
-                    && session.debugForegroundProcessName == "caffeinate"
+                    && session.debugHasForegroundProcess
             }
             let interruptedBlockID = try XCTUnwrap(session.activeCommandBlock?.id)
             session.sendInterrupt()
@@ -176,7 +179,10 @@ final class TerminalSessionHardeningTests: XCTestCase {
         let harness = try makeHarness(named: "secure-persistence", persistenceEnabled: true)
         let session = harness.session
         let terminalView = harness.terminalView
-        defer { try? FileManager.default.removeItem(at: harness.root) }
+        defer {
+            session.terminateForApplicationExit()
+            try? FileManager.default.removeItem(at: harness.root)
+        }
 
         try await waitUntil("persistent session shell readiness", session: session) {
             session.isShellReadyForInput
@@ -226,7 +232,10 @@ final class TerminalSessionHardeningTests: XCTestCase {
     func testSecureInputDoesNotReappearAfterRestore() async throws {
         let first = try makeHarness(named: "secure-restore", persistenceEnabled: true)
         let firstSession = first.session
-        defer { try? FileManager.default.removeItem(at: first.root) }
+        defer {
+            firstSession.terminateForApplicationExit()
+            try? FileManager.default.removeItem(at: first.root)
+        }
 
         try await waitUntil("first restore shell readiness", session: firstSession) {
             firstSession.isShellReadyForInput
@@ -321,9 +330,13 @@ final class TerminalSessionHardeningTests: XCTestCase {
         in session: TerminalSession
     ) async throws {
         session.submit(command: command)
-        try await waitUntil("\(marker) to become active", session: session) {
-            session.activeCommandBlock?.command == command
-                && session.activeCommandBlock?.state == .running
+        try await waitUntil("\(marker) to start", session: session) {
+            guard let block = session.blocks.first(where: { $0.command == command }) else {
+                return false
+            }
+            if block.state == .running { return true }
+            if case .completed(exitCode: 0) = block.state { return true }
+            return false
         }
         try await waitUntil("\(marker) to complete", session: session) {
             guard let block = session.blocks.first(where: { $0.command == command }),

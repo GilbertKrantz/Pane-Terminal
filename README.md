@@ -209,7 +209,7 @@ Option acts as Meta in Terminal mode. The native toolbar and **Terminal** menu e
 - Running non-alternate-screen interactive commands may host Pane's one authoritative terminal directly. When they finish, the block returns to the same clean plain-text presentation as other commands.
 - Commands typed directly in Full Terminal become structured blocks only when Pane's zsh lifecycle hooks identify command start, completion, directory, and exit status.
 - Up and Down navigate command history rather than moving the caret vertically in a multiline draft.
-- Durable session and finalized-block restoration are wired. Repository detection, Git/project feature collection, transition ranking, semantic retrieval, and an optional local model remain future prediction phases.
+- Durable session and finalized-block restoration are wired. Local completion now detects bounded project context, surfaces manifest/Make/Just scripts, and ranks deterministic evidence without running project code. Learned command transitions, semantic retrieval, and an optional local model remain future prediction phases.
 - Replacing zsh with `exec`, removing integration hooks, or redefining them can prevent completion markers and leave a block running until interruption, shell exit, or restart.
 - Warm-shell autocomplete depends on zsh socket, ZLE, PTY, and completion modules. Pane falls back to less context-aware local suggestions when capture is unavailable.
 - Automatic input classification combines alternate-screen, process-group, termios, and bounded process-name signals. Manual Full Terminal selection remains authoritative until you leave it.
@@ -217,4 +217,4 @@ Option acts as Meta in Terminal mode. The native toolbar and **Terminal** menu e
 
 ## Project status
 
-Pane is a focused macOS terminal experiment. The foundation is in place: a persistent PTY shell, structured blocks, native UI, durable safe history, shell-aware completion capture, secure-input routing, and terminal-mode escape hatches. The next layer is smarter local prediction and richer project context without compromising the core rule that the shell remains authoritative.
+Pane is a focused macOS terminal experiment. The foundation is in place: a persistent PTY shell, structured blocks, native UI, durable safe history, shell-authoritative completion capture, project-aware local fallback, secure-input routing, and terminal-mode escape hatches. The next prediction layer can build on the local evidence model without compromising the core rule that the shell remains authoritative.

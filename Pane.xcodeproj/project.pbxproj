@@ -43,6 +43,7 @@
 		A10000000000000000000002 /* LocalAutocompleteProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000002 /* LocalAutocompleteProvider.swift */; };
 		A10000000000000000000003 /* ExecutableIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000003 /* ExecutableIndex.swift */; };
 		A10000000000000000000004 /* CompletionRanker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000004 /* CompletionRanker.swift */; };
+		A10000000000000000000005 /* ProjectContextProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000005 /* ProjectContextProvider.swift */; };
 		B10000000000000000000001 /* FocusCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000000000000001 /* FocusCoordinator.swift */; };
 		B10000000000000000000002 /* PTYGenerationGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000000000000002 /* PTYGenerationGate.swift */; };
 		B10000000000000000000003 /* TerminalInteractionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000000000000003 /* TerminalInteractionController.swift */; };
@@ -117,6 +118,7 @@
 		A200000000000000000000002 /* LocalAutocompleteProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalAutocompleteProvider.swift; sourceTree = "<group>"; };
 		A200000000000000000000003 /* ExecutableIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExecutableIndex.swift; sourceTree = "<group>"; };
 		A200000000000000000000004 /* CompletionRanker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionRanker.swift; sourceTree = "<group>"; };
+		A200000000000000000000005 /* ProjectContextProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectContextProvider.swift; sourceTree = "<group>"; };
 		B200000000000000000000001 /* FocusCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusCoordinator.swift; sourceTree = "<group>"; };
 		B200000000000000000000002 /* PTYGenerationGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PTYGenerationGate.swift; sourceTree = "<group>"; };
 		B200000000000000000000003 /* TerminalInteractionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalInteractionController.swift; sourceTree = "<group>"; };
@@ -196,6 +198,7 @@
 				A200000000000000000000002 /* LocalAutocompleteProvider.swift */,
 				A200000000000000000000003 /* ExecutableIndex.swift */,
 				A200000000000000000000004 /* CompletionRanker.swift */,
+				A200000000000000000000005 /* ProjectContextProvider.swift */,
 			);
 			path = Autocomplete;
 			sourceTree = "<group>";
@@ -416,6 +419,7 @@
 				A10000000000000000000002 /* LocalAutocompleteProvider.swift in Sources */,
 				A10000000000000000000003 /* ExecutableIndex.swift in Sources */,
 				A10000000000000000000004 /* CompletionRanker.swift in Sources */,
+				A10000000000000000000005 /* ProjectContextProvider.swift in Sources */,
 				B10000000000000000000001 /* FocusCoordinator.swift in Sources */,
 				B10000000000000000000002 /* PTYGenerationGate.swift in Sources */,
 				B10000000000000000000005 /* PTYController.swift in Sources */,

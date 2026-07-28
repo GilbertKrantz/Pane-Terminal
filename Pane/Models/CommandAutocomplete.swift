@@ -13,6 +13,7 @@ struct CommandAutocompleteSuggestion: Identifiable, Equatable, Hashable, Sendabl
         case builtIn
         case executable
         case fileSystem
+        case projectScript
     }
 
     let text: String

@@ -18,7 +18,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Verify pinned Xcode
         run: |
@@ -27,7 +27,7 @@ jobs:
           swift --version
 
       - name: Cache SwiftPM
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             .build
@@ -50,7 +50,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Verify pinned Xcode
         run: |
@@ -58,7 +58,7 @@ jobs:
           xcodebuild -version
 
       - name: Cache Xcode dependencies and build data
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             .ci/DerivedData
@@ -83,7 +83,7 @@ jobs:
 
       - name: Upload test result bundle
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: Pane-xcresult
           path: .ci/PaneTests.xcresult
