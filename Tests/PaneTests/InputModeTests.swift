@@ -21,6 +21,45 @@ final class InputModeTests: XCTestCase {
 }
 
 extension InputModeTests {
+    func testModeSwitcherPresentationRestoresSliderGeometry() {
+        XCTAssertEqual(ModeSwitcherPresentation.segmentWidth, 76)
+        XCTAssertEqual(ModeSwitcherPresentation.segmentHeight, 26)
+        XCTAssertEqual(ModeSwitcherPresentation.trackInset, 3)
+        XCTAssertEqual(
+            (ModeSwitcherPresentation.segmentWidth * 2)
+                + (ModeSwitcherPresentation.trackInset * 2),
+            158
+        )
+    }
+
+    func testModeSwitcherPresentationRespectsReducedMotion() {
+        XCTAssertTrue(
+            ModeSwitcherPresentation.shouldAnimateSelection(reduceMotion: false)
+        )
+        XCTAssertFalse(
+            ModeSwitcherPresentation.shouldAnimateSelection(reduceMotion: true)
+        )
+    }
+
+    func testModeSwitcherPresentationExposesSelectionToAccessibility() {
+        XCTAssertEqual(
+            ModeSwitcherPresentation.accessibilityValue(
+                for: .blocks,
+                selection: .blocks
+            ),
+            "Selected"
+        )
+        XCTAssertEqual(
+            ModeSwitcherPresentation.accessibilityValue(
+                for: .terminal,
+                selection: .blocks
+            ),
+            "Not selected"
+        )
+    }
+}
+
+extension InputModeTests {
     func testForegroundSnapshotRecognizesInteractivePrograms() {
         let snapshot = ForegroundProcessSnapshot(
             processGroupID: 42,

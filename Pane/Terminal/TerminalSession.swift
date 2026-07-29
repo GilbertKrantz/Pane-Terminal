@@ -70,6 +70,8 @@ final class TerminalSession: NSObject, ObservableObject {
     @Published var commandDraft = ""
     @Published var blockSearchText = ""
     @Published var blockSearchFilter: BlockSearchFilter = .all
+    @Published private(set) var isBlockSearchPresented = false
+    @Published private(set) var blockSearchFocusGeneration: UInt64 = 0
     @Published private(set) var sessionBoundaries: [UUID: SessionBoundary] = [:]
     @Published private(set) var restoredSessionOrder: [UUID] = []
     @Published private(set) var newShellBoundary: NewShellBoundary?
@@ -77,6 +79,8 @@ final class TerminalSession: NSObject, ObservableObject {
     @Published var isRestartConfirmationPresented = false
     @Published private(set) var lastShellRestartAt: Date?
     @Published private(set) var focusTarget: PaneFocusTarget = .none
+    private var focusBeforeSearch: PaneFocusTarget = .none
+    private var modeBeforeSearch: InputMode?
     @Published private(set) var isRestartInProgress = false
     @Published private(set) var isShuttingDown = false
     @Published private(set) var shellReadiness: ShellReadiness = .starting
@@ -140,6 +144,10 @@ final class TerminalSession: NSObject, ObservableObject {
     var visibleBlocks: [CommandBlock] {
         let query = BlockSearchQuery(text: blockSearchText, filter: blockSearchFilter)
         return blockTimeline.blocks.filter(query.matches)
+    }
+
+    var blockSearchMatches: [CommandBlock] {
+        visibleBlocks.filter(\.isFinalized)
     }
 
     var selectedBlock: CommandBlock? {
@@ -846,6 +854,47 @@ final class TerminalSession: NSObject, ObservableObject {
 
     func selectPreviousSearchMatch() {
         moveSearchSelection(by: -1)
+    }
+
+    func presentBlockSearch() {
+        if !isBlockSearchPresented {
+            focusBeforeSearch = focusTarget
+            modeBeforeSearch = mode
+            if mode == .terminal {
+                setMode(.blocks)
+            }
+        }
+        isBlockSearchPresented = true
+        ensureBlockSearchSelection()
+        // Searching temporarily owns AppKit focus. Advancing the shared
+        // generation prevents a delayed composer or terminal remount callback
+        // from stealing it while the field is active.
+        requestFocus(.none)
+        blockSearchFocusGeneration &+= 1
+    }
+
+    func dismissBlockSearch() {
+        guard isBlockSearchPresented else { return }
+        isBlockSearchPresented = false
+        let priorMode = modeBeforeSearch
+        modeBeforeSearch = nil
+        if priorMode == .terminal, isShellReadyForInput {
+            setMode(.terminal)
+        } else {
+            requestFocus(focusBeforeSearch == .none ? .composer : focusBeforeSearch)
+        }
+    }
+
+    func ensureBlockSearchSelection() {
+        guard isBlockSearchPresented else { return }
+        let matches = blockSearchMatches
+        guard !matches.isEmpty else {
+            selectedBlockID = nil
+            return
+        }
+        if !matches.contains(where: { $0.id == selectedBlockID }) {
+            selectedBlockID = matches[0].id
+        }
     }
 
     func removeBlock(id: UUID) {

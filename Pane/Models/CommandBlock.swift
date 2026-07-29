@@ -110,12 +110,115 @@ struct CommandBlock: Identifiable, Equatable, Sendable {
         return false
     }
 
+    var isFinalized: Bool {
+        switch state {
+        case .completed, .interrupted, .unknown:
+            return true
+        case .queued, .running:
+            return false
+        }
+    }
+
+    func presentation(
+        homeDirectory: String = FileManager.default.homeDirectoryForCurrentUser.path
+    ) -> BlockPresentationModel {
+        let directoryLabel: String
+        if workingDirectory == homeDirectory {
+            directoryLabel = "~"
+        } else if workingDirectory.hasPrefix(homeDirectory + "/") {
+            directoryLabel = "~" + workingDirectory.dropFirst(homeDirectory.count)
+        } else {
+            directoryLabel = workingDirectory
+        }
+        return BlockPresentationModel(
+            status: BlockStatusPresentation(state: state, durationLabel: statusText),
+            directoryLabel: directoryLabel
+        )
+    }
+
     private static func formatDuration(_ duration: TimeInterval) -> String {
         if duration < 1 {
             return "\(max(1, Int((duration * 1_000).rounded()))) ms"
         }
         return String(format: "%.1f s", duration)
     }
+}
+
+enum BlockStatusPresentation: Equatable, Sendable {
+    case success
+    case failure(exitCode: Int32)
+    case interrupted(exitCode: Int32?)
+    case queued
+    case running(durationLabel: String)
+    case unknown
+
+    init(state: CommandBlock.ExecutionState, durationLabel: String) {
+        switch state {
+        case .completed(exitCode: 0):
+            self = .success
+        case .completed(let exitCode):
+            self = .failure(exitCode: exitCode)
+        case .interrupted(let exitCode):
+            self = .interrupted(exitCode: exitCode)
+        case .queued:
+            self = .queued
+        case .running:
+            self = .running(durationLabel: durationLabel)
+        case .unknown:
+            self = .unknown
+        }
+    }
+
+    var compactLabel: String? {
+        switch self {
+        case .success:
+            return nil
+        case .failure(let exitCode):
+            return "Failed · Exit \(exitCode)"
+        case .interrupted(let exitCode):
+            return exitCode.map { "Interrupted · Exit \($0)" } ?? "Interrupted"
+        case .queued:
+            return "Queued"
+        case .running(let durationLabel):
+            return durationLabel
+        case .unknown:
+            return "Unknown"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .success: return "checkmark"
+        case .failure: return "xmark"
+        case .interrupted: return "stop"
+        case .queued: return "clock"
+        case .running: return "circle.dotted"
+        case .unknown: return "questionmark.circle"
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .success:
+            return "Command succeeded"
+        case .failure(let exitCode):
+            return "Command failed with exit code \(exitCode)"
+        case .interrupted(let exitCode):
+            return exitCode.map { "Command interrupted with exit code \($0)" }
+                ?? "Command interrupted"
+        case .queued:
+            return "Command queued"
+        case .running:
+            return "Command running"
+        case .unknown:
+            return "Command status unknown"
+        }
+    }
+}
+
+struct BlockPresentationModel: Equatable, Sendable {
+    let status: BlockStatusPresentation
+    let directoryLabel: String
 }
 
 struct CommandBlockTimeline: Equatable, Sendable {
@@ -306,9 +409,10 @@ struct CommandBlockTimeline: Equatable, Sendable {
 
 enum BlockSearchFilter: String, CaseIterable, Sendable {
     case all = "All"
-    case failed = "Failed"
-    case interrupted = "Interrupted"
-    case unknown = "Unknown"
+    case commands = "Commands"
+    case output = "Output"
+    case directories = "Directories"
+    case status = "Status"
 }
 
 struct BlockSearchQuery: Equatable, Sendable {
@@ -316,21 +420,16 @@ struct BlockSearchQuery: Equatable, Sendable {
     var filter: BlockSearchFilter = .all
 
     func matches(_ block: CommandBlock) -> Bool {
-        let statusMatches: Bool
-        switch filter {
-        case .all:
-            statusMatches = true
-        case .failed:
-            statusMatches = block.failed
-        case .interrupted:
-            if case .interrupted = block.state { statusMatches = true } else { statusMatches = false }
-        case .unknown:
-            if case .unknown = block.state { statusMatches = true } else { statusMatches = false }
-        }
-        guard statusMatches else { return false }
         let needle = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !needle.isEmpty else { return true }
-        return [block.command, block.output, block.workingDirectory, block.statusText]
-            .contains { $0.localizedCaseInsensitiveContains(needle) }
+        let fields: [String]
+        switch filter {
+        case .all: fields = [block.command, block.output, block.workingDirectory, block.statusText]
+        case .commands: fields = [block.command]
+        case .output: fields = [block.output]
+        case .directories: fields = [block.workingDirectory]
+        case .status: fields = [block.statusText]
+        }
+        return fields.contains { $0.localizedCaseInsensitiveContains(needle) }
     }
 }

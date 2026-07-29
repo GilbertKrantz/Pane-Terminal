@@ -218,6 +218,11 @@ private struct TerminalCommands: Commands {
         }
         CommandMenu("Terminal") {
             if let session {
+            Button("Find in Command History") {
+                session.presentBlockSearch()
+            }
+            .keyboardShortcut("f", modifiers: [.command])
+
             Button("Focus Composer") {
                 session.focusComposer()
             }

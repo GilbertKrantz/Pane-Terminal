@@ -17,6 +17,10 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if session.isBlockSearchPresented {
+                BlockSearchBar(session: session)
+            }
+
             workspaceContent
 
             if session.mode == .blocks && !session.shouldPresentExpandedAuthoritativeTerminal {
@@ -120,9 +124,9 @@ struct ContentView: View {
                     .frame(width: 30, height: 30)
                     .glassEffect(.regular.interactive(), in: Circle())
             }
-            // Tahoe gives every custom toolbar item a shared glass capsule by
-            // default. These controls provide their own intentional hierarchy,
-            // so hiding that automatic layer prevents the nested-pill effect.
+            // Each control owns its intended surface. Suppressing Tahoe's
+            // shared capsule keeps status plain and preserves native group and
+            // trailing-edge spacing around the slider and overflow button.
             .sharedBackgroundVisibility(.hidden)
         } else {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -213,13 +217,13 @@ struct ContentView: View {
     private var shellStatusColor: Color {
         switch session.shellReadiness {
         case .starting, .initializing:
-            return .orange
+            return .secondary
         case .stopped:
             return .red
         case .ready:
             break
         }
-        if session.blockTimeline.activeBlockID != nil { return .yellow }
+        if session.blockTimeline.activeBlockID != nil { return .accentColor }
         return .secondary
     }
 
@@ -394,7 +398,7 @@ private struct ModeSwitcher: View {
 
     var body: some View {
         if #available(macOS 26.0, *) {
-            liquidGlassSwitcher
+            slidingSwitcher
         } else {
             Picker("Input mode", selection: $selection) {
                 ForEach(InputMode.allCases, id: \.self) { mode in
@@ -404,24 +408,31 @@ private struct ModeSwitcher: View {
             .labelsHidden()
             .pickerStyle(.segmented)
             .controlSize(.small)
-            .frame(width: 150)
-            .help("Switch between structured Blocks and direct Terminal input")
+            .frame(width: ModeSwitcherPresentation.fallbackWidth)
+            .help(ModeSwitcherPresentation.help)
         }
     }
 
     @available(macOS 26.0, *)
-    private var liquidGlassSwitcher: some View {
+    private var slidingSwitcher: some View {
         HStack(spacing: 0) {
             ForEach(InputMode.allCases, id: \.self) { mode in
                 Button {
-                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.24)) {
+                    withAnimation(
+                        ModeSwitcherPresentation.shouldAnimateSelection(reduceMotion: reduceMotion)
+                            ? .snappy(duration: 0.24)
+                            : nil
+                    ) {
                         selection = mode
                     }
                 } label: {
                     Text(mode.shortTitle)
                         .font(.callout.weight(selection == mode ? .semibold : .medium))
                         .foregroundStyle(selection == mode ? .primary : .secondary)
-                        .frame(width: 76, height: 26)
+                        .frame(
+                            width: ModeSwitcherPresentation.segmentWidth,
+                            height: ModeSwitcherPresentation.segmentHeight
+                        )
                         .background {
                             if selection == mode {
                                 Capsule()
@@ -436,12 +447,17 @@ private struct ModeSwitcher: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(mode.title)
-                .accessibilityValue(selection == mode ? "Selected" : "Not selected")
+                .accessibilityValue(
+                    ModeSwitcherPresentation.accessibilityValue(
+                        for: mode,
+                        selection: selection
+                    )
+                )
             }
         }
-        .padding(3)
+        .padding(ModeSwitcherPresentation.trackInset)
         .glassEffect(.regular.interactive(), in: Capsule())
-        .help("Switch between structured Blocks and direct Terminal input")
+        .help(ModeSwitcherPresentation.help)
         .accessibilityElement(children: .contain)
     }
 
@@ -453,9 +469,26 @@ private struct ModeSwitcher: View {
     }
 }
 
+struct ModeSwitcherPresentation {
+    static let segmentWidth: CGFloat = 76
+    static let segmentHeight: CGFloat = 26
+    static let trackInset: CGFloat = 3
+    static let fallbackWidth: CGFloat = 150
+    static let help = "Switch between structured Blocks and direct Terminal input"
+
+    static func shouldAnimateSelection(reduceMotion: Bool) -> Bool {
+        !reduceMotion
+    }
+
+    static func accessibilityValue(for mode: InputMode, selection: InputMode) -> String {
+        mode == selection ? "Selected" : "Not selected"
+    }
+}
+
 private struct TerminalActionsMenu: View {
     @ObservedObject var session: TerminalSession
     let dismiss: () -> Void
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
         VStack(spacing: 1) {
@@ -501,8 +534,13 @@ private struct TerminalActionsMenu: View {
         .padding(5)
         .frame(width: 188)
         .background {
-            MenuMaterialBackground()
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            if reduceTransparency {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(PaneTheme.blockBackground)
+            } else {
+                MenuMaterialBackground()
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
         }
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)

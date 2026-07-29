@@ -144,8 +144,11 @@ final class CommandBlockTimelineTests: XCTestCase {
 
         XCTAssertTrue(BlockSearchQuery(text: "tests passed").matches(successful))
         XCTAssertTrue(BlockSearchQuery(text: "pane").matches(successful))
-        XCTAssertTrue(BlockSearchQuery(text: "", filter: .failed).matches(failed))
-        XCTAssertFalse(BlockSearchQuery(text: "", filter: .failed).matches(successful))
+        XCTAssertTrue(BlockSearchQuery(text: "npm", filter: .commands).matches(failed))
+        XCTAssertFalse(BlockSearchQuery(text: "Assertion", filter: .commands).matches(failed))
+        XCTAssertTrue(BlockSearchQuery(text: "Assertion", filter: .output).matches(failed))
+        XCTAssertTrue(BlockSearchQuery(text: "Web", filter: .directories).matches(failed))
+        XCTAssertTrue(BlockSearchQuery(text: "Exit 1", filter: .status).matches(failed))
     }
 
     func testCompletionStatusLabelsAreHonest() {
@@ -155,13 +158,34 @@ final class CommandBlockTimelineTests: XCTestCase {
         XCTAssertEqual(CommandBlock(command: "legacy", workingDirectory: "/tmp", state: .unknown).statusText, "Completion unknown")
     }
 
-    func testUnknownCompletionSearchIsIndependentFromInterrupted() {
+    func testStatusScopeSearchesOnlyStatusPresentation() {
         let unknown = CommandBlock(command: "legacy", workingDirectory: "/tmp", state: .unknown)
         let interrupted = CommandBlock(command: "sleep", workingDirectory: "/tmp", state: .interrupted(exitCode: nil))
 
-        XCTAssertTrue(BlockSearchQuery(text: "", filter: .unknown).matches(unknown))
-        XCTAssertFalse(BlockSearchQuery(text: "", filter: .unknown).matches(interrupted))
-        XCTAssertTrue(BlockSearchQuery(text: "", filter: .interrupted).matches(interrupted))
+        XCTAssertTrue(BlockSearchQuery(text: "unknown", filter: .status).matches(unknown))
+        XCTAssertFalse(BlockSearchQuery(text: "unknown", filter: .status).matches(interrupted))
+        XCTAssertTrue(BlockSearchQuery(text: "interrupted", filter: .status).matches(interrupted))
+    }
+
+    func testBlockPresentationKeepsSuccessQuietAndFailureExplicit() {
+        let success = CommandBlock(
+            command: "true",
+            workingDirectory: FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Projects/Pane").path,
+            state: .completed(exitCode: 0)
+        ).presentation()
+        let failure = CommandBlock(
+            command: "false",
+            workingDirectory: "/tmp",
+            state: .completed(exitCode: 7)
+        ).presentation()
+
+        XCTAssertNil(success.status.compactLabel)
+        XCTAssertEqual(success.status.symbolName, "checkmark")
+        XCTAssertEqual(success.status.accessibilityLabel, "Command succeeded")
+        XCTAssertEqual(success.directoryLabel, "~/Projects/Pane")
+        XCTAssertEqual(failure.status.compactLabel, "Failed · Exit 7")
+        XCTAssertEqual(failure.status.accessibilityLabel, "Command failed with exit code 7")
     }
 
     func testRestoredCollapsedStateIsPreserved() throws {

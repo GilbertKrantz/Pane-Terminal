@@ -16,6 +16,39 @@ enum TabActivityState: String, Codable, Equatable, Sendable {
     case idle, running, waitingForInput, secureInput, alternateScreen, exited, failed
 }
 
+enum TabActivityIndicator: Equatable, Sendable {
+    case dot
+    case symbol(String)
+}
+
+enum TabActivityColorRole: Equatable, Sendable {
+    case muted
+    case accent
+    case failure
+}
+
+struct TabActivityPresentation: Equatable, Sendable {
+    let indicator: TabActivityIndicator
+    let colorRole: TabActivityColorRole
+    let indicatorSize: CGFloat
+    let animates: Bool
+    let tooltip: String
+    let accessibilityLabel: String
+}
+
+enum TabTitleTruncation: Equatable, Sendable {
+    case middle, tail
+}
+
+struct TabPresentationModel: Equatable, Sendable {
+    let title: String
+    let tooltip: String
+    let accessibilityLabel: String
+    let activity: TabActivityPresentation
+    let truncation: TabTitleTruncation
+    let isSelected: Bool
+}
+
 enum TabStartupState: Equatable, Sendable {
     case creating, startingShell, ready, failed(String)
 }
@@ -165,6 +198,18 @@ final class TerminalTab: ObservableObject, Identifiable {
         )
     }
 
+    func presentation(isSelected: Bool, index: Int, count: Int) -> TabPresentationModel {
+        let activity = activityState.presentation(hasUnreadActivity: hasUnreadActivity)
+        return TabPresentationModel(
+            title: title,
+            tooltip: "\(title)\n\(currentDirectory.path)\n\(session.activeProcessLabel) · \(activity.tooltip)",
+            accessibilityLabel: "\(isSelected ? "Selected tab" : "Tab \(index + 1) of \(count)"), \(title), \(activity.accessibilityLabel)",
+            activity: activity,
+            truncation: title.contains("@") ? .middle : .tail,
+            isSelected: isSelected
+        )
+    }
+
     func rename(_ value: String) {
         guard let value = Self.sanitize(value) else { return }
         title = value
@@ -192,11 +237,13 @@ final class TerminalTab: ObservableObject, Identifiable {
         if titleSource != .custom { refreshAutomaticTitle() }
         if session.isShuttingDown { return }
         if !session.isShellRunning && session.shellReadiness == .stopped {
-            activityState = .exited
+            activityState = session.shellExitStatus.map { $0 == 0 ? .exited : .failed } ?? .exited
         } else if session.isSecureInputActive {
             activityState = .secureInput
         } else if session.isAlternateScreenActive {
             activityState = .alternateScreen
+        } else if session.inputRequirement == .direct {
+            activityState = .waitingForInput
         } else if session.hasActiveWork {
             activityState = .running
         } else {
@@ -209,10 +256,15 @@ final class TerminalTab: ObservableObject, Identifiable {
     private func refreshAutomaticTitle() {
         let candidate: String
         if session.hasActiveWork, let process = session.foregroundProcessName { candidate = process }
-        else if session.terminalTitle != "Pane" { candidate = session.terminalTitle }
         else {
             let url = currentDirectory
-            candidate = url.path == FileManager.default.homeDirectoryForCurrentUser.path ? "Home" : (url.lastPathComponent.isEmpty ? "/" : url.lastPathComponent)
+            if url.path != FileManager.default.homeDirectoryForCurrentUser.path {
+                candidate = url.lastPathComponent.isEmpty ? "/" : url.lastPathComponent
+            } else if session.terminalTitle != "Pane" {
+                candidate = session.terminalTitle
+            } else {
+                candidate = "Home"
+            }
         }
         if let sanitized = Self.sanitize(candidate) { title = sanitized }
     }
@@ -232,6 +284,78 @@ final class TerminalTab: ObservableObject, Identifiable {
         guard metadata != lastObservedRestorationMetadata else { return }
         lastObservedRestorationMetadata = metadata
         onRestorationMetadataChange?()
+    }
+}
+
+extension TabActivityState {
+    func presentation(hasUnreadActivity: Bool) -> TabActivityPresentation {
+        let base: TabActivityPresentation
+        switch self {
+        case .idle:
+            base = TabActivityPresentation(
+                indicator: .dot,
+                colorRole: hasUnreadActivity ? .accent : .muted,
+                indicatorSize: 5,
+                animates: false,
+                tooltip: hasUnreadActivity ? "unread activity" : "idle",
+                accessibilityLabel: hasUnreadActivity ? "Unread activity" : "Idle"
+            )
+        case .running:
+            base = TabActivityPresentation(
+                indicator: .dot,
+                colorRole: .accent,
+                indicatorSize: 6,
+                animates: false,
+                tooltip: hasUnreadActivity ? "running · unread activity" : "running",
+                accessibilityLabel: hasUnreadActivity ? "Running, unread activity" : "Running"
+            )
+        case .waitingForInput:
+            base = TabActivityPresentation(
+                indicator: .symbol("keyboard"),
+                colorRole: .muted,
+                indicatorSize: 8,
+                animates: false,
+                tooltip: hasUnreadActivity ? "waiting for input · unread activity" : "waiting for input",
+                accessibilityLabel: hasUnreadActivity ? "Waiting for input, unread activity" : "Waiting for input"
+            )
+        case .secureInput:
+            base = TabActivityPresentation(
+                indicator: .symbol("lock.fill"),
+                colorRole: .muted,
+                indicatorSize: 8,
+                animates: false,
+                tooltip: "secure input",
+                accessibilityLabel: "Secure input"
+            )
+        case .alternateScreen:
+            base = TabActivityPresentation(
+                indicator: .dot,
+                colorRole: .accent,
+                indicatorSize: 6,
+                animates: false,
+                tooltip: hasUnreadActivity ? "alternate screen · unread activity" : "alternate screen",
+                accessibilityLabel: hasUnreadActivity ? "Alternate screen, unread activity" : "Alternate screen"
+            )
+        case .exited:
+            base = TabActivityPresentation(
+                indicator: .symbol("xmark.circle"),
+                colorRole: .failure,
+                indicatorSize: 8,
+                animates: false,
+                tooltip: "exited",
+                accessibilityLabel: "Exited"
+            )
+        case .failed:
+            base = TabActivityPresentation(
+                indicator: .symbol("exclamationmark.circle.fill"),
+                colorRole: .failure,
+                indicatorSize: 8,
+                animates: false,
+                tooltip: "failed",
+                accessibilityLabel: "Failed"
+            )
+        }
+        return base
     }
 }
 

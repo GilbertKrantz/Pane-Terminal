@@ -106,9 +106,24 @@ final class TerminalSessionIntegrationTests: XCTestCase {
         hostingView.layoutSubtreeIfNeeded()
 
         let textView = try XCTUnwrap(findTextView(in: hostingView))
+        let composerScrollView = try XCTUnwrap(textView.enclosingScrollView)
+        let composerFrame = composerScrollView.convert(
+            composerScrollView.bounds,
+            to: hostingView
+        )
         XCTAssertTrue(textView.isEditable)
         XCTAssertTrue(textView.isSelectable)
         XCTAssertGreaterThan(textView.bounds.width, 400)
+        XCTAssertEqual(composerScrollView.bounds.height, 32, accuracy: 1)
+        XCTAssertEqual(
+            composerFrame.minX,
+            PaneMetrics.contentTextColumn,
+            accuracy: 1
+        )
+        XCTAssertLessThan(
+            composerFrame.maxX,
+            hostingView.bounds.maxX - PaneMetrics.contentTextColumn
+        )
         XCTAssertTrue(window.makeFirstResponder(textView))
 
         textView.insertText("printf composer-ok", replacementRange: textView.selectedRange())
@@ -1594,6 +1609,52 @@ extension TerminalSessionIntegrationTests {
 
         XCTAssertNotEqual(session.focusGeneration, queuedGeneration)
         XCTAssertEqual(session.focusTarget, .composer)
+    }
+
+    @MainActor
+    func testSearchPresentationAdvancesFocusGenerationAndRestoresComposer() {
+        let session = TerminalSession()
+        defer { session.shutdown() }
+        session.requestFocus(.composer)
+        let composerGeneration = session.focusGeneration
+
+        session.presentBlockSearch()
+
+        XCTAssertTrue(session.isBlockSearchPresented)
+        XCTAssertEqual(session.focusTarget, .none)
+        XCTAssertGreaterThan(session.focusGeneration, composerGeneration)
+
+        session.dismissBlockSearch()
+
+        XCTAssertFalse(session.isBlockSearchPresented)
+        XCTAssertEqual(session.focusTarget, .composer)
+    }
+
+    @MainActor
+    func testSearchFromFullTerminalReturnsToAuthoritativeTerminal() async throws {
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+        try await waitUntil("shell readiness before Full Terminal search", timeout: 5) {
+            session.isShellReadyForInput
+        }
+        session.setMode(.terminal)
+        XCTAssertEqual(session.mode, .terminal)
+
+        session.presentBlockSearch()
+
+        XCTAssertTrue(session.isBlockSearchPresented)
+        XCTAssertEqual(session.mode, .blocks)
+        XCTAssertEqual(session.focusTarget, .none)
+
+        session.dismissBlockSearch()
+
+        XCTAssertFalse(session.isBlockSearchPresented)
+        XCTAssertEqual(session.mode, .terminal)
+        XCTAssertEqual(session.focusTarget, .authoritativeTerminal)
     }
 
     @MainActor

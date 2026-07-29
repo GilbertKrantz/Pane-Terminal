@@ -6,6 +6,9 @@ struct TerminalWorkspaceView: View {
     @State private var didRestore = false
     @State private var renamingTabID: UUID?
     @State private var renameDraft = ""
+    @State private var hoveredTabID: UUID?
+    @State private var isNewTabHovered = false
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     var body: some View {
         VStack(spacing: 0) {
@@ -82,43 +85,69 @@ struct TerminalWorkspaceView: View {
                     Task { await workspace.createTab() }
                 } label: {
                     Image(systemName: "plus")
+                        .foregroundStyle(.secondary)
                         .frame(width: 26, height: 26)
+                        .background(
+                            isNewTabHovered ? PaneTheme.hoveredTabBackground : .clear,
+                            in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        )
                 }
                 .buttonStyle(.plain)
                 .help("New Tab (⌘T)")
+                .onHover { isNewTabHovered = $0 }
                 if workspace.tabs.count > 1 {
                     overflowMenu
                 }
             }
             .padding(.trailing, 8)
         }
-        .frame(height: 38)
-        .background(.bar)
+        .frame(height: PaneMetrics.tabStripHeight)
+        .background(PaneTheme.tabStripBackground)
     }
 
     private func tabButton(_ tab: TerminalTab, index: Int) -> some View {
-        HStack(spacing: 7) {
-            Circle()
-                .fill(indicatorColor(tab))
-                .frame(width: 6, height: 6)
-            Text(tab.title)
+        let presentation = tab.presentation(
+            isSelected: workspace.selectedTabID == tab.id,
+            index: index,
+            count: workspace.tabs.count
+        )
+        return HStack(spacing: 7) {
+            tabActivityIndicator(presentation.activity)
+            Text(presentation.title)
+                .font(.system(.body, design: .default, weight: presentation.isSelected ? .medium : .regular))
                 .lineLimit(1)
+                .truncationMode(presentation.truncation == .middle ? .middle : .tail)
                 .frame(minWidth: 70, maxWidth: 190, alignment: .leading)
             Button {
                 Task { await workspace.closeTab(id: tab.id, policy: .requestUserConfirmation) }
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 9, weight: .bold))
+                    .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Close \(tab.title)")
         }
         .padding(.horizontal, 10)
-        .frame(minWidth: 120, idealWidth: 190, maxWidth: 280, minHeight: 30)
-        .background(workspace.selectedTabID == tab.id ? Color.accentColor.opacity(0.16) : Color.clear,
-                    in: RoundedRectangle(cornerRadius: 7))
+        .frame(minWidth: 108, idealWidth: 164, maxWidth: 220, minHeight: 28)
+        .background(
+            presentation.isSelected
+                ? PaneTheme.selectedTabBackground(increasedContrast: colorSchemeContrast == .increased)
+                : (hoveredTabID == tab.id ? PaneTheme.hoveredTabBackground : .clear),
+            in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+        )
+        .overlay {
+            if presentation.isSelected {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(
+                        PaneTheme.selectedTabBorder(increasedContrast: colorSchemeContrast == .increased),
+                        lineWidth: colorSchemeContrast == .increased ? 1 : 0.5
+                    )
+            }
+        }
         .contentShape(Rectangle())
         .onTapGesture { workspace.selectTab(id: tab.id) }
+        .onHover { hoveredTabID = $0 ? tab.id : nil }
         .draggable(tab.id.uuidString)
         .dropDestination(for: String.self) { items, _ in
             guard let rawID = items.first,
@@ -127,9 +156,12 @@ struct TerminalWorkspaceView: View {
             workspace.moveTab(id: draggedID, to: index)
             return true
         }
-        .help("\(tab.currentDirectory.path) — \(tab.session.activeProcessLabel)")
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Tab \(index + 1) of \(workspace.tabs.count), \(tab.title), \(tab.activityState.rawValue)")
+        .help(presentation.tooltip)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(presentation.accessibilityLabel)
+        .accessibilityAddTraits(
+            presentation.isSelected ? [.isButton, .isSelected] : .isButton
+        )
         .contextMenu {
             Button("New Tab") { Task { await workspace.createTab() } }
             Button("Duplicate Tab") { Task { await workspace.duplicateTab(id: tab.id) } }
@@ -147,6 +179,22 @@ struct TerminalWorkspaceView: View {
             }
             Divider()
             Button("Close Tab") { Task { await workspace.closeTab(id: tab.id, policy: .requestUserConfirmation) } }
+        }
+    }
+
+    @ViewBuilder
+    private func tabActivityIndicator(_ activity: TabActivityPresentation) -> some View {
+        switch activity.indicator {
+        case .dot:
+            Circle()
+                .fill(activityColor(activity.colorRole))
+                .frame(width: activity.indicatorSize, height: activity.indicatorSize)
+                .frame(width: 8, height: 8)
+        case .symbol(let name):
+            Image(systemName: name)
+                .font(.system(size: activity.indicatorSize, weight: .semibold))
+                .foregroundStyle(activityColor(activity.colorRole))
+                .frame(width: 8, height: 8)
         }
     }
 
@@ -179,14 +227,11 @@ struct TerminalWorkspaceView: View {
         renamingTabID = tab.id
     }
 
-    private func indicatorColor(_ tab: TerminalTab) -> Color {
-        if tab.hasUnreadActivity { return .blue }
-        switch tab.activityState {
-        case .idle: return .secondary
-        case .running, .waitingForInput: return .orange
-        case .secureInput: return .purple
-        case .alternateScreen: return .cyan
-        case .exited, .failed: return .red
+    private func activityColor(_ role: TabActivityColorRole) -> Color {
+        switch role {
+        case .muted: return .secondary
+        case .accent: return .accentColor
+        case .failure: return .red
         }
     }
 

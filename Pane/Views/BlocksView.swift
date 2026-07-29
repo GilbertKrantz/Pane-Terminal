@@ -2,6 +2,7 @@ import SwiftUI
 
 struct BlocksView: View {
     @ObservedObject var session: TerminalSession
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private enum TimelineAnchor: Hashable {
         case bottom
@@ -28,7 +29,6 @@ struct BlocksView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            BlockSearchBar(session: session, matchCount: finalizedBlocks.count)
             if let restartedAt = session.lastShellRestartAt {
                 let restartDirectory = session.currentDirectory ?? "home directory"
                 Label(
@@ -39,14 +39,12 @@ struct BlocksView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, PaneMetrics.blockOuterInset + PaneMetrics.blockInnerInset)
-                .padding(.vertical, 6)
-                .background(PaneTheme.subtleControlFill)
+                .frame(minHeight: PaneMetrics.systemEventHeight)
+                .accessibilityLabel("Shell restarted at \(restartedAt.formatted(date: .omitted, time: .shortened)), \(restartDirectory)")
             }
-            Divider().overlay(PaneTheme.separator.opacity(0.5))
-
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: 4) {
+                    LazyVStack(spacing: PaneMetrics.blockVerticalSpacing) {
                         ForEach(session.restoredSessionOrder, id: \.self) { sessionID in
                             if let boundary = session.sessionBoundaries[sessionID] {
                                 SessionBoundaryView(boundary: boundary)
@@ -81,7 +79,7 @@ struct BlocksView: View {
                 }
                 .onChange(of: session.selectedBlockID) { _, selectedID in
                     guard let selectedID else { return }
-                    withAnimation(.easeOut(duration: 0.16)) {
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
                         proxy.scrollTo(selectedID, anchor: .center)
                     }
                 }
@@ -99,7 +97,7 @@ struct BlocksView: View {
         // the following pass so newly wrapped output cannot leave the viewport
         // slightly above the true bottom.
         DispatchQueue.main.async {
-            withAnimation(.easeOut(duration: 0.16)) {
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
                 proxy.scrollTo(TimelineAnchor.bottom, anchor: .bottom)
             }
             DispatchQueue.main.async {
@@ -144,42 +142,61 @@ struct BlocksView: View {
     }
 }
 
-private struct BlockSearchBar: View {
+struct BlockSearchBar: View {
     @ObservedObject var session: TerminalSession
-    let matchCount: Int
+    @FocusState private var isSearchFocused: Bool
+
+    private var matches: [CommandBlock] {
+        session.blockSearchMatches
+    }
+
+    private var currentMatch: Int {
+        guard let selected = session.selectedBlockID,
+              let index = matches.firstIndex(where: { $0.id == selected }) else { return matches.isEmpty ? 0 : 1 }
+        return index + 1
+    }
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
             TextField("Search commands, output, directories, and status", text: $session.blockSearchText)
                 .textFieldStyle(.plain)
-            Picker("Filter", selection: $session.blockSearchFilter) {
+                .focused($isSearchFocused)
+                .onKeyPress(phases: .down) { press in
+                    guard press.key == .return else { return .ignored }
+                    if press.modifiers.contains(.shift) {
+                        session.selectPreviousSearchMatch()
+                    } else {
+                        session.selectNextSearchMatch()
+                    }
+                    return .handled
+                }
+            Picker("Search scope", selection: $session.blockSearchFilter) {
                 ForEach(BlockSearchFilter.allCases, id: \.self) { filter in
                     Text(filter.rawValue).tag(filter)
                 }
             }
             .labelsHidden()
-            .frame(width: 112)
-            Text("\(matchCount)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            .frame(width: 104)
+            Text("\(currentMatch) / \(matches.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                .accessibilityLabel("Search result \(currentMatch) of \(matches.count)")
             Button { session.selectPreviousSearchMatch() } label: { Image(systemName: "chevron.up") }
-                .buttonStyle(.borderless).help("Previous match")
+                .buttonStyle(.borderless).help("Previous match (Shift-Return)").disabled(matches.isEmpty)
             Button { session.selectNextSearchMatch() } label: { Image(systemName: "chevron.down") }
-                .buttonStyle(.borderless).help("Next match")
-            Menu {
-                Button("Collapse All Completed") { session.setAllCompletedBlocksCollapsed(true) }
-                Button("Expand All Matches") {
-                    for block in session.visibleBlocks where block.isCollapsed {
-                        session.toggleBlockCollapsed(id: block.id)
-                    }
-                }
-            } label: { Image(systemName: "rectangle.compress.vertical") }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
+                .buttonStyle(.borderless).help("Next match (Return)").disabled(matches.isEmpty)
+            Button { session.dismissBlockSearch() } label: { Image(systemName: "xmark") }
+                .buttonStyle(.borderless).help("Close Search (Escape)").accessibilityLabel("Close Search")
         }
         .controlSize(.small)
         .padding(.horizontal, PaneMetrics.blockOuterInset + PaneMetrics.blockInnerInset)
-        .padding(.vertical, 7)
+        .frame(height: PaneMetrics.searchRowHeight)
         .background(PaneTheme.contentSurface)
+        .overlay(alignment: .bottom) { Divider() }
+        .onAppear { isSearchFocused = true }
+        .onChange(of: session.blockSearchFocusGeneration) { _, _ in isSearchFocused = true }
+        .onChange(of: session.blockSearchText) { _, _ in session.ensureBlockSearchSelection() }
+        .onChange(of: session.blockSearchFilter) { _, _ in session.ensureBlockSearchSelection() }
+        .onExitCommand { session.dismissBlockSearch() }
     }
 }
 
@@ -187,17 +204,17 @@ private struct SessionBoundaryView: View {
     let boundary: TerminalSession.SessionBoundary
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Label(boundary.lifecycle == .interrupted ? "Previous session · Interrupted" : "Previous session · Closed normally", systemImage: boundary.lifecycle == .interrupted ? "exclamationmark.triangle" : "clock.arrow.circlepath")
-                .font(.caption.weight(.semibold))
-            Text("Last active \(boundary.lastActiveAt.formatted(date: .abbreviated, time: .shortened))")
-                .font(.caption).foregroundStyle(.secondary)
-            Text("\(displayDirectory) · \(URL(fileURLWithPath: boundary.shell).lastPathComponent)")
-                .font(.caption).foregroundStyle(.secondary)
+        HStack(spacing: 7) {
+            Image(systemName: boundary.lifecycle == .interrupted ? "exclamationmark.triangle" : "clock.arrow.circlepath")
+            Text(boundary.lifecycle == .interrupted ? "Previous session interrupted" : "Previous session closed")
+            Text("· \(boundary.lastActiveAt.formatted(date: .abbreviated, time: .shortened)) · \(displayDirectory)")
+                .foregroundStyle(.tertiary)
         }
+        .font(.caption)
+        .foregroundStyle(.secondary)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(PaneTheme.subtleControlFill, in: RoundedRectangle(cornerRadius: 9))
+        .frame(minHeight: PaneMetrics.systemEventHeight)
+        .padding(.horizontal, PaneMetrics.blockInnerInset)
         .accessibilityElement(children: .combine)
     }
 
@@ -211,22 +228,21 @@ private struct NewShellBoundaryView: View {
     let boundary: TerminalSession.NewShellBoundary
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Label("New shell started", systemImage: "terminal")
-                .font(.caption.weight(.semibold))
-            Text(displayDirectory)
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
+        HStack(spacing: 7) {
+            Image(systemName: "terminal")
+            Text("New shell started")
+            Text("· \(displayDirectory)").font(.caption.monospaced()).foregroundStyle(.tertiary)
             if boundary.previousDirectoryUnavailable {
-                Text("Previous directory is unavailable")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Text("· Previous directory unavailable").foregroundStyle(.secondary)
             }
         }
+        .font(.caption)
+        .foregroundStyle(.secondary)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(PaneTheme.subtleControlFill, in: RoundedRectangle(cornerRadius: 9))
+        .frame(minHeight: PaneMetrics.systemEventHeight)
+        .padding(.horizontal, PaneMetrics.blockInnerInset)
         .accessibilityElement(children: .combine)
+        .accessibilityLabel("New shell started, \(displayDirectory)")
     }
 
     private var displayDirectory: String {
@@ -297,7 +313,7 @@ struct AuthoritativeInputCommandView: View {
         )
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Color.accentColor.opacity(0.7), lineWidth: 1)
+                .strokeBorder(PaneTheme.separator.opacity(0.75), lineWidth: 0.5)
         }
         .padding(.horizontal, PaneMetrics.blockOuterInset)
         .padding(.vertical, 8)

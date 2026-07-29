@@ -3,8 +3,6 @@ import SwiftUI
 
 struct CommandComposerView: View {
     @ObservedObject var session: TerminalSession
-    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var isFocused = false
     @State private var editorHeight: CGFloat = 32
     @State private var caretUTF16Offset = 0
@@ -55,32 +53,19 @@ struct CommandComposerView: View {
     }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
-
         composerContent
-            .padding(PaneMetrics.composerInnerInset)
-            .background(composerBackground(in: shape))
-            .clipShape(shape)
-            .overlay {
-                shape.strokeBorder(
-                    isFocused ? Color.accentColor.opacity(0.65) : PaneTheme.separator.opacity(0.7),
-                    lineWidth: isFocused || colorSchemeContrast == .increased ? 1 : 0.5
-                )
-            }
-            .padding(.horizontal, PaneMetrics.composerOuterInset)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(
+                minHeight: PaneMetrics.composerMinHeight
+                    - (PaneMetrics.composerOuterVerticalInset * 2),
+                alignment: .center
+            )
+            .padding(.horizontal, PaneMetrics.contentTextColumn)
             .padding(.vertical, PaneMetrics.composerOuterVerticalInset)
+            .background(PaneTheme.contentSurface)
             .task(id: autocompleteQuery) {
                 await refreshAutocomplete(for: autocompleteQuery)
             }
-    }
-
-    @ViewBuilder
-    private func composerBackground(in shape: RoundedRectangle) -> some View {
-        if reduceTransparency {
-            PaneTheme.blockBackground.clipShape(shape)
-        } else {
-            shape.fill(.regularMaterial)
-        }
     }
 
     private var composerContent: some View {
@@ -130,15 +115,21 @@ struct CommandComposerView: View {
                         .accessibilityLabel("Password input characters are hidden")
                 } else {
                     composerTextView
-                        .frame(height: editorHeight)
-                        .help(editorHelp)
+                        .frame(height: editorHeightForLayout)
+                        .help("\(promptDirectory) % — \(editorHelp)")
+                        .accessibilityLabel("Command input in \(promptDirectory)")
                 }
             }
             .frame(minHeight: 32, maxHeight: 66, alignment: .center)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
 
             submitButton
         }
+    }
+
+    private var editorHeightForLayout: CGFloat {
+        session.commandDraft.isEmpty ? 32 : editorHeight
     }
 
     private var composerTextView: some View {
@@ -179,6 +170,7 @@ struct CommandComposerView: View {
         .disabled(session.isSecureInputActive || !canSubmit)
         .keyboardShortcut(.return, modifiers: [])
         .help(presentedCommandBlock != nil ? "Send input (Return)" : "Execute command (Return)")
+        .accessibilityLabel(presentedCommandBlock != nil ? "Send input" : "Execute command")
     }
 
     private var historyPreviousAction: (() -> Void)? {
@@ -211,7 +203,14 @@ struct CommandComposerView: View {
         if presentedCommandBlock != nil {
             return "Continue the command…"
         }
-        return "Type a command…"
+        return ""
+    }
+
+    private var promptDirectory: String {
+        guard let path = session.currentDirectory else { return "~" }
+        let url = URL(fileURLWithPath: path)
+        if path == FileManager.default.homeDirectoryForCurrentUser.path { return "~" }
+        return url.lastPathComponent.isEmpty ? "/" : url.lastPathComponent
     }
 
     private var editorHelp: String {
@@ -569,7 +568,7 @@ private struct ComposerSubmitButtonStyle: ButtonStyle {
     }
 
     private var focusOrSeparator: Color {
-        controlActiveState == .key ? Color.accentColor.opacity(0.55) : Color.primary.opacity(0.10)
+        PaneTheme.separator.opacity(controlActiveState == .key ? 0.75 : 0.45)
     }
 }
 
@@ -577,6 +576,7 @@ private struct AutocompleteSuggestionsRow: View {
     let suggestions: [CommandAutocompleteSuggestion]
     let highlightedSuggestionID: String?
     let onAccept: (CommandAutocompleteSuggestion) -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -595,7 +595,7 @@ private struct AutocompleteSuggestionsRow: View {
             }
             .onChange(of: highlightedSuggestionID) { _, suggestionID in
                 guard let suggestionID else { return }
-                withAnimation(.easeOut(duration: 0.1)) {
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.1)) {
                     proxy.scrollTo(suggestionID, anchor: .center)
                 }
             }

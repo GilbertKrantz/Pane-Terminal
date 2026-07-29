@@ -5,7 +5,13 @@ struct CommandBlockView: View {
     let isSelected: Bool
     @ObservedObject var session: TerminalSession
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var isHovered = false
+
+    private var presentation: BlockPresentationModel {
+        block.presentation()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -26,8 +32,7 @@ struct CommandBlockView: View {
                     .frame(width: 116, alignment: .trailing)
                     .opacity(contextualToolbarOpacity)
                     .allowsHitTesting(showsContextualToolbar)
-                    .accessibilityHidden(!showsContextualToolbar)
-                    .animation(.easeOut(duration: 0.12), value: contextualToolbarOpacity)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: contextualToolbarOpacity)
             }
 
             Text(block.command)
@@ -52,12 +57,18 @@ struct CommandBlockView: View {
                     )
             }
         }
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 1)
+                .fill(timelineRailColor.opacity(isSelected ? 0.9 : 0.55))
+                .frame(width: PaneMetrics.timelineRailWidth)
+                .padding(.vertical, 6)
+        }
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .onTapGesture { session.selectBlock(block.id) }
         .onHover { isHovered = $0 }
         .contextMenu { overflowActions }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Command block: \(block.command), \(block.statusText)")
+        .accessibilityLabel("Command block: \(block.command), \(presentation.status.accessibilityLabel)")
     }
 
 
@@ -86,7 +97,7 @@ struct CommandBlockView: View {
     private var blockSurface: Color {
         if isSelected {
             return PaneTheme.selectedBlockBackground.opacity(
-                colorSchemeContrast == .increased ? 1 : 0.55
+                colorSchemeContrast == .increased ? 0.65 : 0.28
             )
         }
         if isHovered { return PaneTheme.blockBackground }
@@ -104,12 +115,7 @@ struct CommandBlockView: View {
     }
 
     private var displayDirectory: String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        if block.workingDirectory == home { return "~" }
-        if block.workingDirectory.hasPrefix(home + "/") {
-            return "~" + block.workingDirectory.dropFirst(home.count)
-        }
-        return block.workingDirectory
+        presentation.directoryLabel
     }
 
     @ViewBuilder
@@ -117,36 +123,44 @@ struct CommandBlockView: View {
         switch block.state {
         case .running:
             HStack(spacing: 5) {
-                ProgressView()
-                    .controlSize(.mini)
+                Image(systemName: "circle.fill")
+                    .font(.system(size: 5))
                 Text(block.statusText)
             }
             .foregroundStyle(.secondary)
             .font(.caption.monospacedDigit())
 
+        case .completed(let exitCode) where exitCode == 0:
+            Image(systemName: "checkmark")
+                .accessibilityLabel(presentation.status.accessibilityLabel)
+                .help("Succeeded")
+                .font(.caption)
+                .foregroundStyle(statusColor)
+
         default:
-            Label(block.statusText, systemImage: statusSymbol)
+            Label(presentation.status.compactLabel ?? block.statusText, systemImage: presentation.status.symbolName)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(statusColor)
-        }
-    }
-
-    private var statusSymbol: String {
-        switch block.state {
-        case .queued: "clock"
-        case .running: "circle.dotted"
-        case .completed(let exitCode): exitCode == 0 ? "checkmark" : "xmark"
-        case .interrupted: "stop"
-        case .unknown: "questionmark.circle"
         }
     }
 
     private var statusColor: Color {
         switch block.state {
         case .completed(let exitCode): exitCode == 0 ? .green : .red
-        case .interrupted: .orange
+        case .interrupted: .secondary
         case .unknown: .secondary
         case .queued, .running: .secondary
+        }
+    }
+
+    private var timelineRailColor: Color {
+        switch block.state {
+        case .completed(let exitCode):
+            return exitCode == 0 ? PaneTheme.separator : .red
+        case .interrupted, .unknown, .queued:
+            return PaneTheme.separator
+        case .running:
+            return PaneTheme.separator
         }
     }
 
@@ -191,7 +205,15 @@ struct CommandBlockView: View {
         .controlSize(.small)
         .padding(.horizontal, 3)
         .padding(.vertical, 2)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .background {
+            if reduceTransparency {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(PaneTheme.blockBackground)
+            } else {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(.regularMaterial)
+            }
+        }
     }
 
     @ViewBuilder
@@ -235,6 +257,7 @@ struct CommandBlockView: View {
 private struct ToolbarHoverSurface: View {
     let systemName: String
     @State private var isHovered = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Image(systemName: systemName)
@@ -246,6 +269,6 @@ private struct ToolbarHoverSurface: View {
                     .fill(isHovered ? PaneTheme.selectedBlockBackground : .clear)
             }
             .onHover { isHovered = $0 }
-            .animation(.easeOut(duration: 0.1), value: isHovered)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: isHovered)
     }
 }
