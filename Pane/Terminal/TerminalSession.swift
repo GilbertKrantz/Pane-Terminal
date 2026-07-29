@@ -84,6 +84,7 @@ final class TerminalSession: NSObject, ObservableObject {
     @Published private(set) var isRestartInProgress = false
     @Published private(set) var isShuttingDown = false
     @Published private(set) var shellReadiness: ShellReadiness = .starting
+    @Published private(set) var composerContextGeneration: UInt64 = 0
     @Published var visibilityState: SessionVisibilityState = .selected {
         didSet {
             if visibilityState != .selected { requestFocus(.none) }
@@ -436,6 +437,7 @@ final class TerminalSession: NSObject, ObservableObject {
             await self.runtimeStateController?.resetBehavioralTransitionContinuity()
             self.previousCompletedCommandSummary = nil
             await self.completionService.shellDidRestart()
+            self.composerContextGeneration &+= 1
             self.isShellRunning = false
             self.ptyController.terminate()
             self.invalidateCompletionEndpoint()
@@ -631,6 +633,10 @@ final class TerminalSession: NSObject, ObservableObject {
                     && self.terminalSecurityState.inputMode == .normal
             }
         )
+    }
+
+    func composerProjectContext(for directory: URL) async -> ProjectContext? {
+        await completionService.projectContext(for: directory)
     }
 
     var canSuggestNextCommand: Bool {
@@ -1080,7 +1086,13 @@ final class TerminalSession: NSObject, ObservableObject {
                     ) {
                         selectedBlockID = id
                         if let command = blockTimeline.block(id: id)?.command {
-                            Task { await completionService.commandDidComplete(command) }
+                            Task { @MainActor [weak self] in
+                                guard let self else { return }
+                                await self.completionService.commandDidComplete(command)
+                                if NormalizedCommand(command).executable == "git" {
+                                    self.composerContextGeneration &+= 1
+                                }
+                            }
                         }
                         persistCompletedBlock(id: id)
                     }

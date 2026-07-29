@@ -12,6 +12,7 @@ enum PaneTheme {
     static let subtleControlFill = Color.primary.opacity(0.08)
     static let subtleControlHoverFill = Color.primary.opacity(0.14)
     static let subtleControlPressedFill = Color.primary.opacity(0.20)
+    static let composerContextForeground = Color.secondary
 
     static func selectedTabBackground(increasedContrast: Bool) -> Color {
         Color.primary.opacity(increasedContrast ? 0.14 : 0.075)
@@ -33,7 +34,7 @@ enum PaneTheme {
 enum PaneMetrics {
     static let tabStripHeight: CGFloat = 36
     static let searchRowHeight: CGFloat = 38
-    static let composerMinHeight: CGFloat = 52
+    static let composerMinHeight: CGFloat = 58
     static let contentTextColumn: CGFloat = 28
     static let blockOuterInset: CGFloat = 12
     static let blockInnerInset: CGFloat = 16
@@ -41,9 +42,22 @@ enum PaneMetrics {
     static let timelineRailWidth: CGFloat = 2
     static let systemEventHeight: CGFloat = 32
     static let composerOuterInset: CGFloat = 12
-    static let composerOuterVerticalInset: CGFloat = 5
+    static let composerHorizontalInset: CGFloat = 20
+    static let composerOuterVerticalInset: CGFloat = 6
     static let composerInnerInset: CGFloat = 0
     static let composerHorizontalTextInset: CGFloat = 0
-    static let composerTrailingControlReserve: CGFloat = 6
-    static let composerVerticalTextInset: CGFloat = 7
+    static let composerVerticalTextInset: CGFloat = 5
+    static let composerContextHeaderHeight: CGFloat = 16
+    static let composerContextEditorGap: CGFloat = 2
+    static let composerContextSpacing: CGFloat = 5
+    static let composerContextLargeWidth: CGFloat = 500
+    static let composerContextNameVisibilityWidth: CGFloat = 320
+    static let composerContextLargeTextMaxWidth: CGFloat = 240
+    static let composerContextMediumTextMaxWidth: CGFloat = 160
+    static let composerContextIconSize: CGFloat = 12
+    static let composerEditorMinHeight: CGFloat = 28
+    static let composerEditorMaxHeight: CGFloat = 60
+    static let composerEditorLineIncrement: CGFloat = 16
+    static let composerEditorSubmitSpacing: CGFloat = 8
+    static let composerSubmitButtonSize: CGFloat = 28
 }

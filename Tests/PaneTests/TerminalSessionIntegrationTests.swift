@@ -114,15 +114,19 @@ final class TerminalSessionIntegrationTests: XCTestCase {
         XCTAssertTrue(textView.isEditable)
         XCTAssertTrue(textView.isSelectable)
         XCTAssertGreaterThan(textView.bounds.width, 400)
-        XCTAssertEqual(composerScrollView.bounds.height, 32, accuracy: 1)
+        XCTAssertEqual(
+            composerScrollView.bounds.height,
+            PaneMetrics.composerEditorMinHeight,
+            accuracy: 1
+        )
         XCTAssertEqual(
             composerFrame.minX,
-            PaneMetrics.contentTextColumn,
+            PaneMetrics.composerHorizontalInset,
             accuracy: 1
         )
         XCTAssertLessThan(
             composerFrame.maxX,
-            hostingView.bounds.maxX - PaneMetrics.contentTextColumn
+            hostingView.bounds.maxX - PaneMetrics.composerHorizontalInset
         )
         XCTAssertTrue(window.makeFirstResponder(textView))
 
@@ -131,6 +135,25 @@ final class TerminalSessionIntegrationTests: XCTestCase {
 
         XCTAssertEqual(textView.string, "printf composer-ok")
         XCTAssertEqual(session.commandDraft, "printf composer-ok")
+
+        let selectionBeforeResize = textView.selectedRange()
+        window.setContentSize(NSSize(width: 340, height: 620))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        hostingView.layoutSubtreeIfNeeded()
+
+        let narrowTextView = try XCTUnwrap(findTextView(in: hostingView))
+        let narrowScrollView = try XCTUnwrap(narrowTextView.enclosingScrollView)
+        let narrowFrame = narrowScrollView.convert(narrowScrollView.bounds, to: hostingView)
+        XCTAssertTrue(narrowTextView === textView)
+        XCTAssertEqual(
+            narrowFrame.minX,
+            PaneMetrics.composerHorizontalInset,
+            accuracy: 1
+        )
+        XCTAssertGreaterThan(narrowFrame.width, 150)
+        XCTAssertEqual(narrowTextView.string, "printf composer-ok")
+        XCTAssertEqual(narrowTextView.selectedRange(), selectionBeforeResize)
+        XCTAssertTrue(window.firstResponder === narrowTextView)
     }
 
     @MainActor

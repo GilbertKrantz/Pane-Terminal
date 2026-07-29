@@ -44,6 +44,10 @@ actor CompletionService {
         await localProvider.projectDefinition(for: directory)
     }
 
+    func projectContext(for directory: URL) async -> ProjectContext? {
+        await localProvider.projectContext(for: directory)
+    }
+
     /// Compatibility surface used by the composer. Unlike P0, zsh is another
     /// contributor: it can improve the result but cannot erase local evidence.
     func suggestions(for context: LocalAutocompleteContext,

@@ -52,6 +52,18 @@ actor LocalAutocompleteProvider {
         }
     }
 
+    func projectContext(for directory: URL) async -> ProjectContext? {
+        guard let definition = await projectDefinition(for: directory) else { return nil }
+        let git = await gitContextCache.value(for: definition.root) {
+            await self.projectContextProvider.gitContext(root: definition.root)
+        }
+        return ProjectContext(
+            root: definition.root, identity: definition.identity, kind: definition.kind,
+            git: git, manifests: definition.manifests, scripts: definition.scripts,
+            detectedLanguages: definition.detectedLanguages, discoveredAt: definition.discoveredAt
+        )
+    }
+
     func suggestions(for context: LocalAutocompleteContext) async -> [CommandAutocompleteSuggestion] {
         guard !Task.isCancelled else { return [] }
         let prefix = Self.commandPrefix(in: context.draft, cursorUTF16Offset: context.cursorUTF16Offset)

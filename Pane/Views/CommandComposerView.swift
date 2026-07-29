@@ -1,16 +1,112 @@
 import AppKit
 import SwiftUI
 
+struct ComposerContextPresentation: Equatable, Sendable {
+    let displayName: String
+    let iconName: String
+    let fullPath: String
+    let branchName: String?
+    let accessibilityLabel: String
+    let tooltipText: String
+
+    static func make(directoryPath: String?, project: ProjectContext?, homePath: String) -> Self {
+        guard let directoryPath else {
+            return Self(displayName: "Folder", iconName: "folder", fullPath: "",
+                        branchName: nil, accessibilityLabel: "Current directory unavailable",
+                        tooltipText: "Current directory unavailable")
+        }
+        let url = URL(fileURLWithPath: directoryPath, isDirectory: true)
+        let isHome = url.standardizedFileURL.path == URL(fileURLWithPath: homePath).standardizedFileURL.path
+        let isRoot = url.path == "/"
+        let displayPath = friendlyPath(directoryPath, homePath: homePath)
+        let name = project?.root.lastPathComponent.nonEmpty
+            ?? (isHome ? "Home" : (isRoot ? "/" : url.lastPathComponent.nonEmpty))
+            ?? "Folder"
+        let branch = project?.git?.branch
+        let displayedBranch = branch.map { middleTruncated($0, limit: 120) }
+        let detached = project?.git != nil && project?.git?.branch == nil
+        let detail = displayedBranch.map { "\(displayPath)\nBranch: \($0)" }
+            ?? (detached ? "\(displayPath)\nDetached HEAD" : displayPath)
+        let kind = project == nil ? "folder" : "project"
+        var label = "Current \(kind) \(name), path \(displayPath)"
+        if let branch { label += ", branch \(branch)" }
+        else if detached { label += ", detached HEAD" }
+        return Self(displayName: name,
+                    iconName: "folder",
+                    fullPath: url.path, branchName: branch, accessibilityLabel: label, tooltipText: detail)
+    }
+
+    private static func friendlyPath(_ path: String, homePath: String) -> String {
+        if path == homePath { return "~" }
+        if path.hasPrefix(homePath + "/") { return "~" + path.dropFirst(homePath.count) }
+        return path
+    }
+
+    private static func middleTruncated(_ value: String, limit: Int) -> String {
+        guard value.count > limit else { return value }
+        let side = (limit - 1) / 2
+        return String(value.prefix(side)) + "…" + String(value.suffix(limit - side - 1))
+    }
+}
+
+struct ComposerContextLayout: Equatable, Sendable {
+    let showsName: Bool
+    let textMaxWidth: CGFloat?
+
+    static func make(availableWidth: CGFloat) -> Self {
+        guard availableWidth >= PaneMetrics.composerContextNameVisibilityWidth else {
+            return Self(showsName: false, textMaxWidth: nil)
+        }
+        return Self(
+            showsName: true,
+            textMaxWidth: availableWidth >= PaneMetrics.composerContextLargeWidth
+                ? PaneMetrics.composerContextLargeTextMaxWidth
+                : PaneMetrics.composerContextMediumTextMaxWidth
+        )
+    }
+}
+
+struct ComposerContextMenuPresentation: Equatable, Sendable {
+    let copyPath: String?
+    let openInFinderURL: URL?
+    let copyBranchName: String?
+
+    static func make(
+        context: ComposerContextPresentation,
+        directoryExists: (String) -> Bool
+    ) -> Self {
+        let copyPath = context.fullPath.nonEmpty
+        return Self(
+            copyPath: copyPath,
+            openInFinderURL: copyPath.flatMap {
+                directoryExists($0) ? URL(fileURLWithPath: $0, isDirectory: true) : nil
+            },
+            copyBranchName: context.branchName
+        )
+    }
+}
+
+private extension String {
+    var nonEmpty: String? { isEmpty ? nil : self }
+}
+
+private struct ComposerContextRefreshID: Hashable {
+    let directoryPath: String?
+    let generation: UInt64
+}
+
 struct CommandComposerView: View {
     @ObservedObject var session: TerminalSession
     @State private var isFocused = false
-    @State private var editorHeight: CGFloat = 32
+    @State private var editorHeight: CGFloat = PaneMetrics.composerEditorMinHeight
     @State private var caretUTF16Offset = 0
     @State private var autocompleteSuggestions: [CommandAutocompleteSuggestion] = []
     @State private var autocompleteSelection = CommandAutocompleteSelection()
     @State private var suggestionsQuery: AutocompleteQuery?
     @State private var dismissedQuery: AutocompleteQuery?
     @State private var selectionRequest: ComposerSelectionRequest?
+    @State private var contextProject: ProjectContext?
+    @State private var contextDirectoryPath: String?
 
     private var canSubmit: Bool {
         session.isShellReadyForInput
@@ -39,6 +135,13 @@ struct CommandComposerView: View {
         return autocompleteSuggestions
     }
 
+    private var contextRefreshID: ComposerContextRefreshID {
+        ComposerContextRefreshID(
+            directoryPath: session.currentDirectory,
+            generation: session.composerContextGeneration
+        )
+    }
+
     /// The first queued block represents a command sent to the shell whose
     /// lifecycle start marker has not arrived yet. Keeping it visible avoids
     /// an ambiguous idle composer during that short hand-off.
@@ -60,11 +163,14 @@ struct CommandComposerView: View {
                     - (PaneMetrics.composerOuterVerticalInset * 2),
                 alignment: .center
             )
-            .padding(.horizontal, PaneMetrics.contentTextColumn)
+            .padding(.horizontal, PaneMetrics.composerHorizontalInset)
             .padding(.vertical, PaneMetrics.composerOuterVerticalInset)
             .background(PaneTheme.contentSurface)
             .task(id: autocompleteQuery) {
                 await refreshAutocomplete(for: autocompleteQuery)
+            }
+            .task(id: contextRefreshID) {
+                await refreshComposerContextWhileVisible()
             }
     }
 
@@ -94,42 +200,174 @@ struct CommandComposerView: View {
     }
 
     private var editorRow: some View {
-        HStack(alignment: .center, spacing: 10) {
-            ZStack(alignment: .topLeading) {
-                if session.isSecureInputActive {
-                    EmptyView()
-                } else if session.commandDraft.isEmpty {
-                    Text(editorPlaceholder)
-                        .font(.callout)
-                        .foregroundStyle(.tertiary)
-                        .padding(.top, PaneMetrics.composerVerticalTextInset + 1)
-                        .padding(.leading, PaneMetrics.composerHorizontalTextInset)
-                        .allowsHitTesting(false)
-                }
+        GeometryReader { geometry in
+            let contextLayout = ComposerContextLayout.make(availableWidth: geometry.size.width)
+            HStack(alignment: .center, spacing: PaneMetrics.composerEditorSubmitSpacing) {
+                VStack(alignment: .leading, spacing: PaneMetrics.composerContextEditorGap) {
+                    composerContext(
+                        showsName: contextLayout.showsName,
+                        textMaxWidth: contextLayout.textMaxWidth
+                    )
+                    .frame(height: PaneMetrics.composerContextHeaderHeight, alignment: .leading)
 
-                if session.isSecureInputActive {
-                    Text("Secure Input")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .padding(.top, 1)
-                        .accessibilityLabel("Password input characters are hidden")
-                } else {
-                    composerTextView
-                        .frame(height: editorHeightForLayout)
-                        .help("\(promptDirectory) % — \(editorHelp)")
-                        .accessibilityLabel("Command input in \(promptDirectory)")
+                    editorRowContent
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+
+                submitButton
             }
-            .frame(minHeight: 32, maxHeight: 66, alignment: .center)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .layoutPriority(1)
+        }
+        .frame(
+            height: PaneMetrics.composerContextHeaderHeight
+                + PaneMetrics.composerContextEditorGap
+                + editorHeightForLayout
+        )
+    }
 
-            submitButton
+    private var editorRowContent: some View {
+        ZStack(alignment: .topLeading) {
+            if session.isSecureInputActive {
+                EmptyView()
+            } else if session.commandDraft.isEmpty {
+                Text(editorPlaceholder)
+                    .font(.callout)
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, PaneMetrics.composerVerticalTextInset + 1)
+                    .padding(.leading, PaneMetrics.composerHorizontalTextInset)
+                    .allowsHitTesting(false)
+            }
+
+            if session.isSecureInputActive {
+                Text("Secure Input")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 1)
+                    .accessibilityLabel("Password input characters are hidden")
+            } else {
+                composerTextView
+                    .frame(height: editorHeightForLayout)
+                    .help(editorHelp)
+                    .accessibilityLabel("Command input")
+            }
+        }
+        .frame(
+            minHeight: PaneMetrics.composerEditorMinHeight,
+            maxHeight: PaneMetrics.composerEditorMaxHeight,
+            alignment: .center
+        )
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: editorHeightForLayout)
+    }
+
+    private var contextPresentation: ComposerContextPresentation {
+        ComposerContextPresentation.make(
+            directoryPath: session.currentDirectory,
+            project: contextDirectoryPath == session.currentDirectory ? contextProject : nil,
+            homePath: FileManager.default.homeDirectoryForCurrentUser.path
+        )
+    }
+
+    private var contextMenuPresentation: ComposerContextMenuPresentation {
+        ComposerContextMenuPresentation.make(
+            context: contextPresentation,
+            directoryExists: FileManager.default.fileExists(atPath:)
+        )
+    }
+
+    private func composerContext(showsName: Bool, textMaxWidth: CGFloat?) -> some View {
+        contextLabel(showsName: showsName, textMaxWidth: textMaxWidth)
+            .fixedSize(horizontal: true, vertical: true)
+            .help(contextPresentation.tooltipText)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(contextPresentation.accessibilityLabel)
+            .accessibilityActions { accessibilityContextActions }
+            .contextMenu { contextMenu }
+    }
+
+    private func contextLabel(showsName: Bool, textMaxWidth: CGFloat?) -> some View {
+        HStack(spacing: PaneMetrics.composerContextSpacing) {
+            Image(systemName: contextPresentation.iconName)
+                .font(.system(size: PaneMetrics.composerContextIconSize))
+                .frame(width: PaneMetrics.composerContextIconSize)
+            if showsName, let textMaxWidth {
+                Text(contextPresentation.displayName)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(width: contextTextWidth(maxWidth: textMaxWidth), alignment: .leading)
+            }
+        }
+        .font(.caption.weight(.medium))
+        .foregroundStyle(PaneTheme.composerContextForeground)
+    }
+
+    private func contextTextWidth(maxWidth: CGFloat) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
+        let width = (contextPresentation.displayName as NSString)
+            .size(withAttributes: [.font: font])
+            .width
+        return min(maxWidth, ceil(width))
+    }
+
+    @ViewBuilder private var contextMenu: some View {
+        Button("Copy Path") {
+            if let path = contextMenuPresentation.copyPath {
+                copyToPasteboard(path)
+            }
+        }
+        .disabled(contextMenuPresentation.copyPath == nil)
+        Button("Open in Finder") {
+            if let url = contextMenuPresentation.openInFinderURL {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
+        }
+        .disabled(contextMenuPresentation.openInFinderURL == nil)
+        if let branch = contextMenuPresentation.copyBranchName {
+            Button("Copy Branch Name") { copyToPasteboard(branch) }
+        }
+    }
+
+    @ViewBuilder private var accessibilityContextActions: some View {
+        if let path = contextMenuPresentation.copyPath {
+            Button("Copy Path") { copyToPasteboard(path) }
+        }
+        if let url = contextMenuPresentation.openInFinderURL {
+            Button("Open in Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            }
+        }
+        if let branch = contextMenuPresentation.copyBranchName {
+            Button("Copy Branch Name") { copyToPasteboard(branch) }
+        }
+    }
+
+    private func copyToPasteboard(_ value: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
+    }
+
+    @MainActor private func refreshComposerContextWhileVisible() async {
+        while !Task.isCancelled {
+            let path = session.currentDirectory
+            if contextDirectoryPath != path {
+                contextDirectoryPath = path
+                contextProject = nil
+            }
+            if let path {
+                let project = await session.composerProjectContext(
+                    for: URL(fileURLWithPath: path, isDirectory: true)
+                )
+                guard !Task.isCancelled, session.currentDirectory == path else { return }
+                contextProject = project
+            } else {
+                contextProject = nil
+            }
+            try? await Task.sleep(for: .seconds(5))
         }
     }
 
     private var editorHeightForLayout: CGFloat {
-        session.commandDraft.isEmpty ? 32 : editorHeight
+        session.commandDraft.isEmpty ? PaneMetrics.composerEditorMinHeight : editorHeight
     }
 
     private var composerTextView: some View {
@@ -162,11 +400,12 @@ struct CommandComposerView: View {
         } label: {
             Image(systemName: presentedCommandBlock != nil ? "return" : "arrow.up")
                 .font(.system(size: 12, weight: .semibold))
-                .frame(width: 15, height: 15)
+                .frame(
+                    width: PaneMetrics.composerSubmitButtonSize,
+                    height: PaneMetrics.composerSubmitButtonSize
+                )
         }
         .buttonStyle(ComposerSubmitButtonStyle())
-        .frame(width: 24, height: 24)
-        .padding(.trailing, PaneMetrics.composerTrailingControlReserve)
         .disabled(session.isSecureInputActive || !canSubmit)
         .keyboardShortcut(.return, modifiers: [])
         .help(presentedCommandBlock != nil ? "Send input (Return)" : "Execute command (Return)")
@@ -204,13 +443,6 @@ struct CommandComposerView: View {
             return "Continue the command…"
         }
         return ""
-    }
-
-    private var promptDirectory: String {
-        guard let path = session.currentDirectory else { return "~" }
-        let url = URL(fileURLWithPath: path)
-        if path == FileManager.default.homeDirectoryForCurrentUser.path { return "~" }
-        return url.lastPathComponent.isEmpty ? "/" : url.lastPathComponent
     }
 
     private var editorHelp: String {
@@ -982,7 +1214,8 @@ private struct ComposerTextView: NSViewRepresentable {
             let verticalInsets = textView.textContainerInset.height * 2
             let rawHeight = ceil((CGFloat(visualLineCount) * lineHeight) + verticalInsets)
             let visibleLineCount = min(visualLineCount, 3)
-            let targetHeight = CGFloat(32 + ((visibleLineCount - 1) * 17))
+            let targetHeight = PaneMetrics.composerEditorMinHeight
+                + (CGFloat(visibleLineCount - 1) * PaneMetrics.composerEditorLineIncrement)
 
             let needsScroller = visualLineCount > 3
             if scrollView.hasVerticalScroller != needsScroller {
