@@ -348,6 +348,10 @@ struct CommandComposerView: View {
 
     @MainActor private func refreshComposerContextWhileVisible() async {
         while !Task.isCancelled {
+            guard session.visibilityState == .selected else {
+                try? await Task.sleep(for: .seconds(2))
+                continue
+            }
             let path = session.currentDirectory
             if contextDirectoryPath != path {
                 contextDirectoryPath = path
@@ -357,7 +361,9 @@ struct CommandComposerView: View {
                 let project = await session.composerProjectContext(
                     for: URL(fileURLWithPath: path, isDirectory: true)
                 )
-                guard !Task.isCancelled, session.currentDirectory == path else { return }
+                guard !Task.isCancelled,
+                      session.visibilityState == .selected,
+                      session.currentDirectory == path else { continue }
                 contextProject = project
             } else {
                 contextProject = nil
