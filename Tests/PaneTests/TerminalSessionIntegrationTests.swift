@@ -349,6 +349,192 @@ final class TerminalSessionIntegrationTests: XCTestCase {
     }
 
     @MainActor
+    func testForegroundRefreshSchedulingCoalescesBurstRequests() {
+        let session = makeTestSession()
+        defer { session.shutdown() }
+
+        for _ in 0..<1_000 {
+            session.debugScheduleForegroundRefreshForTests()
+        }
+        let counters = session.debugPerformanceCounters
+        XCTAssertTrue(session.debugForegroundRefreshPending)
+        XCTAssertEqual(counters.foregroundRefreshRequested, 1_000)
+        XCTAssertEqual(counters.foregroundRefreshCoalesced, 999)
+        session.debugCancelScheduledForegroundRefreshForTests()
+        XCTAssertFalse(session.debugForegroundRefreshPending)
+    }
+
+    @MainActor
+    func testForegroundMonitoringUsesBackgroundIntervalPolicy() async throws {
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        try await waitUntil("shell readiness", timeout: 8) {
+            session.isShellReadyForInput
+        }
+        session.visibilityState = .background
+        XCTAssertEqual(session.debugForegroundMonitoringInterval, 3.0, accuracy: 0.001)
+        XCTAssertLessThanOrEqual(session.debugForegroundMonitoringTimerCount, 1)
+    }
+
+    @MainActor
+    func testRepeatedShellRestartsKeepSingleForegroundMonitoringTimer() async throws {
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        try await waitUntil("shell readiness", timeout: 8) {
+            session.isShellReadyForInput
+        }
+        XCTAssertEqual(session.debugForegroundMonitoringTimerCount, 1)
+
+        var generation = session.debugSnapshot.processGeneration
+        for _ in 0..<3 {
+            session.restartShell()
+            try await waitUntil("shell restart", timeout: 8) {
+                session.debugSnapshot.processGeneration > generation
+                    && session.isShellReadyForInput
+                    && !session.isRestartInProgress
+            }
+            generation = session.debugSnapshot.processGeneration
+            XCTAssertEqual(session.debugForegroundMonitoringTimerCount, 1)
+        }
+    }
+
+    @MainActor
+    func testAlternateScreenDisablesForegroundMonitoringAndRestartsOnExit() async throws {
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        try await waitUntil("shell readiness", timeout: 8) {
+            session.isShellReadyForInput
+        }
+        XCTAssertTrue(session.debugForegroundMonitoringTimerActive)
+        let scheduleCountBeforeExit = session.debugForegroundMonitoringScheduleCount
+
+        terminalView.feed(text: "\u{001B}[?1049h")
+        try await waitUntil("alternate screen entry", timeout: 4) {
+            session.isAlternateScreenActive && !session.debugForegroundMonitoringTimerActive
+        }
+
+        terminalView.feed(text: "\u{001B}[?1049l")
+        try await waitUntil("alternate screen exit", timeout: 4) {
+            !session.isAlternateScreenActive && session.debugForegroundMonitoringTimerActive
+        }
+        XCTAssertEqual(
+            session.debugForegroundMonitoringScheduleCount - scheduleCountBeforeExit,
+            1
+        )
+    }
+
+    @MainActor
+    func testLiveMirrorFlushRateIsFrameLimitedAndSkipsBackgroundTabs() async throws {
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        try await waitUntil("shell readiness", timeout: 8) {
+            session.isShellReadyForInput
+        }
+
+        let command = #"/bin/sh -c 'i=0; while [ $i -lt 120 ]; do i=$((i+1)); printf "\rPANE_PROGRESS_$i"; sleep 0.01; done; printf "\nPANE_PROGRESS_DONE\n"'"#
+        session.submit(command: command)
+        try await waitUntil("active command block", timeout: 8) {
+            session.activeCommandBlock?.command == command
+        }
+        let blockID = try XCTUnwrap(session.activeCommandBlock?.id)
+        let liveMirror = LiveCommandTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 200)
+        )
+        session.attachLiveCommandTerminalView(liveMirror, blockID: blockID)
+
+        let startFlushes = session.debugPerformanceCounters.liveMirrorFlushes
+        try await Task.sleep(for: .seconds(1))
+        let selectedFlushes = session.debugPerformanceCounters.liveMirrorFlushes - startFlushes
+        XCTAssertLessThanOrEqual(selectedFlushes, 35)
+
+        session.visibilityState = .background
+        let beforeBackground = session.debugPerformanceCounters.liveMirrorFlushes
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(session.debugPerformanceCounters.liveMirrorFlushes, beforeBackground)
+
+        session.visibilityState = .selected
+        try await waitUntil("progress command completion", timeout: 8) {
+            !session.isCommandActive
+        }
+    }
+
+    @MainActor
+    func testCommandCompletionFlushesPendingLiveMirrorOutput() async throws {
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        try await waitUntil("shell readiness", timeout: 8) {
+            session.isShellReadyForInput
+        }
+        let command = #"/bin/sh -c 'i=0; while [ $i -lt 40 ]; do i=$((i+1)); printf "\rPANE_FINAL_$i"; done; printf "\nPANE_FINAL_DONE\n"'"#
+        session.submit(command: command)
+        try await waitUntil("command active", timeout: 8) {
+            session.activeCommandBlock?.command == command
+        }
+        let blockID = try XCTUnwrap(session.activeCommandBlock?.id)
+        let liveMirror = LiveCommandTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 200)
+        )
+        session.attachLiveCommandTerminalView(liveMirror, blockID: blockID)
+
+        try await waitUntil("command completion", timeout: 8) {
+            guard let block = session.blocks.first(where: { $0.id == blockID }),
+                  case .completed = block.state else { return false }
+            return block.output.contains("PANE_FINAL_DONE")
+        }
+        XCTAssertEqual(session.debugPendingLiveMirrorBytes, 0)
+        XCTAssertFalse(session.debugLiveMirrorFlushScheduled)
+    }
+
+    @MainActor
+    func testShutdownCancelsForegroundMonitoringAndPendingRefresh() async throws {
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+
+        try await waitUntil("shell readiness", timeout: 8) {
+            session.isShellReadyForInput
+        }
+        session.debugScheduleForegroundRefreshForTests()
+        XCTAssertTrue(session.debugForegroundRefreshPending)
+        XCTAssertTrue(session.debugForegroundMonitoringTimerActive)
+
+        session.shutdown()
+        try await waitUntil("shutdown completion", timeout: 8) {
+            !session.isShellRunning && session.shellReadiness == .stopped
+        }
+        XCTAssertFalse(session.debugForegroundRefreshPending)
+        XCTAssertFalse(session.debugForegroundMonitoringTimerActive)
+        XCTAssertEqual(session.debugForegroundMonitoringTimerCount, 0)
+    }
+
+    @MainActor
     func testTerminalModePassesLiteralTabByteToPTY() async throws {
         let session = makeTestSession()
         let terminalView = PaneTerminalView(

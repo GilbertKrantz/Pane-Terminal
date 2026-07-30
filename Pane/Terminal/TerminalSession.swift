@@ -36,8 +36,22 @@ struct TerminalSessionDebugSnapshot: Equatable, Sendable {
     let securityState: TerminalSecurityState
 }
 
+struct TerminalSessionPerformanceCounters: Equatable, Sendable {
+    var ptyChunksReceived: UInt64 = 0
+    var ptyBytesReceived: UInt64 = 0
+    var foregroundRefreshRequested: UInt64 = 0
+    var foregroundRefreshExecuted: UInt64 = 0
+    var foregroundRefreshCoalesced: UInt64 = 0
+    var liveMirrorFlushes: UInt64 = 0
+    var liveMirrorBytes: UInt64 = 0
+}
+
 @MainActor
 final class TerminalSession: NSObject, ObservableObject {
+    private enum LiveMirrorPolicy {
+        static let frameInterval: TimeInterval = 1.0 / 30.0
+    }
+
     let tabID: UUID
     let sessionID = UUID()
     struct SessionBoundary: Equatable {
@@ -88,6 +102,8 @@ final class TerminalSession: NSObject, ObservableObject {
     @Published var visibilityState: SessionVisibilityState = .selected {
         didSet {
             if visibilityState != .selected { requestFocus(.none) }
+            guard visibilityState != oldValue else { return }
+            scheduleNextForegroundMonitoringTick()
         }
     }
 
@@ -133,7 +149,17 @@ final class TerminalSession: NSObject, ObservableObject {
     private var shouldReturnToBlocksAfterAlternateScreen = false
     private var shouldRestoreBlocksViewportAfterAlternateScreen = false
     private var foregroundProcessTimer: Timer?
+    private var foregroundRefreshWorkItem: DispatchWorkItem?
+    private var lastForegroundRefreshAt: ContinuousClock.Instant?
+    private let outputCoalescingDelay: Duration = .milliseconds(100)
+    private let selectedActiveInterval: TimeInterval = 0.25
+    private let selectedIdleInterval: TimeInterval = 1.0
+    private let backgroundInterval: TimeInterval = 3.0
     private var lastForegroundSnapshot: ForegroundProcessSnapshot?
+    private var foregroundMonitoringScheduleCount: UInt64 = 0
+    private var performanceCounters = TerminalSessionPerformanceCounters()
+    private let diagnosticsClock = ContinuousClock()
+    private var lastDiagnosticsLogAt: ContinuousClock.Instant = ContinuousClock().now
     private(set) var focusGeneration: UInt64 = 0
     private var restartTask: Task<Void, Never>?
     private var shutdownTask: Task<Void, Never>?
@@ -269,6 +295,8 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     private func applyInteractionProjection(_ state: TerminalInteractionState) {
+        let previousMode = mode
+        let previousInputRequirement = inputRequirement
         let projectedMode = interactionController.presentationMode
         let projectedInput = interactionController.effectiveInputRequirement
         if mode != projectedMode {
@@ -283,6 +311,9 @@ final class TerminalSession: NSObject, ObservableObject {
             blockLifecycleController.markDirectInteraction()
         }
         requestFocus(state.focusTarget)
+        if previousMode != mode || previousInputRequirement != inputRequirement {
+            scheduleNextForegroundMonitoringTick()
+        }
     }
 
     func makeAuthoritativeTerminalView() -> PaneTerminalView {
@@ -374,6 +405,9 @@ final class TerminalSession: NSObject, ObservableObject {
 
     func startShell(in workingDirectory: String? = nil) {
         guard !isShuttingDown, !ptyController.isRunning else { return }
+        stopForegroundProcessMonitoring()
+        cancelScheduledForegroundRefresh()
+        lastForegroundSnapshot = nil
         _ = interactionController.handle(.shellStarted)
         shellReadiness = .starting
         guard isRuntimeStatePrepared else {
@@ -442,6 +476,8 @@ final class TerminalSession: NSObject, ObservableObject {
             self.ptyController.terminate()
             self.invalidateCompletionEndpoint()
             self.stopForegroundProcessMonitoring()
+            self.cancelScheduledForegroundRefresh()
+            self.lastForegroundSnapshot = nil
             self.leaveAlternateScreenIfNeeded()
             self.terminalView?.feed(text: "\r\n[Restarting shell]\r\n")
             self.lastShellRestartAt = Date()
@@ -477,6 +513,7 @@ final class TerminalSession: NSObject, ObservableObject {
 
     private func stopProcessForShutdown() {
         clearActiveBlockCapture()
+        cancelScheduledForegroundRefresh()
         isShellRunning = false
         blockLifecycleController.markAwaitingStart(nil)
         shellReadiness = .stopped
@@ -717,6 +754,7 @@ final class TerminalSession: NSObject, ObservableObject {
     func setMode(_ newMode: InputMode) {
         guard newMode == .blocks || isShellReadyForInput else { return }
         guard mode != newMode else { return }
+        cancelScheduledForegroundRefresh()
         _ = interactionController.handle(
             newMode == .terminal ? .userOpenedFullTerminal : .userReturnedToBlocks
         )
@@ -738,6 +776,7 @@ final class TerminalSession: NSObject, ObservableObject {
                 requestFocus(.composer)
             }
         }
+        scheduleNextForegroundMonitoringTick()
     }
 
     func restoreModeWhenReady(_ restoredMode: InputMode) {
@@ -1015,10 +1054,12 @@ final class TerminalSession: NSObject, ObservableObject {
 
     private func handleProcessData(_ bytes: [UInt8]) {
         guard ptyController.isRunning else { return }
+        performanceCounters.ptyChunksReceived &+= 1
+        performanceCounters.ptyBytesReceived &+= UInt64(bytes.count)
         if visibilityState == .background, !bytes.isEmpty {
             onMeaningfulBackgroundOutput?()
         }
-        refreshForegroundProcessMode()
+        scheduleForegroundProcessRefresh()
 
         // The persistent direct terminal is fed exactly once. The live block
         // terminal below is an independent emulator and receives parsed block
@@ -1027,6 +1068,7 @@ final class TerminalSession: NSObject, ObservableObject {
 
         let transcriptBytes = transcriptFilter.consume(Data(bytes))
         handleStreamEvents(streamParser.consume(transcriptBytes))
+        logPerformanceDiagnosticsIfNeeded()
     }
 
     private func handleStreamEvents(_ events: [BlockStreamParser.Event]) {
@@ -1048,6 +1090,7 @@ final class TerminalSession: NSObject, ObservableObject {
                     _ = interactionController.handle(.commandStarted)
                     beginActiveBlockCapture(blockID: id)
                     selectedBlockID = id
+                    scheduleNextForegroundMonitoringTick()
                 }
 
             case .commandFinished(let exitCode, let workingDirectory):
@@ -1108,6 +1151,7 @@ final class TerminalSession: NSObject, ObservableObject {
                 _ = interactionController.handle(
                     exitCode == 128 + SIGINT ? .commandInterrupted : .commandCompleted
                 )
+                scheduleNextForegroundMonitoringTick()
                 dispatchNextQueuedCommandIfNeeded()
             }
         }
@@ -1115,6 +1159,7 @@ final class TerminalSession: NSObject, ObservableObject {
 
     private func handleProcessTermination(waitStatus: Int32?) {
         let exitCode = Self.normalizedExitCode(fromWaitStatus: waitStatus)
+        cancelScheduledForegroundRefresh()
 
         let transcriptRemainder = transcriptFilter.flush()
         if !transcriptRemainder.isEmpty {
@@ -1643,6 +1688,42 @@ final class TerminalSession: NSObject, ObservableObject {
         }
     }
 
+    deinit {
+        foregroundProcessTimer?.invalidate()
+        foregroundProcessTimer = nil
+        foregroundRefreshWorkItem?.cancel()
+        foregroundRefreshWorkItem = nil
+        runtimeStateStartTask?.cancel()
+        restartTask?.cancel()
+        shutdownTask?.cancel()
+    }
+
+    private static var isPerformanceDiagnosticsEnabled: Bool {
+#if DEBUG
+        true
+#else
+        ProcessInfo.processInfo.environment["PANE_PERFORMANCE_DIAGNOSTICS"] == "1"
+#endif
+    }
+
+    private func logPerformanceDiagnosticsIfNeeded() {
+        guard Self.isPerformanceDiagnosticsEnabled else { return }
+        let now = diagnosticsClock.now
+        guard now - lastDiagnosticsLogAt >= .seconds(5) else { return }
+        lastDiagnosticsLogAt = now
+        let counters = performanceCounters
+        let ratio: Double = counters.ptyChunksReceived == 0
+            ? 0
+            : Double(counters.foregroundRefreshExecuted) / Double(counters.ptyChunksReceived)
+        print(
+            "[PanePerf] session=\(sessionID.uuidString) visibility=\(visibilityState) "
+                + "ptyChunks=\(counters.ptyChunksReceived) ptyBytes=\(counters.ptyBytesReceived) "
+                + "fgReq=\(counters.foregroundRefreshRequested) fgExec=\(counters.foregroundRefreshExecuted) "
+                + "fgCoalesced=\(counters.foregroundRefreshCoalesced) liveFlush=\(counters.liveMirrorFlushes) "
+                + "liveBytes=\(counters.liveMirrorBytes) fgExecRatio=\(String(format: "%.4f", ratio))"
+        )
+    }
+
     nonisolated private static func validatedWorkingDirectory(_ path: String?) -> String? {
         guard let path, !path.isEmpty else { return nil }
         var isDirectory: ObjCBool = false
@@ -1664,6 +1745,11 @@ final class TerminalSession: NSObject, ObservableObject {
 
         guard liveCommandTerminalBlockID == activeBlockID,
               liveCommandTerminalView != nil else { return }
+        guard visibilityState == .selected else {
+            pendingLiveCommandOutput.removeAll(keepingCapacity: true)
+            isLiveCommandFlushScheduled = false
+            return
+        }
         pendingLiveCommandOutput.append(data)
         scheduleLiveCommandOutputFlush()
     }
@@ -1691,22 +1777,34 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     private func scheduleLiveCommandOutputFlush() {
+        guard visibilityState == .selected else {
+            pendingLiveCommandOutput.removeAll(keepingCapacity: true)
+            isLiveCommandFlushScheduled = false
+            return
+        }
         guard !isLiveCommandFlushScheduled else { return }
         isLiveCommandFlushScheduled = true
-        DispatchQueue.main.async { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + LiveMirrorPolicy.frameInterval) { [weak self] in
             self?.flushPendingLiveCommandOutput()
         }
     }
 
     private func flushPendingLiveCommandOutput() {
         isLiveCommandFlushScheduled = false
+        guard visibilityState == .selected else {
+            pendingLiveCommandOutput.removeAll(keepingCapacity: true)
+            return
+        }
         guard !pendingLiveCommandOutput.isEmpty else { return }
         let output = pendingLiveCommandOutput
         pendingLiveCommandOutput.removeAll(keepingCapacity: true)
 
         guard liveCommandTerminalBlockID == blockTimeline.activeBlockID,
               let liveCommandTerminalView else { return }
+        performanceCounters.liveMirrorFlushes &+= 1
+        performanceCounters.liveMirrorBytes &+= UInt64(output.count)
         liveCommandTerminalView.feed(byteArray: Array(output)[...])
+        logPerformanceDiagnosticsIfNeeded()
     }
 
     /// Estimate only the number of newline-delimited rows needed by the live
@@ -1822,6 +1920,7 @@ final class TerminalSession: NSObject, ObservableObject {
         isAlternateScreenActive = isActive
 
         if isActive {
+            cancelScheduledForegroundRefresh()
             if blockTimeline.activeBlockID != nil {
                 blockLifecycleController.markAlternateScreenEntered()
             }
@@ -1856,6 +1955,7 @@ final class TerminalSession: NSObject, ObservableObject {
             }
             shouldReturnToBlocksAfterAlternateScreen = false
         }
+        scheduleNextForegroundMonitoringTick()
     }
 
     func consumeBlocksViewportRestoreRequest() -> Bool {
@@ -1864,22 +1964,30 @@ final class TerminalSession: NSObject, ObservableObject {
         return true
     }
 
+    private var foregroundMonitoringInterval: TimeInterval {
+        if visibilityState == .background { return backgroundInterval }
+        let hasForegroundWork = isCommandActive
+            || inputRequirement == .direct
+            || inputRequirement == .secure
+            || isSecureInputActive
+            || (lastForegroundSnapshot.map { !$0.isShellForeground } ?? false)
+        return hasForegroundWork ? selectedActiveInterval : selectedIdleInterval
+    }
+
+    private var shouldMonitorForegroundProcess: Bool {
+        isShellRunning && !isShuttingDown && !isAlternateScreenActive
+    }
+
     private func startForegroundProcessMonitoring() {
-        foregroundProcessTimer?.invalidate()
-        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
-            assert(Thread.isMainThread)
-            MainActor.assumeIsolated {
-                self?.refreshForegroundProcessMode()
-            }
-        }
-        foregroundProcessTimer = timer
-        RunLoop.main.add(timer, forMode: .common)
+        cancelScheduledForegroundRefresh()
+        scheduleNextForegroundMonitoringTick()
         refreshForegroundProcessMode()
     }
 
     private func stopForegroundProcessMonitoring() {
         foregroundProcessTimer?.invalidate()
         foregroundProcessTimer = nil
+        cancelScheduledForegroundRefresh()
         lastForegroundSnapshot = nil
         updateSecurityState(echoEnabled: true, source: .terminalEchoState)
         if modeAttribution != .manual {
@@ -1887,8 +1995,51 @@ final class TerminalSession: NSObject, ObservableObject {
         }
     }
 
+    private func scheduleForegroundProcessRefresh() {
+        guard shouldMonitorForegroundProcess else { return }
+        performanceCounters.foregroundRefreshRequested &+= 1
+        guard foregroundRefreshWorkItem == nil else {
+            performanceCounters.foregroundRefreshCoalesced &+= 1
+            return
+        }
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.foregroundRefreshWorkItem = nil
+            guard self.shouldMonitorForegroundProcess else { return }
+            self.lastForegroundRefreshAt = self.diagnosticsClock.now
+            self.refreshForegroundProcessMode()
+            self.scheduleNextForegroundMonitoringTick()
+        }
+        foregroundRefreshWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + outputCoalescingDelay, execute: workItem)
+    }
+
+    private func cancelScheduledForegroundRefresh() {
+        foregroundRefreshWorkItem?.cancel()
+        foregroundRefreshWorkItem = nil
+    }
+
+    private func scheduleNextForegroundMonitoringTick() {
+        foregroundProcessTimer?.invalidate()
+        foregroundProcessTimer = nil
+        guard shouldMonitorForegroundProcess else { return }
+        foregroundMonitoringScheduleCount &+= 1
+        let timer = Timer(timeInterval: foregroundMonitoringInterval, repeats: false) { [weak self] _ in
+            assert(Thread.isMainThread)
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.foregroundProcessTimer = nil
+                self.refreshForegroundProcessMode()
+                self.scheduleNextForegroundMonitoringTick()
+            }
+        }
+        foregroundProcessTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
     private func refreshForegroundProcessMode() {
         guard isShellRunning, !isAlternateScreenActive else { return }
+        performanceCounters.foregroundRefreshExecuted &+= 1
         guard let snapshot = foregroundProcessSnapshot() else { return }
 
         // zsh's idle ZLE can temporarily disable ECHO while it owns the
@@ -1940,6 +2091,7 @@ final class TerminalSession: NSObject, ObservableObject {
                 _ = interactionController.handle(.lineInputRequired)
             }
         }
+        logPerformanceDiagnosticsIfNeeded()
     }
 
     private func updateSecurityState(
@@ -1974,6 +2126,7 @@ final class TerminalSession: NSObject, ObservableObject {
            inputRequirement != .secure {
             requestFocus(.composer)
         }
+        scheduleNextForegroundMonitoringTick()
     }
 
     private func activateSecureInput(source: SecureInputDetectionSource) {
@@ -2006,6 +2159,7 @@ final class TerminalSession: NSObject, ObservableObject {
         if !wasSecure {
             announceAccessibility("Secure input activated")
         }
+        scheduleNextForegroundMonitoringTick()
     }
 
     private func announceAccessibility(_ message: String) {
@@ -2132,9 +2286,23 @@ final class TerminalSession: NSObject, ObservableObject {
     var debugAuthoritativeHostView: NSView? { authoritativeTerminalHostView }
     var debugProcessGeneration: UInt64 { processGeneration }
     var debugPTYWindowSize: winsize { ptyController.windowSize }
+    var debugPerformanceCounters: TerminalSessionPerformanceCounters { performanceCounters }
+    var debugForegroundRefreshPending: Bool { foregroundRefreshWorkItem != nil }
+    var debugForegroundMonitoringTimerActive: Bool { foregroundProcessTimer != nil }
+    var debugForegroundMonitoringTimerCount: Int { foregroundProcessTimer == nil ? 0 : 1 }
+    var debugForegroundMonitoringScheduleCount: UInt64 { foregroundMonitoringScheduleCount }
+    var debugForegroundMonitoringInterval: TimeInterval { foregroundMonitoringInterval }
+    var debugPendingLiveMirrorBytes: Int { pendingLiveCommandOutput.count }
+    var debugLiveMirrorFlushScheduled: Bool { isLiveCommandFlushScheduled }
     var debugHasForegroundProcess: Bool {
         guard let status = ptyController.foregroundStatus() else { return false }
         return status.processGroupID != status.shellProcessGroupID
+    }
+    func debugScheduleForegroundRefreshForTests() {
+        scheduleForegroundProcessRefresh()
+    }
+    func debugCancelScheduledForegroundRefreshForTests() {
+        cancelScheduledForegroundRefresh()
     }
 #endif
 
