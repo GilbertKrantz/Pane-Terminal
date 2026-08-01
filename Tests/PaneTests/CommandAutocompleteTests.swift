@@ -238,6 +238,16 @@ final class CommandAutocompleteTests: XCTestCase {
         )
     }
 
+    func testBoundedProcessOutputStopsMonitoringAtEOF() throws {
+        let pipe = Pipe()
+        let output = BoundedProcessOutput(maximumBytes: 128)
+        pipe.fileHandleForReading.readabilityHandler = { _ in }
+        try pipe.fileHandleForWriting.close()
+
+        XCTAssertFalse(output.drainAvailableData(from: pipe.fileHandleForReading))
+        XCTAssertNil(pipe.fileHandleForReading.readabilityHandler)
+    }
+
     func testProjectDefinitionAndGitCachesHaveIndependentFreshness() async throws {
         let root = try makeTemporaryDirectory()
         let manifest = root.appendingPathComponent("Package.swift")

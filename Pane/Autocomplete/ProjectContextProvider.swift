@@ -5,7 +5,7 @@ import Darwin
 import Glibc
 #endif
 
-private final class BoundedProcessOutput: @unchecked Sendable {
+final class BoundedProcessOutput: @unchecked Sendable {
     private let lock = NSLock()
     private var data = Data()
     private let maximumBytes: Int
@@ -21,6 +21,20 @@ private final class BoundedProcessOutput: @unchecked Sendable {
         let remaining = maximumBytes - data.count
         guard remaining > 0 else { return }
         data.append(incoming.prefix(remaining))
+    }
+
+    /// Drains one readability notification. An empty read is EOF, so the
+    /// handler must be removed or Foundation will continuously redeliver the
+    /// readable EOF and consume a CPU core.
+    @discardableResult
+    func drainAvailableData(from handle: FileHandle) -> Bool {
+        let incoming = handle.availableData
+        guard !incoming.isEmpty else {
+            handle.readabilityHandler = nil
+            return false
+        }
+        append(incoming)
+        return true
     }
 
     func string() -> String? {
@@ -329,7 +343,7 @@ struct ProjectContextProvider: Sendable {
         environment["GIT_OPTIONAL_LOCKS"] = "0"
         process.environment = environment
         pipe.fileHandleForReading.readabilityHandler = { handle in
-            output.append(handle.availableData)
+            output.drainAvailableData(from: handle)
         }
 
         do {
