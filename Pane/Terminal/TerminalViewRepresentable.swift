@@ -183,8 +183,37 @@ final class PaneTerminalView: TerminalView {
     var onTerminalResponse: ((ArraySlice<UInt8>) -> Void)?
     private var lastQueuedAlternateScreenState = false
     private var alternateScreenNotificationGeneration = 0
+    private var userEncodedInputDepth = 0
+
+    override init(frame frameRect: NSRect, font: NSFont?) {
+        super.init(frame: frameRect, font: font)
+        PaneResourceCounters.increment(.terminalView)
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        PaneResourceCounters.increment(.terminalView)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        PaneResourceCounters.increment(.terminalView)
+    }
+
+    deinit {
+        PaneResourceCounters.decrement(.terminalView)
+    }
 
     override func send(source: Terminal, data: ArraySlice<UInt8>) {
+        if userEncodedInputDepth > 0 || Self.isEncodedMouseReport(data) {
+            // SwiftTerm encodes mouse reports through TerminalDelegate rather
+            // than TerminalViewDelegate. Route those user-originated bytes
+            // back through TerminalSession's source/visibility/lifecycle
+            // guard. Emulator protocol replies remain allowed in background
+            // tabs so terminal negotiation cannot deadlock.
+            super.send(source: source, data: data)
+            return
+        }
         // Terminal-generated replies (DA, DSR, color queries, and similar)
         // must reach the PTY even while this view is hidden behind Blocks.
         // User keystrokes use TerminalViewDelegate.send instead, where the
@@ -194,6 +223,53 @@ final class PaneTerminalView: TerminalView {
         } else {
             super.send(source: source, data: data)
         }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        withUserEncodedInput {
+            super.mouseDown(with: event)
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        withUserEncodedInput {
+            super.mouseUp(with: event)
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        withUserEncodedInput {
+            super.mouseDragged(with: event)
+        }
+    }
+
+    private func withUserEncodedInput(_ action: () -> Void) {
+        userEncodedInputDepth += 1
+        defer { userEncodedInputDepth -= 1 }
+        action()
+    }
+
+    private static func isEncodedMouseReport(
+        _ data: ArraySlice<UInt8>
+    ) -> Bool {
+        let bytes = Array(data)
+        guard bytes.count >= 3,
+              bytes[0] == 0x1B,
+              bytes[1] == UInt8(ascii: "[") else { return false }
+        // SGR mouse: CSI < Cb ; Cx ; Cy M/m
+        if bytes[2] == UInt8(ascii: "<") {
+            return bytes.last == UInt8(ascii: "M")
+                || bytes.last == UInt8(ascii: "m")
+        }
+        // X10/UTF-8 mouse: CSI M Cb Cx Cy
+        if bytes[2] == UInt8(ascii: "M") {
+            return bytes.count >= 6
+        }
+        // URXVT mouse: CSI Cb ; Cx ; Cy M
+        return bytes[2] >= UInt8(ascii: "0")
+            && bytes[2] <= UInt8(ascii: "9")
+            && bytes.contains(UInt8(ascii: ";"))
+            && bytes.last == UInt8(ascii: "M")
     }
 
     override func bufferActivated(source: Terminal) {
@@ -326,7 +402,9 @@ struct LiveCommandTerminalViewRepresentable: NSViewRepresentable {
             font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         )
         terminalView.autoresizingMask = [.width, .height]
-        terminalView.changeScrollback(10_000)
+        terminalView.changeScrollback(
+            ScrollbackPolicy.standard.terminalLineLimit
+        )
         terminalView.scrollerStyle = .overlay
         terminalView.optionAsMetaKey = false
         terminalView.allowMouseReporting = false
@@ -495,7 +573,9 @@ struct FrozenBlockTerminalViewRepresentable: NSViewRepresentable {
             font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         )
         terminalView.autoresizingMask = [.width, .height]
-        terminalView.changeScrollback(10_000)
+        terminalView.changeScrollback(
+            ScrollbackPolicy.standard.terminalLineLimit
+        )
         terminalView.scrollerStyle = .overlay
         terminalView.optionAsMetaKey = false
         terminalView.allowMouseReporting = false

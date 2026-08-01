@@ -84,12 +84,16 @@ actor ProjectDefinitionCache {
     private let ttl: TimeInterval
     init(ttl: TimeInterval = 300) { self.ttl = max(1, ttl) }
 
-    func value(for directory: URL, loader: @Sendable () async -> ProjectContext?) async -> ProjectContext? {
+    func value(
+        for directory: URL,
+        now: Date = Date(),
+        loader: @Sendable () async -> ProjectContext?
+    ) async -> ProjectContext? {
         let key = directory.standardizedFileURL.resolvingSymlinksInPath().path
-        if let entry = entries[key], Date().timeIntervalSince(entry.createdAt) < ttl,
+        if let entry = entries[key], now.timeIntervalSince(entry.createdAt) < ttl,
            Self.manifestsAreCurrent(entry.context) { return entry.context }
         let context = await loader()
-        entries[key] = Entry(context: context, createdAt: Date())
+        entries[key] = Entry(context: context, createdAt: now)
         return context
     }
     func invalidate() { entries.removeAll() }
@@ -105,23 +109,26 @@ actor ProjectDefinitionCache {
 actor GitContextCache {
     private struct Entry { let context: GitContext?; let createdAt: Date }
     private var entries: [String: Entry] = [:]
-    private let activeTTL: TimeInterval
+    private let defaultTTL: TimeInterval
 
     init(activeTTL: TimeInterval = 5) {
-        self.activeTTL = min(30, max(1, activeTTL))
+        self.defaultTTL = max(1, activeTTL)
     }
 
     func value(
         for root: URL,
+        ttl: TimeInterval? = nil,
+        now: Date = Date(),
         loader: @Sendable () async -> GitContext?
     ) async -> GitContext? {
         let key = root.standardizedFileURL.resolvingSymlinksInPath().path
+        let effectiveTTL = max(1, ttl ?? defaultTTL)
         if let entry = entries[key],
-           Date().timeIntervalSince(entry.createdAt) < activeTTL {
+           now.timeIntervalSince(entry.createdAt) < effectiveTTL {
             return entry.context
         }
         let context = await loader()
-        entries[key] = Entry(context: context, createdAt: Date())
+        entries[key] = Entry(context: context, createdAt: now)
         return context
     }
 
@@ -140,7 +147,18 @@ actor GitContextCache {
 /// queried with prompts disabled and a small wall-clock timeout.
 struct ProjectContextProvider: Sendable {
     let maximumParentDepth: Int
-    init(maximumParentDepth: Int = 12) { self.maximumParentDepth = max(0, maximumParentDepth) }
+    private let gitExecutableURL: URL
+    private let gitArgumentPrefix: [String]
+
+    init(
+        maximumParentDepth: Int = 12,
+        gitExecutableURL: URL = URL(fileURLWithPath: "/usr/bin/env"),
+        gitArgumentPrefix: [String] = ["git"]
+    ) {
+        self.maximumParentDepth = max(0, maximumParentDepth)
+        self.gitExecutableURL = gitExecutableURL
+        self.gitArgumentPrefix = gitArgumentPrefix
+    }
 
     func context(for directory: URL) async -> ProjectContext? {
         guard let definition = definition(for: directory) else { return nil }
@@ -331,9 +349,15 @@ struct ProjectContextProvider: Sendable {
     private func runGit(_ arguments: [String], at directory: URL) async -> String? {
         let process = Process()
         let pipe = Pipe()
+        let readHandle = pipe.fileHandleForReading
+        let writeHandle = pipe.fileHandleForWriting
+#if DEBUG
+        let lifecycleDebugID = UUID()
+        print("Pane lifecycle git-pipe[\(lifecycleDebugID.uuidString)] opened")
+#endif
         let output = BoundedProcessOutput(maximumBytes: 1_048_576)
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git"] + arguments
+        process.executableURL = gitExecutableURL
+        process.arguments = gitArgumentPrefix + arguments
         process.currentDirectoryURL = directory
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
@@ -342,16 +366,26 @@ struct ProjectContextProvider: Sendable {
         environment["GIT_CONFIG_NOSYSTEM"] = "1"
         environment["GIT_OPTIONAL_LOCKS"] = "0"
         process.environment = environment
-        pipe.fileHandleForReading.readabilityHandler = { handle in
+        readHandle.readabilityHandler = { handle in
             output.drainAvailableData(from: handle)
+        }
+        defer {
+            readHandle.readabilityHandler = nil
+            try? readHandle.close()
+            try? writeHandle.close()
+#if DEBUG
+            print("Pane lifecycle git-pipe[\(lifecycleDebugID.uuidString)] closed")
+#endif
         }
 
         do {
             try process.run()
         } catch {
-            pipe.fileHandleForReading.readabilityHandler = nil
             return nil
         }
+        // Process has duplicated the descriptor. Keeping the parent's writer
+        // open prevents EOF and can retain the readability callback forever.
+        try? writeHandle.close()
 
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: .milliseconds(250))
@@ -367,10 +401,14 @@ struct ProjectContextProvider: Sendable {
         }
         if process.isRunning {
             _ = kill(process.processIdentifier, SIGKILL)
+            let killDeadline = clock.now.advanced(by: .milliseconds(250))
+            while process.isRunning, clock.now < killDeadline {
+                try? await Task.sleep(for: .milliseconds(5))
+            }
         }
-        process.waitUntilExit()
-        pipe.fileHandleForReading.readabilityHandler = nil
-        output.append(pipe.fileHandleForReading.readDataToEndOfFile())
+        guard !process.isRunning else { return nil }
+        readHandle.readabilityHandler = nil
+        output.append(readHandle.readDataToEndOfFile())
         guard !Task.isCancelled, process.terminationStatus == 0 else { return nil }
         return output.string()
     }

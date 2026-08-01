@@ -1,0 +1,63 @@
+name: P2 Reference Soak
+
+on:
+  schedule:
+    - cron: "0 18 * * 6"
+  workflow_dispatch:
+    inputs:
+      preset:
+        description: Soak duration
+        required: true
+        default: 2h
+        type: choice
+        options:
+          - 2h
+          - 8h
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p2-reference-soak
+  cancel-in-progress: false
+
+jobs:
+  reference-soak:
+    name: App-hosted ${{ inputs.preset || '2h' }} soak
+    runs-on: [self-hosted, macOS, pane-reference]
+    timeout-minutes: 540
+    env:
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
+      PANE_SOAK_DRIVER: ${{ vars.PANE_SOAK_DRIVER_PATH }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Verify reference runner and app driver
+        run: |
+          test -d "$DEVELOPER_DIR"
+          test -n "$PANE_SOAK_DRIVER"
+          test -x "$PANE_SOAK_DRIVER"
+          xcodebuild -version
+          Scripts/P2/check-integrity.sh
+
+      - name: Run app-hosted soak
+        run: |
+          Scripts/P2/run-soak.sh \
+            --preset '${{ inputs.preset || '2h' }}' \
+            --interval-seconds 300 \
+            --artifact Artifacts/P2/pane-soak.jsonl \
+            --diagnostics-dir Artifacts/P2/soak-diagnostics \
+            --require-app-driver
+
+      - name: Capture sanitized runner metadata
+        if: always()
+        run: Scripts/P2/collect-ci-metadata.sh Artifacts/P2/ci
+
+      - name: Upload soak samples and sanitized diagnostics
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: Pane-P2-${{ inputs.preset || '2h' }}-soak-${{ github.run_id }}
+          path: Artifacts/P2
+          if-no-files-found: warn
+          retention-days: 90

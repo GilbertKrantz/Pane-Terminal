@@ -347,22 +347,37 @@ struct CommandComposerView: View {
     }
 
     @MainActor private func refreshComposerContextWhileVisible() async {
-        while !Task.isCancelled {
-            let path = session.currentDirectory
-            if contextDirectoryPath != path {
-                contextDirectoryPath = path
-                contextProject = nil
+        let path = session.currentDirectory
+        if contextDirectoryPath != path {
+            contextDirectoryPath = path
+            contextProject = nil
+        }
+        guard let path else {
+            contextProject = nil
+            return
+        }
+
+        let directory = URL(fileURLWithPath: path, isDirectory: true)
+        var reason = ContextRefreshReason.tabSelected
+        while !Task.isCancelled, session.currentDirectory == path {
+            let project = await session.composerProjectContext(
+                for: directory,
+                reason: reason
+            )
+            guard !Task.isCancelled, session.currentDirectory == path else {
+                return
             }
-            if let path {
-                let project = await session.composerProjectContext(
-                    for: URL(fileURLWithPath: path, isDirectory: true)
+            contextProject = project
+            reason = .ttlExpired
+            do {
+                try await Task.sleep(
+                    for: .seconds(
+                        PanePerformanceThresholds.selectedGitTTL
+                    )
                 )
-                guard !Task.isCancelled, session.currentDirectory == path else { return }
-                contextProject = project
-            } else {
-                contextProject = nil
+            } catch {
+                return
             }
-            try? await Task.sleep(for: .seconds(5))
         }
     }
 
@@ -476,7 +491,7 @@ struct CommandComposerView: View {
         }
 
         do {
-            try await Task.sleep(for: .milliseconds(110))
+            try await Task.sleep(for: PanePerformanceThresholds.autocompleteDebounce)
         } catch {
             return
         }

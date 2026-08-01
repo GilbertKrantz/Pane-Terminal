@@ -2,10 +2,15 @@ import Foundation
 
 struct CommandHistory: Equatable, Sendable {
     private(set) var commands: [String] = []
+    private let limit: Int
     private var cursor: Int?
     private var pendingDraft = ""
 
     var count: Int { commands.count }
+
+    init(limit: Int = ScrollbackPolicy.standard.finalizedBlockLimit) {
+        self.limit = max(0, limit)
+    }
 
     mutating func append(_ command: String) {
         guard !command.isEmpty else {
@@ -15,6 +20,9 @@ struct CommandHistory: Equatable, Sendable {
 
         if commands.last != command {
             commands.append(command)
+            if commands.count > limit {
+                commands.removeFirst(commands.count - limit)
+            }
         }
         resetNavigation()
     }

@@ -15,6 +15,9 @@ actor CompletionService {
     private var generation: UInt64 = 0
     private var currentTask: Task<Void, Never>?
 #if DEBUG
+    private let debugID = UUID()
+#endif
+#if DEBUG
     private var debugRequestID: UUID?
     private var debugInFlight: Set<CompletionProviderID> = []
     private var debugDiagnostics: [CompletionProviderDiagnostic] = []
@@ -30,6 +33,24 @@ actor CompletionService {
 
     init(localProvider: LocalAutocompleteProvider = LocalAutocompleteProvider()) {
         self.localProvider = localProvider
+        PaneResourceCounters.increment(.completionService)
+    }
+
+    deinit {
+        currentTask?.cancel()
+        PaneResourceCounters.decrement(.completionService)
+    }
+
+    /// Cancels the single request owned by this service. TerminalSession calls
+    /// this explicitly during teardown; AsyncStream termination is only a
+    /// secondary cancellation path.
+    func shutdown() {
+        generation &+= 1
+        currentTask?.cancel()
+        currentTask = nil
+#if DEBUG
+        print("Pane lifecycle autocomplete[\(debugID.uuidString)] stopped")
+#endif
     }
 
     func commandDidComplete(_ command: String) async {
@@ -41,12 +62,42 @@ actor CompletionService {
         await localProvider.invalidateProjectContext()
     }
 
+    func invalidateProjectContext() async {
+        await localProvider.invalidateProjectContext()
+    }
+
+    /// Invalidates response identity and waits for provider groups to observe
+    /// cancellation so resource counters converge before session teardown ends.
+    func cancelPendingRequests() async {
+        generation &+= 1
+        guard let task = currentTask else {
+#if DEBUG
+            print("Pane lifecycle autocomplete[\(debugID.uuidString)] stopped")
+#endif
+            return
+        }
+        currentTask = nil
+        task.cancel()
+        await task.value
+#if DEBUG
+        print("Pane lifecycle autocomplete[\(debugID.uuidString)] cancelled and stopped")
+#endif
+    }
+
     func projectDefinition(for directory: URL) async -> ProjectContext? {
         await localProvider.projectDefinition(for: directory)
     }
 
-    func projectContext(for directory: URL) async -> ProjectContext? {
-        await localProvider.projectContext(for: directory)
+    func projectContext(
+        for directory: URL,
+        visibility: SessionVisibilityState = .selected,
+        reason: ContextRefreshReason = .tabSelected
+    ) async -> ProjectContext? {
+        await localProvider.projectContext(
+            for: directory,
+            visibility: visibility,
+            reason: reason
+        )
     }
 
     /// Compatibility surface used by the composer. Unlike P0, zsh is another
@@ -86,10 +137,17 @@ actor CompletionService {
             createdAt: ContinuousClock.now
         )
         currentTask?.cancel()
+#if DEBUG
+        print("Pane lifecycle autocomplete[\(debugID.uuidString)] request started")
+#endif
         var continuation: AsyncStream<[CommandAutocompleteSuggestion]>.Continuation!
         let stream = AsyncStream<[CommandAutocompleteSuggestion]> { continuation = $0 }
         let task = Task { [weak self, localProvider, autocomplete, ranker] in
-            defer { continuation.finish() }
+            PaneResourceCounters.increment(.completionTask)
+            defer {
+                PaneResourceCounters.decrement(.completionTask)
+                continuation.finish()
+            }
             await withTaskGroup(of: [CompletionCandidate]?.self) { group in
                 group.addTask {
                     // This compatibility provider still combines cached local,
@@ -176,10 +234,17 @@ actor CompletionService {
         debugProjectID = request.projectContext?.identity
 #endif
         currentTask?.cancel()
+#if DEBUG
+        print("Pane lifecycle autocomplete[\(debugID.uuidString)] request started")
+#endif
         var continuation: AsyncStream<CompletionResponse>.Continuation!
         let stream = AsyncStream<CompletionResponse> { continuation = $0 }
         let task = Task { [weak self, ranker] in
-            defer { continuation.finish() }
+            PaneResourceCounters.increment(.completionTask)
+            defer {
+                PaneResourceCounters.decrement(.completionTask)
+                continuation.finish()
+            }
             let clock = ContinuousClock(); let started = clock.now
             await withTaskGroup(of: ProviderResult.self) { group in
                 for provider in providers {

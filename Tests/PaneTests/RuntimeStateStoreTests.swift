@@ -600,6 +600,10 @@ final class RuntimeStateStoreTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let databaseURL = directory.appendingPathComponent("runtime.sqlite")
         try Data("not a sqlite database".utf8).write(to: databaseURL)
+        let walURL = URL(fileURLWithPath: databaseURL.path + "-wal")
+        let sharedMemoryURL = URL(fileURLWithPath: databaseURL.path + "-shm")
+        try Data("stale wal".utf8).write(to: walURL)
+        try Data("stale shared memory".utf8).write(to: sharedMemoryURL)
         let controller = RuntimeStateController(
             databaseURL: databaseURL,
             configuration: RuntimeStateConfiguration(
@@ -621,6 +625,14 @@ final class RuntimeStateStoreTests: XCTestCase {
         XCTAssertTrue(result.diagnostic?.contains("recovery file") == true)
         let recoveryFile = await controller.recoveryFile()
         XCTAssertNotNil(recoveryFile)
+        if let recoveryFile {
+            XCTAssertTrue(FileManager.default.fileExists(
+                atPath: recoveryFile.path + "-wal"
+            ))
+            XCTAssertTrue(FileManager.default.fileExists(
+                atPath: recoveryFile.path + "-shm"
+            ))
+        }
     }
 
     private func temporaryDirectory(named name: String) -> URL {
@@ -943,4 +955,294 @@ extension RuntimeStateStoreTests {
         XCTAssertTrue(context.commandEvents.isEmpty)
         XCTAssertTrue(context.features.isEmpty)
     }
+
+    func testCommandEventPersistenceNeverRegressesFinality() async throws {
+        let session = RuntimeSession(
+            id: UUID(), workspaceID: nil, repositoryID: nil,
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp",
+            startedAt: Date(), lastActiveAt: Date()
+        )
+        let blockID = UUID()
+        let completed = PersistedCommandEvent(
+            blockID: blockID, sessionID: session.id, timestamp: Date(timeIntervalSince1970: 20),
+            workingDirectory: "/tmp", command: "swift test", exitCode: 0,
+            durationMilliseconds: 100, sanitizedOutputSummary: "passed",
+            sanitizedErrorSummary: nil, predictionSource: nil, predictionAction: nil,
+            completion: .completed, outputKind: .excerpt
+        )
+        let delayedPending = PersistedCommandEvent(
+            blockID: blockID, sessionID: session.id, timestamp: Date(timeIntervalSince1970: 30),
+            workingDirectory: "/tmp", command: "swift test", exitCode: nil,
+            durationMilliseconds: nil, sanitizedOutputSummary: nil,
+            sanitizedErrorSummary: nil, predictionSource: nil, predictionAction: nil,
+            completion: .unknown
+        )
+        let interrupted = PersistedCommandEvent(
+            blockID: blockID, sessionID: session.id, timestamp: Date(timeIntervalSince1970: 10),
+            workingDirectory: "/tmp", command: "swift test", exitCode: nil,
+            durationMilliseconds: 50, sanitizedOutputSummary: nil,
+            sanitizedErrorSummary: "interrupted", predictionSource: nil, predictionAction: nil,
+            completion: .interrupted, outputKind: .excerpt
+        )
+
+        let memoryStore = InMemoryRuntimeStateStore()
+        try await memoryStore.startSession(session)
+        try await memoryStore.persistCommandEvent(completed)
+        try await memoryStore.persistCommandEvent(delayedPending)
+        var context = try await memoryStore.loadRecentContext(
+            workspaceID: nil, repositoryID: nil, limit: 10
+        )
+        XCTAssertEqual(context.commandEvents.first?.completion, .completed)
+        XCTAssertEqual(context.commandEvents.first?.sanitizedOutputSummary, "passed")
+        try await memoryStore.persistCommandEvent(interrupted)
+        context = try await memoryStore.loadRecentContext(
+            workspaceID: nil, repositoryID: nil, limit: 10
+        )
+        XCTAssertEqual(context.commandEvents.first?.completion, .interrupted)
+
+        let directory = temporaryDirectory(named: "MonotonicSQLite")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let sqliteStore = try SQLiteRuntimeStateStore(
+            databaseURL: directory.appendingPathComponent("runtime.sqlite")
+        )
+        try await sqliteStore.startSession(session)
+        try await sqliteStore.persistCommandEvent(completed)
+        try await sqliteStore.persistCommandEvent(delayedPending)
+        context = try await sqliteStore.loadRecentContext(
+            workspaceID: nil, repositoryID: nil, limit: 10
+        )
+        XCTAssertEqual(context.commandEvents.first?.completion, .completed)
+        XCTAssertEqual(context.commandEvents.first?.sanitizedOutputSummary, "passed")
+        try await sqliteStore.persistCommandEvent(interrupted)
+        context = try await sqliteStore.loadRecentContext(
+            workspaceID: nil, repositoryID: nil, limit: 10
+        )
+        XCTAssertEqual(context.commandEvents.first?.completion, .interrupted)
+    }
+
+    func testSharedCoordinatorRecoversPriorLaunchOnlyOnce() async throws {
+        let directory = temporaryDirectory(named: "SharedCoordinator")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databaseURL = directory.appendingPathComponent("runtime.sqlite")
+        let priorSession = RuntimeSession(
+            id: UUID(), workspaceID: "/tmp", repositoryID: nil,
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp",
+            startedAt: Date(timeIntervalSince1970: 1),
+            lastActiveAt: Date(timeIntervalSince1970: 2)
+        )
+        let seed = try SQLiteRuntimeStateStore(databaseURL: databaseURL)
+        try await seed.startSession(priorSession)
+        await seed.close()
+
+        let coordinator = RuntimeStatePersistenceCoordinator(databaseURL: databaseURL)
+        let configuration = RuntimeStateConfiguration(
+            persistenceEnabled: true,
+            commandHistoryEnabled: true,
+            visibleSessionRecoveryEnabled: true,
+            predictionContextEnabled: false,
+            outputSummariesEnabled: false,
+            filePathCollectionEnabled: true
+        )
+        let firstSession = RuntimeSession(
+            id: UUID(), workspaceID: "/tmp", repositoryID: nil,
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp",
+            startedAt: Date(timeIntervalSince1970: 10),
+            lastActiveAt: Date(timeIntervalSince1970: 11)
+        )
+        let secondSession = RuntimeSession(
+            id: UUID(), workspaceID: "/tmp", repositoryID: nil,
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp",
+            startedAt: Date(timeIntervalSince1970: 20),
+            lastActiveAt: Date(timeIntervalSince1970: 21)
+        )
+        _ = await RuntimeStateController(
+            persistenceCoordinator: coordinator,
+            configuration: configuration
+        ).startSession(firstSession)
+        _ = await RuntimeStateController(
+            persistenceCoordinator: coordinator,
+            configuration: configuration
+        ).startSession(secondSession)
+
+        let store = try await coordinator.store()
+        let context = try await store.loadRecentContext(
+            workspaceID: nil, repositoryID: nil, limit: 10
+        )
+        XCTAssertEqual(
+            context.sessions.first { $0.id == priorSession.id }?.lifecycle,
+            .interrupted
+        )
+        XCTAssertEqual(
+            context.sessions.first { $0.id == firstSession.id }?.lifecycle,
+            .active
+        )
+        XCTAssertEqual(
+            context.sessions.first { $0.id == secondSession.id }?.lifecycle,
+            .active
+        )
+        await coordinator.shutdown()
+    }
+
+    func testFutureSchemaIsPreservedAndFallsBackToMemory() async throws {
+        let directory = temporaryDirectory(named: "FutureSchema")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databaseURL = directory.appendingPathComponent("runtime.sqlite")
+        var database: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &database), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(database, "PRAGMA user_version = 99", nil, nil, nil), SQLITE_OK)
+        sqlite3_close(database)
+        let original = try Data(contentsOf: databaseURL)
+
+        let coordinator = RuntimeStatePersistenceCoordinator(databaseURL: databaseURL)
+        let controller = RuntimeStateController(
+            persistenceCoordinator: coordinator,
+            configuration: RuntimeStateConfiguration(
+                persistenceEnabled: true,
+                commandHistoryEnabled: true,
+                visibleSessionRecoveryEnabled: true,
+                predictionContextEnabled: false,
+                outputSummariesEnabled: false,
+                filePathCollectionEnabled: true
+            )
+        )
+        let result = await controller.startSession(RuntimeSession(
+            id: UUID(), workspaceID: "/tmp", repositoryID: nil,
+            shell: "/bin/zsh", initialWorkingDirectory: "/tmp",
+            startedAt: Date(), lastActiveAt: Date()
+        ))
+
+        let diagnostic = await controller.persistenceDiagnosticSnapshot()
+        let recoveryFile = await controller.recoveryFile()
+        XCTAssertEqual(diagnostic.failureCategory, .unsupportedSchemaVersion)
+        XCTAssertTrue(result.diagnostic?.contains("memory-only") == true)
+        XCTAssertNil(recoveryFile)
+        XCTAssertEqual(try Data(contentsOf: databaseURL), original)
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: databaseURL.path + "-wal"
+            )
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: databaseURL.path + "-shm"
+            )
+        )
+        await coordinator.shutdown()
+    }
+
+    func testCoordinatorShutdownClosesStoreDeterministically() async throws {
+        let directory = temporaryDirectory(named: "CoordinatorClose")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let coordinator = RuntimeStatePersistenceCoordinator(
+            databaseURL: directory.appendingPathComponent("runtime.sqlite")
+        )
+        let store = try await coordinator.store()
+        await coordinator.shutdown()
+
+        do {
+            _ = try await coordinator.store()
+            XCTFail("A closed coordinator must not reopen the durable store")
+        } catch let error as RuntimeStateStoreError {
+            XCTAssertEqual(error.category, .closed)
+        }
+        do {
+            _ = try await store.loadRecentContext(
+                workspaceID: nil, repositoryID: nil, limit: 1
+            )
+            XCTFail("Operations on a closed SQLite store must fail")
+        } catch let error as RuntimeStateStoreError {
+            XCTAssertEqual(error.category, .closed)
+        }
+    }
+
+    func testEightConcurrentStoreOpensShareMigrationWithoutBusyFailure() async throws {
+        let root = temporaryDirectory(named: "ConcurrentMigration")
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        for iteration in 0..<10 {
+            let databaseURL = root
+                .appendingPathComponent("round-\(iteration)", isDirectory: true)
+                .appendingPathComponent("runtime.sqlite")
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                for _ in 0..<8 {
+                    group.addTask {
+                        let store = try SQLiteRuntimeStateStore(databaseURL: databaseURL)
+                        _ = try await store.loadRecentContext(
+                            workspaceID: nil, repositoryID: nil, limit: 1
+                        )
+                        await store.close()
+                    }
+                }
+                try await group.waitForAll()
+            }
+
+            let reader = try SQLiteRuntimeStateStore(databaseURL: databaseURL)
+            let context = try await reader.loadRecentContext(
+                workspaceID: nil, repositoryID: nil, limit: 1
+            )
+            XCTAssertTrue(context.sessions.isEmpty)
+            await reader.close()
+        }
+    }
+
+    func testInjectedMigrationCommitFaultRollsBackAndCanRetry() async throws {
+        let directory = temporaryDirectory(named: "InterruptedMigration")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let databaseURL = directory.appendingPathComponent("runtime.sqlite")
+
+        do {
+            _ = try SQLiteRuntimeStateStore(
+                databaseURL: databaseURL,
+                faultInjector: { checkpoint in
+                    if checkpoint == .beforeMigrationCommit {
+                        throw InjectedRuntimeStateFault()
+                    }
+                }
+            )
+            XCTFail("Expected injected migration failure")
+        } catch is InjectedRuntimeStateFault {
+            // The migration transaction must have rolled back completely.
+        }
+        XCTAssertEqual(try sqliteUserVersion(at: databaseURL), 0)
+
+        let recovered = try SQLiteRuntimeStateStore(databaseURL: databaseURL)
+        XCTAssertEqual(try sqliteUserVersion(at: databaseURL), 5)
+        await recovered.close()
+    }
+
+    private func sqliteUserVersion(at url: URL) throws -> Int {
+        var database: OpaquePointer?
+        guard sqlite3_open_v2(
+            url.path,
+            &database,
+            SQLITE_OPEN_READONLY,
+            nil
+        ) == SQLITE_OK, let database else {
+            throw RuntimeStateStoreError.openFailed(code: SQLITE_CANTOPEN)
+        }
+        defer { sqlite3_close(database) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            database,
+            "PRAGMA user_version",
+            -1,
+            &statement,
+            nil
+        ) == SQLITE_OK, let statement else {
+            throw RuntimeStateStoreError.databaseFailure(
+                operation: "test read user version",
+                code: sqlite3_errcode(database)
+            )
+        }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            throw RuntimeStateStoreError.databaseFailure(
+                operation: "test step user version",
+                code: sqlite3_errcode(database)
+            )
+        }
+        return Int(sqlite3_column_int(statement, 0))
+    }
 }
+
+private struct InjectedRuntimeStateFault: Error {}

@@ -129,12 +129,29 @@ extension InputModeTests {
             processGroupID: 42,
             shellProcessGroupID: 7,
             processName: "sudo",
-            isRawInput: true,
+            isRawInput: false,
             echoEnabled: false
         )
 
         XCTAssertFalse(snapshot.echoEnabled)
-        XCTAssertEqual(snapshot.terminalModeAttribution, .rawTermios("sudo"))
+        XCTAssertTrue(snapshot.requiresSecureInputFromTermios)
+        XCTAssertNil(snapshot.terminalModeAttribution)
+    }
+
+    func testRawInteractiveInputIsNotMistakenForSecureInput() {
+        let snapshot = ForegroundProcessSnapshot(
+            processGroupID: 42,
+            shellProcessGroupID: 7,
+            processName: "python3",
+            isRawInput: true,
+            echoEnabled: false
+        )
+
+        XCTAssertFalse(snapshot.requiresSecureInputFromTermios)
+        XCTAssertEqual(
+            snapshot.terminalModeAttribution,
+            .rawTermios("python3")
+        )
     }
 
     func testTerminalInputRequirementModelsBlockFirstStates() {

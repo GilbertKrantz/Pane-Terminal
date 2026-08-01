@@ -36,4 +36,16 @@ final class CommandHistoryTests: XCTestCase {
 
         XCTAssertEqual(history.count, 0)
     }
+
+    func testHistoryRetainsOnlyNewestConfiguredEntries() {
+        var history = CommandHistory(limit: 3)
+        for index in 0..<5 {
+            history.append("echo \(index)")
+        }
+
+        XCTAssertEqual(history.commands, ["echo 2", "echo 3", "echo 4"])
+        XCTAssertEqual(history.previous(currentDraft: ""), "echo 4")
+        XCTAssertEqual(history.previous(currentDraft: ""), "echo 3")
+        XCTAssertEqual(history.previous(currentDraft: ""), "echo 2")
+    }
 }
