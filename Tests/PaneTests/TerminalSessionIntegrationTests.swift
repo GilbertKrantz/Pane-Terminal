@@ -1846,7 +1846,7 @@ extension TerminalSessionIntegrationTests {
     @MainActor
     func testRestartPersistsActiveCommandAsInterruptedWithStableIDAndOutput() async throws {
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("Pane-RestartPersistence-(UUID().uuidString)")
+            .appendingPathComponent("Pane-RestartPersistence-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let databaseURL = directory.appendingPathComponent("runtime.sqlite")
@@ -1897,7 +1897,7 @@ extension TerminalSessionIntegrationTests {
     @MainActor
     func testApplicationExitPersistsSensitiveCommandAsNonRerunnablePlaceholder() async throws {
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("Pane-SensitiveExit-(UUID().uuidString)")
+            .appendingPathComponent("Pane-SensitiveExit-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let databaseURL = directory.appendingPathComponent("runtime.sqlite")
@@ -1959,7 +1959,7 @@ extension TerminalSessionIntegrationTests {
         configuration.persistenceEnabled = false
         let controller = RuntimeStateController(
             databaseURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("unused-(UUID().uuidString).sqlite"),
+                .appendingPathComponent("unused-\(UUID().uuidString).sqlite"),
             configuration: configuration,
             ephemeralStore: ephemeralStore
         )
@@ -2003,7 +2003,7 @@ extension TerminalSessionIntegrationTests {
         configuration.persistenceEnabled = false
         let controller = RuntimeStateController(
             databaseURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("unused-(UUID().uuidString).sqlite"),
+                .appendingPathComponent("unused-\(UUID().uuidString).sqlite"),
             configuration: configuration,
             ephemeralStore: ephemeralStore
         )

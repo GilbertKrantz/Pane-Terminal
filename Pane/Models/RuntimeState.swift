@@ -145,6 +145,47 @@ struct PersistedCommandEvent: Codable, Sendable, Equatable {
         self.isCollapsed = isCollapsed
         self.outputKind = outputKind
     }
+
+    /// Returns the durable representation that is safest to keep when two
+    /// writers report the same block. Lifecycle finality wins before
+    /// timestamp or payload completeness so a delayed "pending" write cannot
+    /// turn an interrupted or completed command back into an active one.
+    func monotonicallyMerged(with incoming: PersistedCommandEvent) -> PersistedCommandEvent {
+        precondition(blockID == incoming.blockID)
+        let existingRank = completion.persistenceRank
+        let incomingRank = incoming.completion.persistenceRank
+        if existingRank != incomingRank {
+            return existingRank > incomingRank ? self : incoming
+        }
+        if timestamp != incoming.timestamp {
+            return timestamp > incoming.timestamp ? self : incoming
+        }
+        let existingCompleteness = persistenceCompleteness
+        let incomingCompleteness = incoming.persistenceCompleteness
+        return existingCompleteness > incomingCompleteness ? self : incoming
+    }
+
+    private var persistenceCompleteness: Int {
+        var score = 0
+        if exitCode != nil { score += 1 }
+        if durationMilliseconds != nil { score += 1 }
+        if !(sanitizedOutputSummary?.isEmpty ?? true) { score += 1 }
+        if !(sanitizedErrorSummary?.isEmpty ?? true) { score += 1 }
+        if predictionSource != nil { score += 1 }
+        if predictionAction != nil { score += 1 }
+        if outputKind != .none { score += 1 }
+        return score
+    }
+}
+
+private extension PersistedCommandEvent.Completion {
+    var persistenceRank: Int {
+        switch self {
+        case .interrupted: 3
+        case .completed: 2
+        case .unknown: 1
+        }
+    }
 }
 
 struct RuntimeFeature: Codable, Sendable, Equatable {

@@ -29,6 +29,7 @@ Traditional terminals are powerful but linear. Modern block terminals are easier
 | **Structured Blocks mode** | Run commands from a multiline composer and get finalized blocks with command text, output, exit status, duration, search, copy, edit, rerun, and collapse controls. |
 | **Full Terminal mode** | Switch to the authoritative SwiftTerm view whenever you want a classic terminal layout or an app needs direct byte input. |
 | **Persistent zsh session** | Pane talks to one login, interactive zsh through a PTY, so shell state survives from command to command. |
+| **Multi-tab workspace** | Each tab owns one persistent PTY and one authoritative SwiftTerm view, with safe metadata-only workspace restoration into fresh shells. |
 | **Warm-shell autocomplete** | Suggestions come from the active zsh completion system through a private socket, with local history, executable, command, and filesystem fallback suggestions. |
 | **Smart input routing** | Normal commands use the composer; secure prompts, raw mode programs, known interactive tools, and alternate-screen apps route to SwiftTerm. |
 | **Alternate-screen isolation** | Full-screen TUIs such as editors and monitors stay in SwiftTerm's alternate buffer instead of polluting plain-text block transcripts. |
@@ -119,17 +120,21 @@ SwiftPM deliberately exposes no GUI executable. Run `Pane.app` from Xcode or wit
 Pane/
 ├── App/                 # SwiftUI app entry point
 ├── Assets.xcassets/     # macOS app icon assets
+├── Diagnostics/         # Sanitized snapshots, lifecycle ring, process metrics, and debug counters
 ├── Models/              # Command blocks, history, runtime state, prediction and security models
+├── Performance/         # Context refresh coordination, thresholds, and signposts
 ├── Terminal/            # PTY session, shell integration, parser, serializer, SwiftTerm bridge
 └── Views/               # Blocks timeline, composer, mode indicator, settings, and content view
 
 Tests/
-└── PaneTests/           # Unit and integration coverage for parser, session, state, UI helpers, and history
+├── PaneTests/           # Unit and integration coverage for parser, sessions, state, UI helpers, and history
+└── Compatibility/       # Deterministic terminal fixtures, app-hosted compatibility tests, and evidence
 ```
 
 Core responsibilities:
 
-- `TerminalSession` owns the SwiftTerm `LocalProcess`, PTY lifecycle, command writes, resize propagation, input mode, history, block timeline, transcript filtering, and cleanup.
+- `TerminalSession` owns session-local PTY lifecycle through `PTYController`, command writes, resize propagation, input mode, history, block timeline, transcript filtering, and cleanup.
+- `TerminalWorkspaceController` owns tab selection and lifecycle while preserving one session-local PTY and authoritative terminal view per tab.
 - `PaneTerminalView` observes real buffer activation and invalidates the complete native drawing surface when the active buffer changes.
 - `TerminalViewRepresentable` moves one stable AppKit host between Blocks and Full Terminal mounts without reconstructing emulator state or replaying transcripts.
 - `ShellIntegration` installs additive zsh `preexec` and `precmd` hooks plus private OSC 777 markers for command lifecycle detection.
@@ -137,7 +142,7 @@ Core responsibilities:
 - `CommandAutocomplete` combines warm-shell `compsys` capture with bounded local history, command, executable, and filesystem suggestions.
 - `TerminalSecurityState` follows PTY ECHO state so password prompts and secure reads bypass prediction and persistence paths.
 - `SensitiveDataSanitizer` is the shared redaction boundary for commands, output, errors, and allowlisted environment values.
-- `SQLiteRuntimeStateStore` provides WAL-backed, schema-versioned storage with age, count, and size retention.
+- `RuntimeStatePersistenceCoordinator` shares one `SQLiteRuntimeStateStore` handle across tabs; the store provides WAL-backed, schema-versioned storage with age, count, and size retention.
 
 PTY bytes intentionally have two destinations:
 
@@ -168,7 +173,10 @@ Autocomplete appears when the shell is idle and the caret follows a non-whitespa
 
 Eligible completed commands and block metadata are written asynchronously to local SQLite storage. On launch, Pane marks stale active records interrupted, restores bounded durable block history behind a session boundary, validates the previous directory, and starts a fresh shell there or falls back to the home directory.
 
-Pane never resurrects a PTY, foreground process, alternate-screen buffer, draft, secure input, raw terminal byte stream, or automatically executes a restored command.
+Pane never resurrects a PTY, foreground process, alternate-screen buffer,
+secure draft, secure input, raw terminal byte stream, or automatically executes
+a restored command. Workspace restoration may retain only a bounded,
+non-secure composer draft and always places it in a fresh shell.
 
 ## Keyboard shortcuts
 
@@ -192,6 +200,10 @@ Pane never resurrects a PTY, foreground process, alternate-screen buffer, draft,
 
 Option acts as Meta in Terminal mode. The native toolbar and **Terminal** menu expose the primary mode and lifecycle actions without requiring pointer input.
 
+Each tab keeps an isolated shell, terminal buffer, command timeline, completion
+generation, focus target, and secure-input state. Workspace restoration stores
+only bounded safe metadata and always creates fresh shells.
+
 ## Terminal behavior
 
 - SwiftTerm provides ANSI/VT rendering, selection, copy and paste, hyperlinks, mouse reporting, alternate buffers, and 10,000 lines of scrollback.
@@ -213,8 +225,17 @@ Option acts as Meta in Terminal mode. The native toolbar and **Terminal** menu e
 - Replacing zsh with `exec`, removing integration hooks, or redefining them can prevent completion markers and leave a block running until interruption, shell exit, or restart.
 - Warm-shell autocomplete depends on zsh socket, ZLE, PTY, and completion modules. Pane falls back to less context-aware local suggestions when capture is unavailable.
 - Automatic input classification combines alternate-screen, process-group, termios, and bounded process-name signals. Manual Full Terminal selection remains authoritative until you leave it.
-- There are no tabs, generated AI predictions, synchronization, remote-session management, or cloud export.
+- Pane supports a single-window multi-tab workspace. Split panes, multiple
+  windows, detachable tabs, generated AI predictions, synchronization,
+  remote-session reconnection, and cloud export are not implemented.
 
 ## Project status
 
-Pane is a focused macOS terminal experiment. The foundation is in place: a persistent PTY shell, structured blocks, native UI, durable safe history, shell-authoritative completion capture, project-aware local fallback, secure-input routing, and terminal-mode escape hatches. The next prediction layer can build on the local evidence model without compromising the core rule that the shell remains authoritative.
+Pane is a focused macOS terminal experiment. The foundation is in place: isolated persistent PTYs across a multi-tab workspace, structured blocks, native UI, durable safe history, shell-authoritative completion capture, project-aware local fallback, secure-input routing, and terminal-mode escape hatches.
+
+P2 hardens that foundation for daily-driver use through compatibility,
+multi-session, resource, large-output, and recovery testing. See
+[the compatibility dashboard](docs/compatibility.md) and
+[the P2 release-validation checklist](docs/p2-release-validation.md). The next
+roadmap step after P2 is **essential settings and distribution**, not split
+panes or MLX completion.

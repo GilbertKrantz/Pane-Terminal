@@ -29,6 +29,16 @@ let package = Package(
             dependencies: ["Pane"],
             path: "Tests/PaneTests",
             swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        .testTarget(
+            name: "PaneCompatibilityTests",
+            dependencies: ["Pane"],
+            path: "Tests/Compatibility",
+            exclude: ["Scripts", "Snapshots"],
+            resources: [
+                .copy("Fixtures")
+            ],
+            swiftSettings: [.swiftLanguageMode(.v5)]
         )
     ]
 )

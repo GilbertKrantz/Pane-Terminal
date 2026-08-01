@@ -1,0 +1,234 @@
+{
+  "schemaVersion": 2,
+  "updatedAt": "2026-07-29",
+  "cases": [
+    {
+      "application": "zsh and basic commands",
+      "launch": "Pass",
+      "input": "Pass",
+      "resize": "Pending",
+      "tabSwitch": "Pending",
+      "exit": "Pass",
+      "source": "TerminalSessionIntegrationTests and PaneConnectedCompatibilityTests",
+      "date": "2026-07-29",
+      "notes": "clean HOME/ZDOTDIR Pane PTY"
+    },
+    {
+      "application": "Pane alternate-screen fixture",
+      "launch": "Pass",
+      "input": "Pass",
+      "resize": "Pass",
+      "tabSwitch": "Pass",
+      "exit": "Pass",
+      "source": "PaneConnectedCompatibilityTests and WorkspaceStressRunnerTests",
+      "date": "2026-07-29",
+      "notes": "selected/background input identity and stable authoritative view asserted"
+    },
+    {
+      "application": "Bracketed paste fixture",
+      "launch": "Pass",
+      "input": "Pass",
+      "resize": "N/A",
+      "tabSwitch": "Pass",
+      "exit": "Pass",
+      "source": "PaneConnectedCompatibilityTests.testBracketedPasteUsesSelectedPaneTerminalOnly",
+      "date": "2026-07-29",
+      "notes": "SwiftTerm markers and selected-session isolation asserted with Unicode payload"
+    },
+    {
+      "application": "Mouse reporting fixture",
+      "launch": "Pass",
+      "input": "Pending",
+      "resize": "N/A",
+      "tabSwitch": "Pass",
+      "exit": "Pass",
+      "source": "PaneConnectedCompatibilityTests.testMouseReportingRejectsStaleBackgroundEvent",
+      "date": "2026-07-29",
+      "notes": "click encoding and stale-background rejection pass; drag, wheel, and trackpad review remain Pending"
+    },
+    {
+      "application": "Pane split-byte Unicode fixture",
+      "launch": "Pass",
+      "input": "N/A",
+      "resize": "Pending",
+      "tabSwitch": "Pending",
+      "exit": "Pass",
+      "source": "PaneConnectedCompatibilityTests.testFixtureRunsThroughPanePTYAndAuthoritativeTerminal",
+      "date": "2026-07-29",
+      "notes": "block output preserves tested graphemes"
+    },
+    {
+      "application": "Pane SIGWINCH fixture",
+      "launch": "Pass",
+      "input": "N/A",
+      "resize": "Pass",
+      "tabSwitch": "Pending",
+      "exit": "Pass",
+      "source": "PaneConnectedCompatibilityTests.testPanePTYResizeDeliversSIGWINCHToInteractiveFixture",
+      "date": "2026-07-29",
+      "notes": "Pane terminal resize reaches the fixture PTY"
+    },
+    {
+      "application": "Large output fixture (10k lines)",
+      "launch": "Pass",
+      "input": "N/A",
+      "resize": "Pending",
+      "tabSwitch": "Pass",
+      "exit": "Pass",
+      "source": "PaneConnectedCompatibilityTests.testLargeOutputThroughBackgroundPaneSessionStaysIsolated",
+      "date": "2026-07-29",
+      "notes": "background Pane PTY stays isolated and bounded while selected-session input completes"
+    },
+    {
+      "application": "Vim",
+      "launch": "Pass",
+      "input": "Pass",
+      "resize": "Pending",
+      "tabSwitch": "Pending",
+      "exit": "Pass",
+      "source": "PaneConnectedCompatibilityTests.testSystemVimEditsAcrossAlternateScreenAndExitsCleanly",
+      "date": "2026-07-29",
+      "notes": "system Vim with clean configuration"
+    },
+    {
+      "application": "Neovim",
+      "launch": "Pending",
+      "input": "Pending",
+      "resize": "Pending",
+      "tabSwitch": "Pending",
+      "exit": "Pending",
+      "notes": "dated manual or self-hosted application run required"
+    },
+    {
+      "application": "less",
+      "launch": "Pass",
+      "input": "Pass",
+      "resize": "Pending",
+      "tabSwitch": "Pending",
+      "exit": "Pass",
+      "source": "PaneConnectedCompatibilityTests.testLessAndPythonREPLPreserveDirectInputAndReturnToComposer",
+      "date": "2026-07-29",
+      "notes": "system less direct-input exit"
+    },
+    {
+      "application": "man",
+      "launch": "Pass",
+      "input": "Pass",
+      "resize": "Pending",
+      "tabSwitch": "Pending",
+      "exit": "Pass",
+      "source": "PaneConnectedCompatibilityTests.testSystemManAndTopExitWithoutTerminalStateCorruption",
+      "date": "2026-07-29",
+      "notes": "system man with less pager"
+    },
+    {
+      "application": "top",
+      "launch": "Pass",
+      "input": "Pass",
+      "resize": "Pending",
+      "tabSwitch": "Pending",
+      "exit": "Pass",
+      "source": "PaneConnectedCompatibilityTests.testSystemManAndTopExitWithoutTerminalStateCorruption",
+      "date": "2026-07-29",
+      "notes": "system top direct input and normal exit"
+    },
+    {
+      "application": "htop / btop",
+      "launch": "Pending",
+      "input": "Pending",
+      "resize": "Pending",
+      "tabSwitch": "Pending",
+      "exit": "Pending",
+      "notes": "optional tools remain Pending when unavailable"
+    },
+    {
+      "application": "fzf",
+      "launch": "Pending",
+      "input": "Pending",
+      "resize": "Pending",
+      "tabSwitch": "Pending",
+      "exit": "Pending",
+      "notes": "dated manual or self-hosted application run required"
+    },
+    {
+      "application": "tmux",
+      "launch": "Pending",
+      "input": "Pending",
+      "resize": "Pending",
+      "tabSwitch": "Pending",
+      "exit": "Pending",
+      "notes": "dated manual or self-hosted application run required"
+    },
+    {
+      "application": "SSH (local fixture)",
+      "launch": "Pass",
+      "input": "Pass",
+      "resize": "Pending",
+      "tabSwitch": "Pass",
+      "exit": "Pass",
+      "source": "PaneConnectedCompatibilityTests.testLocalSSHThroughPanePTYStaysSessionLocalAndExitsCleanly",
+      "date": "2026-07-29",
+      "notes": "unprivileged loopback-only sshd with temporary host/client keys; no public host"
+    },
+    {
+      "application": "Docker shell",
+      "launch": "Pending",
+      "input": "Pending",
+      "resize": "Pending",
+      "tabSwitch": "Pending",
+      "exit": "Pending",
+      "notes": "local runtime required"
+    },
+    {
+      "application": "Python REPL",
+      "launch": "Pass",
+      "input": "Pass",
+      "resize": "Pending",
+      "tabSwitch": "Pending",
+      "exit": "Pass",
+      "source": "PaneConnectedCompatibilityTests.testLessAndPythonREPLPreserveDirectInputAndReturnToComposer",
+      "date": "2026-07-29",
+      "notes": "raw input is kept distinct from secure input"
+    },
+    {
+      "application": "Node REPL",
+      "launch": "Pass",
+      "input": "Pass",
+      "resize": "Pending",
+      "tabSwitch": "Pending",
+      "exit": "Pass",
+      "source": "PaneConnectedCompatibilityTests.testNodeAndSQLiteREPLsPreserveSessionLocalInput",
+      "date": "2026-07-29",
+      "notes": "installed Node direct-input REPL"
+    },
+    {
+      "application": "database CLI",
+      "launch": "Pass",
+      "input": "Pass",
+      "resize": "Pending",
+      "tabSwitch": "Pending",
+      "exit": "Pass",
+      "source": "PaneConnectedCompatibilityTests.testNodeAndSQLiteREPLsPreserveSessionLocalInput",
+      "date": "2026-07-29",
+      "notes": "system SQLite in-memory REPL"
+    },
+    {
+      "application": "OpenCode / Codex",
+      "launch": "Pending",
+      "input": "Pending",
+      "resize": "Pending",
+      "tabSwitch": "Pending",
+      "exit": "Pending",
+      "notes": "dated manual application run required"
+    },
+    {
+      "application": "Real trackpad and complex Unicode visual review",
+      "launch": "Pending",
+      "input": "Pending",
+      "resize": "Pending",
+      "tabSwitch": "Pending",
+      "exit": "Pending",
+      "notes": "manual release review required"
+    }
+  ]
+}

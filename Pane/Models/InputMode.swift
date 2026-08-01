@@ -82,6 +82,13 @@ struct ForegroundProcessSnapshot: Equatable, Sendable {
         Self.isKnownInteractiveProgram(named: processName)
     }
 
+    /// An echo-disabled canonical foreground process is the termios shape
+    /// used by password/passphrase prompts. Raw applications may also disable
+    /// echo, but that alone must not put the whole TUI or REPL in secure mode.
+    var requiresSecureInputFromTermios: Bool {
+        !echoEnabled && !isRawInput
+    }
+
     var terminalModeAttribution: InputModeAttribution? {
         // Interactive shells commonly put their own line editor into raw
         // termios mode. The shell foreground is still the Blocks-mode idle

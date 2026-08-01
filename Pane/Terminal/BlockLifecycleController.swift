@@ -58,13 +58,22 @@ struct BoundedByteTail {
 final class BlockLifecycleController {
     private(set) var timeline = CommandBlockTimeline()
     private(set) var awaitingStartID: UUID?
+    private(set) var pruningNotice: ScrollbackPruningNotice?
 
     var onTimelineChanged: ((CommandBlockTimeline) -> Void)?
+    var onTimelinePruned: ((ScrollbackPruningNotice) -> Void)?
 
-    private var activeOutput = BoundedByteTail(limit: 4 * 1_024 * 1_024)
-    private var activeTerminalBytes = BoundedByteTail(limit: 4 * 1_024 * 1_024)
+    private let scrollbackPolicy: ScrollbackPolicy
+    private var activeCapture: BoundedHeadTailByteCapture
     private var activeUsedNonAlternateDirectInteraction = false
     private var activeEnteredAlternateScreen = false
+
+    init(scrollbackPolicy: ScrollbackPolicy = .standard) {
+        self.scrollbackPolicy = scrollbackPolicy
+        activeCapture = BoundedHeadTailByteCapture(
+            limit: scrollbackPolicy.excerptByteLimit
+        )
+    }
 
     var isCommandActive: Bool {
         timeline.activeBlockID != nil || awaitingStartID != nil
@@ -80,7 +89,7 @@ final class BlockLifecycleController {
     }
 
     var capturedOutputData: Data {
-        activeOutput.data
+        activeCapture.data
     }
 
     @discardableResult
@@ -127,8 +136,7 @@ final class BlockLifecycleController {
         if data.range(of: AlternateScreenTranscriptFilter.transitionPlaceholder) != nil {
             activeEnteredAlternateScreen = true
         }
-        activeOutput.append(data)
-        activeTerminalBytes.append(data)
+        activeCapture.append(data)
     }
 
     func markDirectInteraction() {
@@ -155,18 +163,21 @@ final class BlockLifecycleController {
         if exitCode == 128 + SIGINT {
             timeline.interruptActive(
                 exitCode: exitCode,
-                output: output,
+                output: output.text,
+                outputKind: output.kind,
                 terminalSnapshot: snapshot
             )
             completedID = activeID
         } else {
             completedID = timeline.finishActive(
                 exitCode: exitCode,
-                output: output,
+                output: output.text,
+                outputKind: output.kind,
                 terminalSnapshot: snapshot
             )
         }
         resetCapture()
+        applyScrollbackPolicy(compactOversizedOutputs: false)
         publishTimeline()
         return completedID
     }
@@ -176,6 +187,7 @@ final class BlockLifecycleController {
         guard let awaitingStartID else { return nil }
         timeline.interruptQueued(id: awaitingStartID, exitCode: exitCode)
         self.awaitingStartID = nil
+        applyScrollbackPolicy(compactOversizedOutputs: false)
         publishTimeline()
         return awaitingStartID
     }
@@ -194,9 +206,11 @@ final class BlockLifecycleController {
             return nil
         }
 
+        let output = finalizedOutput(renderedOutput: renderedOutput)
         timeline.interruptUnfinished(
             exitCode: exitCode,
-            activeOutput: finalizedOutput(renderedOutput: renderedOutput),
+            activeOutput: output.text,
+            activeOutputKind: output.kind,
             activeTerminalSnapshot: finalizedTerminalSnapshot(
                 columns: columns,
                 rows: rows
@@ -204,6 +218,7 @@ final class BlockLifecycleController {
         )
         awaitingStartID = nil
         resetCapture()
+        applyScrollbackPolicy(compactOversizedOutputs: false)
         publishTimeline()
         return blockID
     }
@@ -231,6 +246,7 @@ final class BlockLifecycleController {
 
     func restore(_ blocks: [CommandBlock]) {
         timeline.restore(blocks)
+        applyScrollbackPolicy()
         publishTimeline()
     }
 
@@ -246,6 +262,10 @@ final class BlockLifecycleController {
 
     func clearCapture() {
         resetCapture()
+    }
+
+    func dismissPruningNotice() {
+        pruningNotice = nil
     }
 
     func assertInvariants(
@@ -297,12 +317,30 @@ final class BlockLifecycleController {
         return sawCarriageReturn && !data.contains(0x0A)
     }
 
-    private func finalizedOutput(renderedOutput: String?) -> String {
-        guard timeline.activeBlockID != nil else { return "" }
-        if let renderedOutput {
-            return renderedOutput
+    private func finalizedOutput(renderedOutput: String?) -> CompactedBlockOutput {
+        guard timeline.activeBlockID != nil else {
+            return CompactedBlockOutput(text: "", kind: .none, omittedByteCount: 0)
         }
-        return BlockOutputSanitizer.sanitize(activeOutput.data)
+        // A mounted terminal transcript is itself bounded by terminal
+        // scrollback. Once the stream capture has truncated, use its
+        // head/tail representation so a short rendered viewport cannot be
+        // mislabeled as complete output.
+        if activeCapture.isTruncated {
+            return BoundedOutputCompactor.compactSanitizedCapture(
+                activeCapture,
+                byteLimit: scrollbackPolicy.excerptByteLimit
+            )
+        }
+        if let renderedOutput {
+            return BoundedOutputCompactor.compact(
+                renderedOutput,
+                byteLimit: scrollbackPolicy.excerptByteLimit
+            )
+        }
+        return BoundedOutputCompactor.compactSanitizedCapture(
+            activeCapture,
+            byteLimit: scrollbackPolicy.excerptByteLimit
+        )
     }
 
     private func finalizedTerminalSnapshot(
@@ -310,26 +348,39 @@ final class BlockLifecycleController {
         rows: Int
     ) -> TerminalReplaySnapshot? {
         guard timeline.activeBlockID != nil else { return nil }
-        let rawBytes = activeTerminalBytes.data
+        let rawBytes = activeCapture.data
         let requiresRichRendering = Self.requiresRichTerminalRendering(rawBytes)
             || (activeUsedNonAlternateDirectInteraction && !activeEnteredAlternateScreen)
         guard requiresRichRendering else { return nil }
 
-        let safeBytes = TerminalReplaySanitizer.sanitize(rawBytes)
+        let safeBytes = BoundedOutputCompactor.compactReplay(
+            activeCapture,
+            byteLimit: scrollbackPolicy.excerptByteLimit
+        )
         guard !safeBytes.isEmpty else { return nil }
         return TerminalReplaySnapshot(
             bytes: safeBytes,
             columns: max(1, columns),
             rows: max(1, rows),
-            isTruncated: activeTerminalBytes.isTruncated
+            isTruncated: activeCapture.isTruncated
         )
     }
 
     private func resetCapture() {
-        activeOutput.removeAll()
-        activeTerminalBytes.removeAll()
+        activeCapture.removeAll()
         activeUsedNonAlternateDirectInteraction = false
         activeEnteredAlternateScreen = false
+    }
+
+    private func applyScrollbackPolicy(compactOversizedOutputs: Bool = true) {
+        guard let notice = timeline.enforceScrollbackPolicy(
+            scrollbackPolicy,
+            compactOversizedOutputs: compactOversizedOutputs
+        ) else {
+            return
+        }
+        pruningNotice = notice
+        onTimelinePruned?(notice)
     }
 
     private func publishTimeline() {

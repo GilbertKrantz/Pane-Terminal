@@ -9,14 +9,36 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   DEVELOPER_DIR: /Applications/Xcode_26.4.app/Contents/Developer
+  PANE_FIXTURE_STARTUP_TIMEOUT_SECONDS: "5"
+  PANE_FIXTURE_READINESS_TIMEOUT_SECONDS: "5"
+  PANE_FIXTURE_ACTION_TIMEOUT_SECONDS: "5"
+  PANE_FIXTURE_CLEANUP_TIMEOUT_SECONDS: "2"
+  PANE_FIXTURE_TOTAL_TIMEOUT_SECONDS: "20"
 
 jobs:
-  swiftpm:
-    name: SwiftPM
+  integrity:
+    name: Repository integrity
     runs-on: macos-26
-    timeout-minutes: 15
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Conflict markers, whitespace, and compatibility evidence
+        run: Scripts/P2/check-integrity.sh
+
+  swiftpm:
+    name: SwiftPM standard and compatibility tests
+    needs: integrity
+    runs-on: macos-26
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
 
@@ -42,13 +64,39 @@ jobs:
       - name: Build
         run: swift build
 
-      - name: Test
-        run: swift test
+      - name: Run Pane standard tests
+        run: |
+          mkdir -p .ci/p2-artifacts
+          set -o pipefail
+          swift test --filter PaneTests \
+            2>&1 | tee .ci/p2-artifacts/swiftpm-standard.log
+
+      - name: Run short compatibility fixtures
+        run: |
+          mkdir -p .ci/p2-artifacts
+          set -o pipefail
+          swift test --filter PaneCompatibilityTests \
+            2>&1 | tee .ci/p2-artifacts/swiftpm-compatibility.log
+
+      - name: Capture sanitized runner metadata
+        if: always()
+        run: Scripts/P2/collect-ci-metadata.sh .ci/p2-artifacts
+
+      - name: Upload SwiftPM diagnostics
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: Pane-SwiftPM-diagnostics
+          path: .ci/p2-artifacts
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 14
 
   xcode:
-    name: Xcode app tests
+    name: Native Pane test targets
+    needs: integrity
     runs-on: macos-26
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v5
 
@@ -68,7 +116,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-xcode-
 
-      - name: Run app test target
+      - name: Run PaneTests
         run: |
           xcodebuild \
             -project Pane.xcodeproj \
@@ -78,14 +126,39 @@ jobs:
             -derivedDataPath .ci/DerivedData \
             -clonedSourcePackagesDirPath .ci/SourcePackages \
             -resultBundlePath .ci/PaneTests.xcresult \
+            -only-testing:PaneTests \
             CODE_SIGNING_ALLOWED=NO \
             test
 
-      - name: Upload test result bundle
-        if: failure()
+      - name: Run app-hosted PaneCompatibilityTests non-parallel
+        if: always()
+        run: |
+          xcodebuild \
+            -project Pane.xcodeproj \
+            -scheme Pane \
+            -destination 'platform=macOS' \
+            -configuration Debug \
+            -derivedDataPath .ci/DerivedData \
+            -clonedSourcePackagesDirPath .ci/SourcePackages \
+            -resultBundlePath .ci/PaneCompatibilityTests.xcresult \
+            -only-testing:PaneCompatibilityTests \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+      - name: Capture sanitized runner metadata
+        if: always()
+        run: Scripts/P2/collect-ci-metadata.sh .ci/p2-artifacts
+
+      - name: Upload native result bundles and diagnostics
+        if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: Pane-xcresult
-          path: .ci/PaneTests.xcresult
-          if-no-files-found: ignore
-          retention-days: 7
+          name: Pane-native-test-artifacts
+          path: |
+            .ci/PaneTests.xcresult
+            .ci/PaneCompatibilityTests.xcresult
+            .ci/p2-artifacts
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 14

@@ -210,7 +210,7 @@ final class TerminalWorkspaceControllerTests: XCTestCase {
         second.rename("Server")
         original.moveTab(id: secondID, to: 0)
         original.selectTab(id: first.id)
-        original.persistWorkspace()
+        await original.persistWorkspace()
 
         let originalSessions = Dictionary(
             uniqueKeysWithValues: original.tabs.map { ($0.id, $0.session.sessionID) }

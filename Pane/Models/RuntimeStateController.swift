@@ -37,12 +37,10 @@ struct RuntimeStateOperationResult: Sendable {
 /// events; the SQLite store performs a second sanitization pass before writes.
 actor RuntimeStateController {
     private let databaseURL: URL
+    private let persistenceCoordinator: RuntimeStatePersistenceCoordinator
     private let ephemeralStore: InMemoryRuntimeStateStore
-    private var durableStore: SQLiteRuntimeStateStore?
     private var configuration: RuntimeStateConfiguration
     private var currentSession: RuntimeSession?
-    private var recoveryDiagnostic: String?
-    private var recoveryFileURL: URL?
     private var previousBehavioralCommand: BehavioralCommandRecord?
 
     init(
@@ -53,6 +51,20 @@ actor RuntimeStateController {
         self.databaseURL = databaseURL
         self.configuration = configuration
         self.ephemeralStore = ephemeralStore
+        self.persistenceCoordinator = RuntimeStatePersistenceCoordinator(
+            databaseURL: databaseURL,
+            ephemeralStore: ephemeralStore
+        )
+    }
+
+    init(
+        persistenceCoordinator: RuntimeStatePersistenceCoordinator,
+        configuration: RuntimeStateConfiguration
+    ) {
+        self.databaseURL = persistenceCoordinator.databaseURL
+        self.configuration = configuration
+        self.ephemeralStore = persistenceCoordinator.ephemeralStore
+        self.persistenceCoordinator = persistenceCoordinator
     }
 
     func startSession(_ session: RuntimeSession, restoreLimit: Int = 200) async -> RuntimeStateOperationResult {
@@ -86,8 +98,8 @@ actor RuntimeStateController {
         }
 
         do {
-            let store = try durableStateStore()
-            _ = try await store.markActiveSessionsInterrupted(excluding: currentSession.id)
+            _ = try await persistenceCoordinator.prepareCurrentLaunch()
+            let store = try await durableStateStore()
             let scope = restorationScope(for: currentSession)
             let context = try await store.loadRecentContext(
                 workspaceID: scope.workspaceID,
@@ -95,7 +107,7 @@ actor RuntimeStateController {
                 limits: restorationLimits(commandLimit: restoreLimit)
             )
             try await store.startSession(currentSession)
-            try await store.applyRetentionPolicy()
+            await persistenceCoordinator.scheduleMaintenance()
             if configuration.predictionContextEnabled,
                await store.needsBehavioralBackfill() {
                 Task {
@@ -107,7 +119,7 @@ actor RuntimeStateController {
             }
             return RuntimeStateOperationResult(
                 restoredContext: context,
-                diagnostic: recoveryDiagnostic,
+                diagnostic: await persistenceCoordinator.diagnostic().message,
                 restoresCommandHistory: configuration.commandHistoryEnabled,
                 restoresVisibleBlocks: configuration.visibleSessionRecoveryEnabled
             )
@@ -166,7 +178,7 @@ actor RuntimeStateController {
 
         guard configuration.persistenceEnabled else { return nil }
         do {
-            let store = try durableStateStore()
+            let store = try await durableStateStore()
             if let currentSession {
                 try await store.startSession(currentSession)
             }
@@ -346,7 +358,7 @@ actor RuntimeStateController {
         guard let currentSession else { return nil }
         do {
             try await ephemeralStore.deleteSession(currentSession.id)
-            if let store = try durableStateStoreIfPresentOrEnabled() {
+            if let store = try await durableStateStoreIfPresentOrEnabled() {
                 try await store.deleteSession(currentSession.id)
                 if storesSessionMetadata {
                     try await store.startSession(currentSession)
@@ -367,7 +379,7 @@ actor RuntimeStateController {
         }
         do {
             try await ephemeralStore.deleteWorkspace(workspaceID)
-            if let store = try durableStateStoreIfPresentOrEnabled() {
+            if let store = try await durableStateStoreIfPresentOrEnabled() {
                 try await store.deleteWorkspace(workspaceID)
                 if storesSessionMetadata {
                     try await store.startSession(currentSession)
@@ -386,7 +398,7 @@ actor RuntimeStateController {
         guard let currentSession else { return nil }
         do {
             try await ephemeralStore.updateSessionLifecycle(currentSession.id, lifecycle: .closedCleanly, lastActiveAt: date)
-            if let store = try durableStateStoreIfPresentOrEnabled() {
+            if let store = try await durableStateStoreIfPresentOrEnabled() {
                 try await store.updateSessionLifecycle(currentSession.id, lifecycle: .closedCleanly, lastActiveAt: date)
             }
             self.currentSession = RuntimeSession(
@@ -409,19 +421,16 @@ actor RuntimeStateController {
     }
 
     func recoverInterruptedSessions(excludingCurrentSession: Bool = true) async -> [RuntimeSession] {
-        let excluded = excludingCurrentSession ? currentSession?.id : nil
-        var recovered = (try? await ephemeralStore.markActiveSessionsInterrupted(excluding: excluded)) ?? []
-        if let store = try? durableStateStoreIfPresentOrEnabled(),
-           let durable = try? await store.markActiveSessionsInterrupted(excluding: excluded) {
-            recovered.append(contentsOf: durable)
-        }
-        return recovered.sorted { $0.lastActiveAt > $1.lastActiveAt }
+        _ = excludingCurrentSession // Recovery is launch-scoped for shared multi-tab storage.
+        guard configuration.persistenceEnabled else { return [] }
+        return ((try? await persistenceCoordinator.prepareCurrentLaunch()) ?? [])
+            .sorted { $0.lastActiveAt > $1.lastActiveAt }
     }
 
     func deleteAllState() async -> String? {
         do {
             try await ephemeralStore.deleteAllState()
-            if let store = try durableStateStoreIfPresentOrEnabled() {
+            if let store = try await durableStateStoreIfPresentOrEnabled() {
                 try await store.deleteAllState()
                 if storesSessionMetadata, let currentSession {
                     try await store.startSession(currentSession)
@@ -440,7 +449,7 @@ actor RuntimeStateController {
         guard let currentSession else { return nil }
         do {
             try await ephemeralStore.deleteSessions(excluding: currentSession.id)
-            if let store = try durableStateStoreIfPresentOrEnabled() {
+            if let store = try await durableStateStoreIfPresentOrEnabled() {
                 try await store.deleteSessions(excluding: currentSession.id)
             }
             return nil
@@ -452,7 +461,7 @@ actor RuntimeStateController {
     func deleteExactCommandHistory() async -> String? {
         do {
             try await ephemeralStore.deleteAllCommandEvents()
-            if let store = try durableStateStoreIfPresentOrEnabled() { try await store.deleteAllCommandEvents() }
+            if let store = try await durableStateStoreIfPresentOrEnabled() { try await store.deleteAllCommandEvents() }
             return nil
         } catch {
             return "Exact command history could not be cleared completely."
@@ -462,7 +471,7 @@ actor RuntimeStateController {
     func clearPersistedBlockOutput() async -> String? {
         do {
             try await ephemeralStore.clearPersistedOutput()
-            if let store = try durableStateStoreIfPresentOrEnabled() { try await store.clearPersistedOutput() }
+            if let store = try await durableStateStoreIfPresentOrEnabled() { try await store.clearPersistedOutput() }
             return nil
         } catch {
             return "Persisted block output could not be cleared completely."
@@ -473,47 +482,32 @@ actor RuntimeStateController {
         databaseURL.deletingLastPathComponent()
     }
 
-    func recoveryFile() -> URL? { recoveryFileURL }
+    func recoveryFile() async -> URL? {
+        await persistenceCoordinator.recoveryFile()
+    }
 
-    func clearRecoveryFile() -> String? {
-        guard let recoveryFileURL else { return nil }
+    func clearRecoveryFile() async -> String? {
         do {
-            try FileManager.default.removeItem(at: recoveryFileURL)
-            self.recoveryFileURL = nil
-            recoveryDiagnostic = nil
+            try await persistenceCoordinator.clearRecoveryFile()
             return nil
         } catch {
             return "The local recovery file could not be cleared."
         }
     }
 
-    private func durableStateStore() throws -> SQLiteRuntimeStateStore {
-        if let durableStore { return durableStore }
-        do {
-            let store = try SQLiteRuntimeStateStore(databaseURL: databaseURL)
-            durableStore = store
-            return store
-        } catch {
-            guard FileManager.default.fileExists(atPath: databaseURL.path) else { throw error }
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyyMMdd-HHmmss"
-            let recoveryURL = databaseURL.deletingLastPathComponent()
-                .appendingPathComponent("runtime-state-recovery-\(formatter.string(from: Date()))-\(UUID().uuidString).sqlite")
-            try FileManager.default.moveItem(at: databaseURL, to: recoveryURL)
-            let store = try SQLiteRuntimeStateStore(databaseURL: databaseURL)
-            durableStore = store
-            recoveryDiagnostic = "Pane recovered from an unreadable local database. The recovery file remains local at \(recoveryURL.lastPathComponent)."
-            recoveryFileURL = recoveryURL
-            return store
-        }
+    func persistenceDiagnosticSnapshot() async -> PersistenceDiagnostic {
+        await persistenceCoordinator.diagnostic()
     }
 
-    private func durableStateStoreIfPresentOrEnabled() throws -> SQLiteRuntimeStateStore? {
-        if let durableStore { return durableStore }
+    private func durableStateStore() async throws -> SQLiteRuntimeStateStore {
+        try await persistenceCoordinator.store()
+    }
+
+    private func durableStateStoreIfPresentOrEnabled() async throws -> SQLiteRuntimeStateStore? {
         guard configuration.persistenceEnabled || FileManager.default.fileExists(atPath: databaseURL.path) else {
             return nil
         }
-        return try durableStateStore()
+        return try await durableStateStore()
     }
 
     private func storageSafeSession(_ session: RuntimeSession) -> RuntimeSession {

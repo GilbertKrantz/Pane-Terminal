@@ -42,6 +42,23 @@ struct BlocksView: View {
                 .frame(minHeight: PaneMetrics.systemEventHeight)
                 .accessibilityLabel("Shell restarted at \(restartedAt.formatted(date: .omitted, time: .shortened)), \(restartDirectory)")
             }
+            if let notice = session.scrollbackPruningNotice {
+                HStack(spacing: 7) {
+                    Image(systemName: "archivebox")
+                    Text(notice.message)
+                    Spacer(minLength: 8)
+                    Button("Dismiss") {
+                        session.dismissScrollbackPruningNotice()
+                    }
+                    .buttonStyle(.borderless)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, PaneMetrics.blockOuterInset + PaneMetrics.blockInnerInset)
+                .frame(minHeight: PaneMetrics.systemEventHeight)
+                .accessibilityElement(children: .combine)
+            }
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: PaneMetrics.blockVerticalSpacing) {

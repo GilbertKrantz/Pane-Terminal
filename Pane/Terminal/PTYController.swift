@@ -9,6 +9,19 @@ struct PTYForegroundStatus: Equatable, Sendable {
     let echoEnabled: Bool
 }
 
+struct PTYTerminationResult: Equatable, Sendable {
+    enum Outcome: String, Codable, Sendable {
+        case notRunning
+        case terminated
+        case killed
+        case timedOut
+    }
+
+    let processID: pid_t?
+    let outcome: Outcome
+    let elapsed: Duration
+}
+
 @MainActor
 protocol PTYProcessDriving: AnyObject {
     var running: Bool { get }
@@ -105,6 +118,7 @@ final class PTYController {
 
     private var process: (any PTYProcessDriving)?
     private var processBridge: PTYProcessDelegateBridge?
+    private var countsRunningPTY = false
     private var generationGate = PTYGenerationGate()
     private let processFactory: ProcessFactory
     private let resizeHandler: ResizeHandler
@@ -132,6 +146,11 @@ final class PTYController {
                 windowSize: &size
             )
         }
+        PaneResourceCounters.increment(.ptyController)
+    }
+
+    deinit {
+        PaneResourceCounters.decrement(.ptyController)
     }
 
     var isRunning: Bool {
@@ -184,6 +203,9 @@ final class PTYController {
             process = nil
             processBridge = nil
             _ = generationGate.acceptTermination(from: nextGeneration)
+        } else {
+            countsRunningPTY = true
+            PaneResourceCounters.increment(.runningPTY)
         }
         return StartResult(generation: nextGeneration, isRunning: running)
     }
@@ -213,14 +235,38 @@ final class PTYController {
     }
 
     func terminate() {
-        guard let oldProcess = process else { return }
-        process = nil
-        processBridge = nil
-        _ = generationGate.acceptTermination(from: generation)
+        guard let termination = detachCurrentProcess() else { return }
+        Self.signalProcessGroups(termination.identity, signal: SIGTERM)
+        termination.process.terminate()
+        Task.detached(priority: .utility) {
+            _ = await Self.reapBounded(
+                termination.identity,
+                gracefulWait: .seconds(1),
+                killWait: .milliseconds(500)
+            )
+        }
+    }
 
-        let pid = oldProcess.shellProcessID
-        oldProcess.terminate()
-        Self.reap(pid)
+    func terminateAndWait(
+        gracefulWait: Duration = .seconds(1),
+        killWait: Duration = .milliseconds(500)
+    ) async -> PTYTerminationResult {
+        guard let termination = detachCurrentProcess() else {
+            return PTYTerminationResult(
+                processID: nil,
+                outcome: .notRunning,
+                elapsed: .zero
+            )
+        }
+        Self.signalProcessGroups(termination.identity, signal: SIGTERM)
+        termination.process.terminate()
+        return await Task.detached(priority: .utility) {
+            await Self.reapBounded(
+                termination.identity,
+                gracefulWait: gracefulWait,
+                killWait: killWait
+            )
+        }.value
     }
 
     func foregroundStatus() -> PTYForegroundStatus? {
@@ -235,8 +281,13 @@ final class PTYController {
         let hasTermios = tcgetattr(descriptor, &termiosState) == 0
         let localFlags = hasTermios ? termiosState.c_lflag : 0
         let echoEnabled = !hasTermios || (localFlags & tcflag_t(ECHO) != 0)
+        // ECHO and ICANON are independent. Password prompts commonly clear
+        // only ECHO, while REPLs and full-screen applications use
+        // non-canonical input (and often clear ECHO as part of raw mode).
+        // Conflating the two classifies ordinary interactive applications as
+        // secure input and steals their direct-input routing.
         let isRawInput = hasTermios
-            && (localFlags & tcflag_t(ICANON) == 0 || !echoEnabled)
+            && localFlags & tcflag_t(ICANON) == 0
         let shellPID = process.shellProcessID
         let shellPGID = shellPID > 0 ? getpgid(shellPID) : -1
 
@@ -267,17 +318,117 @@ final class PTYController {
         guard generationGate.acceptTermination(from: generation) else { return }
         process = nil
         processBridge = nil
+        releaseRunningPTYCount()
         onEvent?(.terminated(waitStatus: waitStatus))
     }
 
-    nonisolated private static func reap(_ pid: pid_t) {
-        guard pid > 0 else { return }
-        DispatchQueue.global(qos: .utility).async {
-            var status: Int32 = 0
-            while Darwin.waitpid(pid, &status, 0) == -1 {
-                guard errno == EINTR else { return }
-            }
+    private struct ProcessIdentity: Sendable {
+        let processID: pid_t
+        let shellProcessGroupID: pid_t?
+        let foregroundProcessGroupID: pid_t?
+    }
+
+    private func detachCurrentProcess() -> (
+        process: any PTYProcessDriving,
+        identity: ProcessIdentity
+    )? {
+        guard let oldProcess = process else { return nil }
+        let shellPID = oldProcess.shellProcessID
+        let shellPGID = shellPID > 0 ? getpgid(shellPID) : -1
+        let foregroundPGID: pid_t
+        if oldProcess.childFileDescriptor >= 0 {
+            foregroundPGID = tcgetpgrp(oldProcess.childFileDescriptor)
+        } else {
+            foregroundPGID = -1
         }
+        process = nil
+        processBridge = nil
+        _ = generationGate.acceptTermination(from: generation)
+        releaseRunningPTYCount()
+        return (
+            oldProcess,
+            ProcessIdentity(
+                processID: shellPID,
+                shellProcessGroupID: shellPGID > 0 ? shellPGID : nil,
+                foregroundProcessGroupID: foregroundPGID > 0 ? foregroundPGID : nil
+            )
+        )
+    }
+
+    private func releaseRunningPTYCount() {
+        guard countsRunningPTY else { return }
+        countsRunningPTY = false
+        PaneResourceCounters.decrement(.runningPTY)
+    }
+
+    nonisolated private static func signalProcessGroups(
+        _ identity: ProcessIdentity,
+        signal: Int32
+    ) {
+        let applicationProcessGroup = getpgrp()
+        var signaledGroups: Set<pid_t> = []
+        for group in [
+            identity.foregroundProcessGroupID,
+            identity.shellProcessGroupID
+        ].compactMap({ $0 }) where group > 0 && group != applicationProcessGroup {
+            guard signaledGroups.insert(group).inserted else { continue }
+            _ = Darwin.kill(-group, signal)
+        }
+    }
+
+    nonisolated private static func reapBounded(
+        _ identity: ProcessIdentity,
+        gracefulWait: Duration,
+        killWait: Duration
+    ) async -> PTYTerminationResult {
+        let started = ContinuousClock.now
+        guard identity.processID > 0 else {
+            return PTYTerminationResult(
+                processID: nil,
+                outcome: .terminated,
+                elapsed: started.duration(to: .now)
+            )
+        }
+
+        if await waitForExit(identity.processID, timeout: gracefulWait) {
+            return PTYTerminationResult(
+                processID: identity.processID,
+                outcome: .terminated,
+                elapsed: started.duration(to: .now)
+            )
+        }
+
+        signalProcessGroups(identity, signal: SIGKILL)
+        _ = Darwin.kill(identity.processID, SIGKILL)
+        let killed = await waitForExit(identity.processID, timeout: killWait)
+        return PTYTerminationResult(
+            processID: identity.processID,
+            outcome: killed ? .killed : .timedOut,
+            elapsed: started.duration(to: .now)
+        )
+    }
+
+    nonisolated private static func waitForExit(
+        _ processID: pid_t,
+        timeout: Duration
+    ) async -> Bool {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        repeat {
+            var status: Int32 = 0
+            let result = Darwin.waitpid(processID, &status, WNOHANG)
+            if result == processID || (result == -1 && errno == ECHILD) {
+                return true
+            }
+            if result == -1 && errno != EINTR {
+                return true
+            }
+            if clock.now >= deadline {
+                return false
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        } while !Task.isCancelled
+        return false
     }
 
     nonisolated private static func equalWindowSizes(

@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 @main
 struct PaneApp: App {
@@ -10,10 +11,13 @@ struct PaneApp: App {
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
         let settings = RuntimeStateSettings()
+        let persistenceCoordinator = RuntimeStatePersistenceCoordinator(
+            databaseURL: Self.runtimeStateDatabaseURL
+        )
         let factory = DefaultTerminalSessionFactory(
             runtimeStateControllerProvider: {
                 RuntimeStateController(
-                    databaseURL: Self.runtimeStateDatabaseURL,
+                    persistenceCoordinator: persistenceCoordinator,
                     configuration: settings.configuration
                 )
             },
@@ -26,6 +30,7 @@ struct PaneApp: App {
         _runtimeStateSettings = StateObject(wrappedValue: settings)
         _workspace = StateObject(wrappedValue: workspace)
         AppDelegate.sharedWorkspace = workspace
+        AppDelegate.sharedRuntimeStatePersistenceCoordinator = persistenceCoordinator
     }
 
     var body: some Scene {
@@ -75,6 +80,7 @@ struct PaneApp: App {
 @MainActor
 private final class AppDelegate: NSObject, NSApplicationDelegate {
     static weak var sharedWorkspace: TerminalWorkspaceController?
+    static var sharedRuntimeStatePersistenceCoordinator: RuntimeStatePersistenceCoordinator?
     private var terminalControlKeyMonitor: Any?
     private var windowIconObserver: NSObjectProtocol?
     private var applicationIcon: NSImage?
@@ -146,11 +152,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         isFinalizingTermination = true
         Task { @MainActor in
             await workspace.shutdown()
+            await Self.sharedRuntimeStatePersistenceCoordinator?.shutdown()
             replyToTerminationIfNeeded(sender)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self, weak sender] in
             guard let self, let sender else { return }
-            workspace.tabs.forEach { $0.session.terminateForApplicationExit() }
+            workspace.terminateAllForApplicationExit()
             self.replyToTerminationIfNeeded(sender)
         }
         return .terminateLater
@@ -172,7 +179,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             self.windowIconObserver = nil
         }
         if !isFinalizingTermination {
-            Self.sharedWorkspace?.tabs.forEach { $0.session.terminateForApplicationExit() }
+            Self.sharedWorkspace?.terminateAllForApplicationExit()
         }
     }
 
@@ -323,7 +330,39 @@ private struct TerminalCommands: Commands {
             Button("Copy Diagnostics with Sanitized Command Context") {
                 session.copyLocalDiagnostics(includeSanitizedCommandContext: true)
             }
+
+#if DEBUG
+            Button("Export Diagnostics…") {
+                Task { @MainActor in
+                    await exportDiagnostics()
+                }
+            }
+#endif
             }
         }
     }
+
+#if DEBUG
+    @MainActor
+    private func exportDiagnostics() async {
+        let runtimeCoordinator = AppDelegate.sharedRuntimeStatePersistenceCoordinator
+        let runtimePersistenceStatus = await runtimeCoordinator?.diagnostic()
+        let snapshot = await workspace.diagnosticsSnapshot(
+            persistenceStatus: runtimePersistenceStatus
+        )
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.canCreateDirectories = true
+        panel.isExtensionHidden = false
+        panel.nameFieldStringValue = "pane-diagnostics.json"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try snapshot.encodedJSON().write(to: url, options: .atomic)
+        } catch {
+            let alert = NSAlert(error: error)
+            alert.messageText = "Pane could not export diagnostics"
+            alert.runModal()
+        }
+    }
+#endif
 }

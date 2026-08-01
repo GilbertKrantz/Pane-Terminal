@@ -29,6 +29,12 @@ actor CompletionService {
 
     init(localProvider: LocalAutocompleteProvider = LocalAutocompleteProvider()) {
         self.localProvider = localProvider
+        PaneResourceCounters.increment(.completionService)
+    }
+
+    deinit {
+        currentTask?.cancel()
+        PaneResourceCounters.decrement(.completionService)
     }
 
     func commandDidComplete(_ command: String) async {
@@ -40,12 +46,34 @@ actor CompletionService {
         await localProvider.invalidateProjectContext()
     }
 
+    func invalidateProjectContext() async {
+        await localProvider.invalidateProjectContext()
+    }
+
+    /// Invalidates response identity and waits for provider groups to observe
+    /// cancellation so resource counters converge before session teardown ends.
+    func cancelPendingRequests() async {
+        generation &+= 1
+        guard let task = currentTask else { return }
+        currentTask = nil
+        task.cancel()
+        await task.value
+    }
+
     func projectDefinition(for directory: URL) async -> ProjectContext? {
         await localProvider.projectDefinition(for: directory)
     }
 
-    func projectContext(for directory: URL) async -> ProjectContext? {
-        await localProvider.projectContext(for: directory)
+    func projectContext(
+        for directory: URL,
+        visibility: SessionVisibilityState = .selected,
+        reason: ContextRefreshReason = .tabSelected
+    ) async -> ProjectContext? {
+        await localProvider.projectContext(
+            for: directory,
+            visibility: visibility,
+            reason: reason
+        )
     }
 
     /// Compatibility surface used by the composer. Unlike P0, zsh is another
@@ -88,7 +116,11 @@ actor CompletionService {
         var continuation: AsyncStream<[CommandAutocompleteSuggestion]>.Continuation!
         let stream = AsyncStream<[CommandAutocompleteSuggestion]> { continuation = $0 }
         let task = Task { [weak self, localProvider, autocomplete, ranker] in
-            defer { continuation.finish() }
+            PaneResourceCounters.increment(.completionTask)
+            defer {
+                PaneResourceCounters.decrement(.completionTask)
+                continuation.finish()
+            }
             await withTaskGroup(of: [CompletionCandidate]?.self) { group in
                 group.addTask {
                     // This compatibility provider still combines cached local,
@@ -175,7 +207,11 @@ actor CompletionService {
         var continuation: AsyncStream<CompletionResponse>.Continuation!
         let stream = AsyncStream<CompletionResponse> { continuation = $0 }
         let task = Task { [weak self, ranker] in
-            defer { continuation.finish() }
+            PaneResourceCounters.increment(.completionTask)
+            defer {
+                PaneResourceCounters.decrement(.completionTask)
+                continuation.finish()
+            }
             let clock = ContinuousClock(); let started = clock.now
             await withTaskGroup(of: ProviderResult.self) { group in
                 for provider in providers {

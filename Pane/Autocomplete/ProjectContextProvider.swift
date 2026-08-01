@@ -70,12 +70,16 @@ actor ProjectDefinitionCache {
     private let ttl: TimeInterval
     init(ttl: TimeInterval = 300) { self.ttl = max(1, ttl) }
 
-    func value(for directory: URL, loader: @Sendable () async -> ProjectContext?) async -> ProjectContext? {
+    func value(
+        for directory: URL,
+        now: Date = Date(),
+        loader: @Sendable () async -> ProjectContext?
+    ) async -> ProjectContext? {
         let key = directory.standardizedFileURL.resolvingSymlinksInPath().path
-        if let entry = entries[key], Date().timeIntervalSince(entry.createdAt) < ttl,
+        if let entry = entries[key], now.timeIntervalSince(entry.createdAt) < ttl,
            Self.manifestsAreCurrent(entry.context) { return entry.context }
         let context = await loader()
-        entries[key] = Entry(context: context, createdAt: Date())
+        entries[key] = Entry(context: context, createdAt: now)
         return context
     }
     func invalidate() { entries.removeAll() }
@@ -91,23 +95,26 @@ actor ProjectDefinitionCache {
 actor GitContextCache {
     private struct Entry { let context: GitContext?; let createdAt: Date }
     private var entries: [String: Entry] = [:]
-    private let activeTTL: TimeInterval
+    private let defaultTTL: TimeInterval
 
     init(activeTTL: TimeInterval = 5) {
-        self.activeTTL = min(30, max(1, activeTTL))
+        self.defaultTTL = max(1, activeTTL)
     }
 
     func value(
         for root: URL,
+        ttl: TimeInterval? = nil,
+        now: Date = Date(),
         loader: @Sendable () async -> GitContext?
     ) async -> GitContext? {
         let key = root.standardizedFileURL.resolvingSymlinksInPath().path
+        let effectiveTTL = max(1, ttl ?? defaultTTL)
         if let entry = entries[key],
-           Date().timeIntervalSince(entry.createdAt) < activeTTL {
+           now.timeIntervalSince(entry.createdAt) < effectiveTTL {
             return entry.context
         }
         let context = await loader()
-        entries[key] = Entry(context: context, createdAt: Date())
+        entries[key] = Entry(context: context, createdAt: now)
         return context
     }
 

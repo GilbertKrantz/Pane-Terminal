@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+"""Deterministic terminal fixture with bounded, network-free protocol modes."""
+
+import argparse
+import base64
+import os
+import select
+import signal
+import sys
+import time
+
+ESC = "\x1b"
+READY = "PANE_FIXTURE_READY"
+DONE = "PANE_FIXTURE_DONE"
+OBSERVED = "PANE_FIXTURE_OBSERVED"
+
+
+def emit(value: str) -> None:
+    sys.stdout.buffer.write(value.encode("utf-8"))
+    sys.stdout.buffer.flush()
+
+
+def emit_bytes(value: bytes) -> None:
+    sys.stdout.buffer.write(value)
+    sys.stdout.buffer.flush()
+
+
+def wait_for_exit(args: argparse.Namespace) -> bytes:
+    """Read a single deterministic action and never wait without a deadline."""
+    if not args.interactive:
+        if args.wait:
+            time.sleep(args.wait)
+        return b""
+
+    deadline = time.monotonic() + args.action_timeout
+    data = bytearray()
+    while time.monotonic() < deadline:
+        remaining = max(0.0, deadline - time.monotonic())
+        readable, _, _ = select.select([sys.stdin.fileno()], [], [], remaining)
+        if not readable:
+            break
+        chunk = os.read(sys.stdin.fileno(), 4096)
+        if not chunk:
+            break
+        data.extend(chunk)
+        if b"\n" in data:
+            break
+    return bytes(data)
+
+
+def alternate_screen(args: argparse.Namespace) -> None:
+    emit(f"{ESC}[?1049h{ESC}[2J{ESC}[H{READY}\r\nalt-screen{ESC}[2;5Hcursor")
+    action = wait_for_exit(args)
+    if action:
+        emit(f"\r\n{OBSERVED} input={action.rstrip().hex()}\r\n")
+    emit(f"{ESC}[?1049l\r\n{DONE}\r\n")
+
+
+def bracketed_paste(args: argparse.Namespace) -> None:
+    emit(f"{ESC}[?2004h{READY}\r\n")
+    action = wait_for_exit(args)
+    if action:
+        emit(f"{OBSERVED} paste-base64={base64.b64encode(action.rstrip()).decode()}\r\n")
+    emit(f"{ESC}[?2004l{DONE}\r\n")
+
+
+def mouse(args: argparse.Namespace) -> None:
+    emit(f"{ESC}[?1000h{ESC}[?1002h{ESC}[?1006h{READY}\r\n")
+    action = wait_for_exit(args)
+    if action:
+        emit(f"{OBSERVED} mouse-hex={action.rstrip().hex()}\r\n")
+    emit(f"{ESC}[?1006l{ESC}[?1002l{ESC}[?1000l{DONE}\r\n")
+
+
+def resize(args: argparse.Namespace) -> None:
+    resize_count = 0
+
+    def resized(_signal: int, _frame: object) -> None:
+        nonlocal resize_count
+        resize_count += 1
+        try:
+            size = os.get_terminal_size(sys.stdout.fileno())
+            emit(f"\r\n{OBSERVED} resize={size.columns}x{size.lines} count={resize_count}\r\n")
+        except OSError:
+            emit(f"\r\n{OBSERVED} resize=unavailable count={resize_count}\r\n")
+
+    signal.signal(signal.SIGWINCH, resized)
+    emit(READY + "\r\n")
+    action = wait_for_exit(args)
+    if action:
+        emit(f"{OBSERVED} input={action.rstrip().hex()}\r\n")
+    emit(DONE + "\r\n")
+
+
+def progress(args: argparse.Namespace) -> None:
+    emit(READY + "\r\n")
+    for index in range(args.count):
+        emit(f"progress {index + 1}/{args.count}\r")
+        if args.delay:
+            time.sleep(args.delay)
+    emit("\n" + DONE + "\r\n")
+
+
+def unicode(_args: argparse.Namespace) -> None:
+    emit(READY + "\r\n")
+    raw = "ASCII 漢字 · e\u0301 · ✈️ · 👍🏽 · 👩‍💻 · אבג\r\n".encode("utf-8")
+    # Deliberately split every UTF-8 sequence across one-byte writes.
+    for byte in raw:
+        emit_bytes(bytes([byte]))
+    emit(DONE + "\r\n")
+
+
+def osc_title(_args: argparse.Namespace) -> None:
+    emit(
+        f"{ESC}]0;Pane fixture title\x07{READY}\r\n"
+        f"{ESC}]8;;https://example.invalid/fixture{ESC}\\link"
+        f"{ESC}]8;;{ESC}\\\r\n{DONE}\r\n"
+    )
+
+
+def sequences(_args: argparse.Namespace) -> None:
+    emit(
+        f"{READY}\r\n{ESC}[2J{ESC}[Hline one{ESC}[K\r"
+        f"rewrite\b!\x07{ESC}[?2004h{ESC}[?2004l\r\n{DONE}\r\n"
+    )
+
+
+def output(args: argparse.Namespace) -> None:
+    emit(READY + "\r\n")
+    if args.mode == "long-line":
+        emit_bytes(b"x" * args.bytes)
+    elif args.mode == "continuous":
+        chunk = b"0123456789abcdef" * 4096
+        remaining = args.bytes
+        while remaining:
+            current = chunk[: min(remaining, len(chunk))]
+            emit_bytes(current)
+            remaining -= len(current)
+    elif args.mode == "invalid-utf8":
+        emit_bytes(b"valid\xff\xfeinvalid\r\n")
+    elif args.mode == "ansi":
+        for index in range(args.lines):
+            emit(f"{ESC}[3{(index % 7) + 1}m{index:06d} pane deterministic output{ESC}[0m\r\n")
+    else:
+        for index in range(args.lines):
+            emit(f"{index:06d} pane deterministic output\r\n")
+    emit("\r\n" + DONE + "\r\n")
+
+
+def add_interaction_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--interactive", action="store_true")
+    parser.add_argument("--wait", type=float, default=0.0)
+    parser.add_argument("--action-timeout", type=float, default=5.0)
+
+
+parser = argparse.ArgumentParser()
+subparsers = parser.add_subparsers(dest="command", required=True)
+
+for name, function in [
+    ("alternate-screen", alternate_screen),
+    ("bracketed-paste", bracketed_paste),
+    ("mouse", mouse),
+    ("resize", resize),
+]:
+    mode_parser = subparsers.add_parser(name)
+    add_interaction_options(mode_parser)
+    mode_parser.set_defaults(function=function)
+
+for name, function in [
+    ("unicode", unicode),
+    ("osc-title", osc_title),
+    ("sequences", sequences),
+]:
+    subparsers.add_parser(name).set_defaults(function=function)
+
+progress_parser = subparsers.add_parser("progress")
+progress_parser.add_argument("--count", type=int, default=20)
+progress_parser.add_argument("--delay", type=float, default=0)
+progress_parser.set_defaults(function=progress)
+
+output_parser = subparsers.add_parser("output")
+output_parser.add_argument(
+    "--mode",
+    choices=["lines", "long-line", "continuous", "invalid-utf8", "ansi"],
+    default="lines",
+)
+output_parser.add_argument("--lines", type=int, default=10_000)
+output_parser.add_argument("--bytes", type=int, default=10_000_000)
+output_parser.set_defaults(function=output)
+
+arguments = parser.parse_args()
+arguments.function(arguments)

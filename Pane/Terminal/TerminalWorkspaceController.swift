@@ -224,13 +224,35 @@ final class TerminalTab: ObservableObject, Identifiable {
     }
 
     private func observeSession() {
-        session.objectWillChange.sink { [weak self] _ in
-            DispatchQueue.main.async { [weak self] in
+        observe(session.$terminalTitle)
+        observe(session.$currentDirectory)
+        observe(session.$blockTimeline)
+        observe(session.$mode)
+        observe(session.$inputRequirement)
+        observe(session.$isShellRunning)
+        observe(session.$shellExitStatus)
+        observe(session.$shellReadiness)
+        observe(session.$terminalSecurityState)
+        observe(session.$isAlternateScreenActive)
+        observe(session.$isRestartInProgress)
+        observe(session.$isShuttingDown)
+        observe(session.$commandDraft)
+        session.onMeaningfulBackgroundOutput = { [weak self] in
+            guard let self, !self.hasUnreadActivity else { return }
+            self.hasUnreadActivity = true
+        }
+        refreshDerivedState()
+    }
+
+    private func observe<Value: Equatable>(
+        _ publisher: Published<Value>.Publisher
+    ) {
+        publisher
+            .removeDuplicates()
+            .sink { [weak self] _ in
                 self?.refreshDerivedState()
             }
-        }.store(in: &observations)
-        session.onMeaningfulBackgroundOutput = { [weak self] in self?.hasUnreadActivity = true }
-        refreshDerivedState()
+            .store(in: &observations)
     }
 
     private func refreshDerivedState() {
@@ -367,24 +389,40 @@ final class TerminalWorkspaceController: ObservableObject {
     @Published private(set) var lifecycleState: TerminalWorkspaceLifecycleState = .initializing
     @Published var pendingCloseTab: TerminalTab?
     @Published private(set) var creationLimitReached = false
+    @Published private(set) var persistenceStatus = PersistenceDiagnostic(
+        status: .ready,
+        failureCategory: nil,
+        schemaVersion: TerminalWorkspaceSnapshot.currentSchemaVersion,
+        recoveryFileName: nil,
+        message: nil
+    )
 
     private let factory: TerminalSessionFactory
     private let snapshotURL: URL
+    private let snapshotStore: WorkspaceSnapshotStore
     private let defaultShell: ShellConfiguration
     private var selectionGeneration: UInt64 = 0
-    private var closingTabIDs: Set<UUID> = []
+    private var closingTabs: [UUID: TerminalTab] = [:]
     private var persistTask: Task<Void, Never>?
 
     var selectedTab: TerminalTab? { tabs.first { $0.id == selectedTabID } }
+    private var closingTabIDs: Set<UUID> { Set(closingTabs.keys) }
     var debugSnapshot: TerminalWorkspaceDebugSnapshot {
         TerminalWorkspaceDebugSnapshot(lifecycleState: lifecycleState, selectedTabID: selectedTabID,
             orderedTabIDs: tabs.map(\.id), sessionCount: tabs.count, closingTabIDs: closingTabIDs,
             selectionGeneration: selectionGeneration, pendingFocusTabID: selectedTabID)
     }
 
-    init(factory: TerminalSessionFactory, snapshotURL: URL, defaultShell: ShellConfiguration = .loginZsh()) {
+    init(
+        factory: TerminalSessionFactory,
+        snapshotURL: URL,
+        defaultShell: ShellConfiguration = .loginZsh(),
+        snapshotStore: WorkspaceSnapshotStore? = nil
+    ) {
         self.factory = factory
         self.snapshotURL = snapshotURL
+        self.snapshotStore = snapshotStore
+            ?? WorkspaceSnapshotStore(snapshotURL: snapshotURL)
         self.defaultShell = defaultShell
     }
 
@@ -438,11 +476,22 @@ final class TerminalWorkspaceController: ObservableObject {
     func selectTab(id: UUID) {
         guard lifecycleState != .shuttingDown else { return }
         guard !closingTabIDs.contains(id), let tab = tabs.first(where: { $0.id == id }) else { return }
+        let signpost = PanePerformanceSignposts.beginTabSwitch()
+        defer { PanePerformanceSignposts.endTabSwitch(signpost) }
         tabs.forEach { $0.session.visibilityState = $0.id == id ? .selected : .background }
         selectedTabID = id
         tab.lastSelectedAt = Date()
         tab.hasUnreadActivity = false
         selectionGeneration &+= 1
+        Task {
+            await PaneLifecycleEventRing.shared.append(PaneLifecycleEvent(
+                timestamp: Date(),
+                kind: .sessionSelected,
+                tabID: tab.id,
+                sessionID: tab.session.sessionID,
+                outcome: .succeeded
+            ))
+        }
         let focus = WorkspaceFocusGeneration(selectedTabID: id, generation: selectionGeneration)
         DispatchQueue.main.async { [weak self, weak tab] in
             guard let self, let tab, self.selectedTabID == focus.selectedTabID,
@@ -459,11 +508,9 @@ final class TerminalWorkspaceController: ObservableObject {
             if policy == .requestUserConfirmation { pendingCloseTab = tab }
             return .requiresConfirmation(processName: tab.session.foregroundProcessName ?? tab.session.shellDisplayName)
         }
-        closingTabIDs.insert(id)
+        closingTabs[id] = tab
         tab.session.visibilityState = .closing
-        tab.session.shutdown()
         tabs.remove(at: index)
-        closingTabIDs.remove(id)
         pendingCloseTab = nil
         if selectedTabID == id {
             selectedTabID = nil
@@ -471,6 +518,8 @@ final class TerminalWorkspaceController: ObservableObject {
             else { _ = await createTab(directoryPolicy: .defaultDirectory) }
         }
         schedulePersistence()
+        _ = await tab.session.shutdownAndWait()
+        closingTabs.removeValue(forKey: id)
         return .closed
     }
 
@@ -499,12 +548,26 @@ final class TerminalWorkspaceController: ObservableObject {
         guard lifecycleState == .initializing else { return }
         lifecycleState = .restoring
         defer { lifecycleState = .ready }
-        guard let data = try? Data(contentsOf: snapshotURL),
-              let snapshot = try? JSONDecoder().decode(TerminalWorkspaceSnapshot.self, from: data),
-              snapshot.schemaVersion == TerminalWorkspaceSnapshot.currentSchemaVersion else {
+        guard let snapshot = await snapshotStore.load() else {
+            persistenceStatus = await snapshotStore.diagnostic()
+            await PaneLifecycleEventRing.shared.append(PaneLifecycleEvent(
+                timestamp: Date(),
+                kind: .persistenceRead,
+                tabID: nil,
+                sessionID: nil,
+                outcome: .fallbackUsed
+            ))
             _ = await createTab(directoryPolicy: .defaultDirectory)
             return
         }
+        persistenceStatus = await snapshotStore.diagnostic()
+        await PaneLifecycleEventRing.shared.append(PaneLifecycleEvent(
+            timestamp: Date(),
+            kind: .persistenceRead,
+            tabID: nil,
+            sessionID: nil,
+            outcome: persistenceStatus.status == .ready ? .succeeded : .fallbackUsed
+        ))
         var seen: Set<UUID> = []
         for metadata in snapshot.orderedTabs.sorted(by: { $0.order < $1.order }) where seen.insert(metadata.id).inserted {
             let directory = Self.nearestExistingDirectory(metadata.workingDirectoryPath)
@@ -526,7 +589,9 @@ final class TerminalWorkspaceController: ObservableObject {
         selectTab(id: tabs.contains(where: { $0.id == snapshot.selectedTabID }) ? snapshot.selectedTabID! : tabs[0].id)
     }
 
-    func persistWorkspace() {
+    func persistWorkspace() async {
+        let signpost = PanePerformanceSignposts.beginWorkspacePersistence()
+        defer { PanePerformanceSignposts.endWorkspacePersistence(signpost) }
         let metadata = tabs.enumerated().map { index, tab -> TerminalTabRestorationMetadata in
             let value = tab.restorationMetadata
             return TerminalTabRestorationMetadata(id: value.id, order: index, title: value.title,
@@ -538,17 +603,86 @@ final class TerminalWorkspaceController: ObservableObject {
         let snapshot = TerminalWorkspaceSnapshot(schemaVersion: TerminalWorkspaceSnapshot.currentSchemaVersion,
             selectedTabID: selectedTabID, orderedTabs: metadata, savedAt: Date())
         do {
-            try FileManager.default.createDirectory(at: snapshotURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try JSONEncoder().encode(snapshot).write(to: snapshotURL, options: .atomic)
-        } catch { /* Persistence is deliberately non-fatal to live terminals. */ }
+            try await snapshotStore.save(snapshot)
+        } catch {
+            // Persistence is deliberately non-fatal to live terminals. The
+            // typed, sanitized status remains available to diagnostics/UI.
+        }
+        persistenceStatus = await snapshotStore.diagnostic()
+        await PaneLifecycleEventRing.shared.append(PaneLifecycleEvent(
+            timestamp: Date(),
+            kind: .persistenceWrite,
+            tabID: nil,
+            sessionID: nil,
+            outcome: persistenceStatus.status == .ready ? .succeeded : .failed
+        ))
+    }
+
+    func diagnosticsSnapshot(
+        persistenceStatus: PersistenceDiagnostic? = nil
+    ) async -> PaneDiagnosticsSnapshot {
+        var sessionDiagnostics: [TerminalSessionDiagnostics] = []
+        sessionDiagnostics.reserveCapacity(tabs.count + closingTabs.count)
+        for tab in tabs + Array(closingTabs.values) {
+            sessionDiagnostics.append(await tab.session.diagnostics())
+        }
+        sessionDiagnostics.sort {
+            if $0.tabID == $1.tabID {
+                return $0.sessionID.uuidString < $1.sessionID.uuidString
+            }
+            return $0.tabID.uuidString < $1.tabID.uuidString
+        }
+        let events = await PaneLifecycleEventRing.shared.snapshot()
+        let appVersion = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString"
+        ) as? String ?? "development"
+        return PaneDiagnosticsSnapshot(
+            workspace: PaneWorkspaceDiagnostics(
+                lifecycleState: String(describing: lifecycleState),
+                selectedTabID: selectedTabID,
+                tabCount: tabs.count
+            ),
+            sessions: sessionDiagnostics,
+            resourceCounters: PaneResourceCounters.snapshot,
+            processMetrics: PaneProcessMetrics.snapshot(),
+            persistenceStatus: persistenceStatus ?? self.persistenceStatus,
+            lifecycleEvents: events,
+            appVersion: appVersion,
+            macOSVersion: ProcessInfo.processInfo.operatingSystemVersionString,
+            timestamp: Date()
+        )
     }
 
     func shutdown() async {
         guard lifecycleState != .shuttingDown else { return }
         lifecycleState = .shuttingDown
         persistTask?.cancel()
-        persistWorkspace()
-        for tab in tabs { await tab.session.finalizeApplicationExit() }
+        await persistWorkspace()
+        let sessions = Array(
+            Dictionary(
+                uniqueKeysWithValues: (tabs + Array(closingTabs.values)).map {
+                    ($0.session.sessionID, $0.session)
+                }
+            ).values
+        )
+        await withTaskGroup(of: Void.self) { group in
+            for session in sessions {
+                group.addTask { @MainActor in
+                    await session.finalizeApplicationExit()
+                }
+            }
+            await group.waitForAll()
+        }
+        closingTabs.removeAll()
+    }
+
+    func terminateAllForApplicationExit() {
+        let sessions = Dictionary(
+            uniqueKeysWithValues: (tabs + Array(closingTabs.values)).map {
+                ($0.session.sessionID, $0.session)
+            }
+        ).values
+        sessions.forEach { $0.terminateForApplicationExit() }
     }
 
     private func schedulePersistence() {
@@ -557,7 +691,7 @@ final class TerminalWorkspaceController: ObservableObject {
         persistTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
-            self?.persistWorkspace()
+            await self?.persistWorkspace()
         }
     }
 
