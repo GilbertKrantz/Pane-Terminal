@@ -17,6 +17,26 @@ enum CommandInterruptionReason: String, Codable, Sendable {
     case shellExit
 }
 
+/// Test-only crash simulation can terminate an isolated host when one of these
+/// checkpoints is observed. Production callers leave the handler unset; the
+/// hook deliberately does not alter lifecycle semantics or recover a live PTY.
+enum PaneLifecycleFaultCheckpoint: String, Sendable {
+    case shellRestartRequested
+    case shellRestartCommandFinalized
+    case shellRestartPTYTerminated
+    case shellRestartStartingReplacement
+    case commandFinalizationStarted
+    case commandFinalizationCompleted
+    case interruptedCommandFinalizationStarted
+    case interruptedCommandFinalizationCompleted
+    case tabCreationStarted
+    case tabCreationPTYStarted
+    case tabCreationInstalled
+    case tabCloseStarted
+    case tabCloseRemoved
+    case tabCloseCleanupCompleted
+}
+
 enum ShellReadiness: Equatable, Sendable {
     case starting
     case initializing
@@ -121,6 +141,8 @@ final class TerminalSession: NSObject, ObservableObject {
 
     private(set) var history = CommandHistory()
     private let ptyController: PTYController
+    private let lifecycleFaultCheckpointHandler:
+        (@MainActor @Sendable (PaneLifecycleFaultCheckpoint) -> Void)?
     private let blockLifecycleController = BlockLifecycleController()
     private let focusCoordinator = FocusCoordinator()
     private let interactionController = TerminalInteractionController(
@@ -293,7 +315,9 @@ final class TerminalSession: NSObject, ObservableObject {
         shellConfiguration: ShellConfiguration = .loginZsh(),
         runtimeStateController: RuntimeStateController? = nil,
         commandHistoryEnabled: Bool = true,
-        ptyController: PTYController? = nil
+        ptyController: PTYController? = nil,
+        lifecycleFaultCheckpointHandler:
+            (@MainActor @Sendable (PaneLifecycleFaultCheckpoint) -> Void)? = nil
     ) {
         self.tabID = tabID
         self.shellConfiguration = shellConfiguration
@@ -302,6 +326,7 @@ final class TerminalSession: NSObject, ObservableObject {
         self.isRuntimeStatePrepared = runtimeStateController == nil
         self.currentDirectory = shellConfiguration.workingDirectory
         self.ptyController = ptyController ?? PTYController()
+        self.lifecycleFaultCheckpointHandler = lifecycleFaultCheckpointHandler
         super.init()
         PaneResourceCounters.increment(.session)
         self.ptyController.onEvent = { [weak self] event in
@@ -542,6 +567,7 @@ final class TerminalSession: NSObject, ObservableObject {
 
     func restartShell() {
         guard restartTask == nil, !isShuttingDown else { return }
+        lifecycleFaultCheckpointHandler?(.shellRestartRequested)
         _ = interactionController.handle(.restartRequested)
         isRestartInProgress = true
         shellReadiness = .starting
@@ -552,12 +578,14 @@ final class TerminalSession: NSObject, ObservableObject {
                 self.isRestartInProgress = false
             }
             await self.finalizeUnfinishedCommand(reason: .shellRestart)
+            self.lifecycleFaultCheckpointHandler?(.shellRestartCommandFinalized)
             await self.runtimeStateController?.resetBehavioralTransitionContinuity()
             self.previousCompletedCommandSummary = nil
             await self.completionService.shellDidRestart()
             self.composerContextGeneration &+= 1
             self.isShellRunning = false
             _ = await self.ptyController.terminateAndWait()
+            self.lifecycleFaultCheckpointHandler?(.shellRestartPTYTerminated)
             self.invalidateCompletionEndpoint()
             self.stopForegroundProcessMonitoring()
             self.leaveAlternateScreenIfNeeded()
@@ -570,6 +598,7 @@ final class TerminalSession: NSObject, ObservableObject {
                 sessionID: self.sessionID,
                 outcome: .succeeded
             ))
+            self.lifecycleFaultCheckpointHandler?(.shellRestartStartingReplacement)
             self.startShell()
         }
     }
@@ -1364,6 +1393,7 @@ final class TerminalSession: NSObject, ObservableObject {
                 }
 
                 if blockTimeline.activeBlockID != nil {
+                    lifecycleFaultCheckpointHandler?(.commandFinalizationStarted)
                     let signpost = PanePerformanceSignposts.beginBlockFinalization()
                     let windowSize = ptyController.windowSize
                     if let id = blockLifecycleController.completeActive(
@@ -1384,6 +1414,7 @@ final class TerminalSession: NSObject, ObservableObject {
                         }
                         persistCompletedBlock(id: id)
                     }
+                    lifecycleFaultCheckpointHandler?(.commandFinalizationCompleted)
                     PanePerformanceSignposts.endBlockFinalization(signpost)
                     clearActiveBlockCapture()
                 } else if blockLifecycleController.awaitingStartID != nil {
@@ -1458,6 +1489,7 @@ final class TerminalSession: NSObject, ObservableObject {
         reason: CommandInterruptionReason,
         renderedOutput: String? = nil
     ) async {
+        lifecycleFaultCheckpointHandler?(.interruptedCommandFinalizationStarted)
         let blockID = blockLifecycleController.activeOrAwaitingBlockID
 
         guard let blockID else {
@@ -1480,9 +1512,13 @@ final class TerminalSession: NSObject, ObservableObject {
         }
 
         guard let block = blockTimeline.block(id: blockID),
-              block.origin == .live else { return }
+              block.origin == .live else {
+            lifecycleFaultCheckpointHandler?(.interruptedCommandFinalizationCompleted)
+            return
+        }
 
         await persistInterruptedBlock(block, reason: reason)
+        lifecycleFaultCheckpointHandler?(.interruptedCommandFinalizationCompleted)
     }
 
     private func persistInterruptedBlock(

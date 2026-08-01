@@ -404,6 +404,8 @@ final class TerminalWorkspaceController: ObservableObject {
     private var selectionGeneration: UInt64 = 0
     private var closingTabs: [UUID: TerminalTab] = [:]
     private var persistTask: Task<Void, Never>?
+    private let lifecycleFaultCheckpointHandler:
+        (@MainActor @Sendable (PaneLifecycleFaultCheckpoint) -> Void)?
 
     var selectedTab: TerminalTab? { tabs.first { $0.id == selectedTabID } }
     private var closingTabIDs: Set<UUID> { Set(closingTabs.keys) }
@@ -417,13 +419,16 @@ final class TerminalWorkspaceController: ObservableObject {
         factory: TerminalSessionFactory,
         snapshotURL: URL,
         defaultShell: ShellConfiguration = .loginZsh(),
-        snapshotStore: WorkspaceSnapshotStore? = nil
+        snapshotStore: WorkspaceSnapshotStore? = nil,
+        lifecycleFaultCheckpointHandler:
+            (@MainActor @Sendable (PaneLifecycleFaultCheckpoint) -> Void)? = nil
     ) {
         self.factory = factory
         self.snapshotURL = snapshotURL
         self.snapshotStore = snapshotStore
             ?? WorkspaceSnapshotStore(snapshotURL: snapshotURL)
         self.defaultShell = defaultShell
+        self.lifecycleFaultCheckpointHandler = lifecycleFaultCheckpointHandler
     }
 
     @discardableResult
@@ -438,11 +443,13 @@ final class TerminalWorkspaceController: ObservableObject {
             return selectedTabID ?? configuration.tabID
         }
         creationLimitReached = false
+        lifecycleFaultCheckpointHandler?(.tabCreationStarted)
         let session = factory.makeSession(configuration: configuration)
         session.visibilityState = select ? .selected : .background
         // Starting is independent of mounting: background tabs must own a
         // live PTY and continue receiving output before they are first shown.
         session.ensureAuthoritativeTerminalIsRunning()
+        lifecycleFaultCheckpointHandler?(.tabCreationPTYStarted)
         let tab = TerminalTab(
             id: configuration.tabID,
             session: session,
@@ -457,6 +464,7 @@ final class TerminalWorkspaceController: ObservableObject {
         }
         let insertion = min(max(index ?? tabs.count, 0), tabs.count)
         tabs.insert(tab, at: insertion)
+        lifecycleFaultCheckpointHandler?(.tabCreationInstalled)
         if select || selectedTabID == nil { selectTab(id: tab.id) }
         schedulePersistence()
         return tab.id
@@ -508,9 +516,11 @@ final class TerminalWorkspaceController: ObservableObject {
             if policy == .requestUserConfirmation { pendingCloseTab = tab }
             return .requiresConfirmation(processName: tab.session.foregroundProcessName ?? tab.session.shellDisplayName)
         }
+        lifecycleFaultCheckpointHandler?(.tabCloseStarted)
         closingTabs[id] = tab
         tab.session.visibilityState = .closing
         tabs.remove(at: index)
+        lifecycleFaultCheckpointHandler?(.tabCloseRemoved)
         pendingCloseTab = nil
         if selectedTabID == id {
             selectedTabID = nil
@@ -520,6 +530,7 @@ final class TerminalWorkspaceController: ObservableObject {
         schedulePersistence()
         _ = await tab.session.shutdownAndWait()
         closingTabs.removeValue(forKey: id)
+        lifecycleFaultCheckpointHandler?(.tabCloseCleanupCompleted)
         return .closed
     }
 

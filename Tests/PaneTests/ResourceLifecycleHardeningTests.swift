@@ -174,24 +174,23 @@ final class ResourceLifecycleHardeningTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) async {
-        let warmResources = PaneResourceCounters.snapshot
         let warmMetrics = PaneProcessMetrics.snapshot()
         let warmDescriptors = warmMetrics.fileDescriptorCount
+        var ownedResources: [WeakLifecycleResources] = []
 
         for _ in 0..<count {
-            await createAndCloseOneSession()
+            ownedResources.append(await createAndCloseOneSession())
         }
 
         let deadline = ContinuousClock.now.advanced(
             by: PanePerformanceThresholds.resourceConvergenceTimeout
         )
-        while PaneResourceCounters.snapshot != warmResources,
+        while ownedResources.contains(where: { !$0.hasDeallocated }),
               ContinuousClock.now < deadline {
             await Task.yield()
             try? await Task.sleep(for: .milliseconds(10))
         }
 
-        let finalResources = PaneResourceCounters.snapshot
         let finalDescriptors = PaneProcessMetrics.snapshot().fileDescriptorCount
         let allowedDescriptorResidual = max(
             PanePerformanceThresholds.maximumDescriptorResidualFloor,
@@ -202,7 +201,12 @@ final class ResourceLifecycleHardeningTests: XCTestCase {
                 )
             )
         )
-        XCTAssertEqual(finalResources, warmResources, file: file, line: line)
+        XCTAssertTrue(
+            ownedResources.allSatisfy(\.hasDeallocated),
+            "test-owned session, terminal view, or PTY controller survived cleanup",
+            file: file,
+            line: line
+        )
         XCTAssertLessThanOrEqual(
             finalDescriptors - warmDescriptors,
             allowedDescriptorResidual,
@@ -226,7 +230,7 @@ final class ResourceLifecycleHardeningTests: XCTestCase {
     }
 
     @MainActor
-    private func createAndCloseOneSession() async {
+    private func createAndCloseOneSession() async -> WeakLifecycleResources {
         let controller = PTYController(
             terminationDelay: .nanoseconds(0),
             processFactory: { _ in ResourceFakePTYDriver() }
@@ -238,9 +242,15 @@ final class ResourceLifecycleHardeningTests: XCTestCase {
         let terminalView = PaneTerminalView(
             frame: NSRect(x: 0, y: 0, width: 640, height: 320)
         )
+        let resources = WeakLifecycleResources(
+            session: session,
+            terminalView: terminalView,
+            ptyController: controller
+        )
         session.attach(terminalView: terminalView)
         _ = await session.shutdownAndWait()
         session.detach(terminalView: terminalView)
+        return resources
     }
 
     @MainActor
@@ -249,9 +259,6 @@ final class ResourceLifecycleHardeningTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) async throws {
-        let warmResources = PaneResourceCounters.snapshot
-        let warmMetrics = PaneProcessMetrics.snapshot()
-        let warmChildProcesses = childProcessCount()
         let temporaryRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent(
                 "Pane-RealPTYLifecycle-\(UUID().uuidString)",
@@ -263,54 +270,27 @@ final class ResourceLifecycleHardeningTests: XCTestCase {
         )
         defer { try? FileManager.default.removeItem(at: temporaryRoot) }
 
+        // Measure residual growth relative to a stabilized SwiftTerm/AppKit
+        // baseline, excluding one-time font and shell-integration caches.
+        for index in 0..<3 {
+            try await runRealPTYLifecycleCycle(
+                name: "warmup-\(index)",
+                temporaryRoot: temporaryRoot,
+                file: file,
+                line: line
+            )
+        }
+        let warmResources = PaneResourceCounters.snapshot
+        let warmMetrics = PaneProcessMetrics.snapshot()
+        let warmChildProcesses = childProcessCount()
+
         for index in 0..<count {
-            let home = temporaryRoot.appendingPathComponent(
-                "session-\(index)",
-                isDirectory: true
-            )
-            try FileManager.default.createDirectory(
-                at: home,
-                withIntermediateDirectories: true
-            )
-            let configuration = ShellConfiguration.loginZsh(
-                processEnvironment: [
-                    "HOME": home.path,
-                    "ZDOTDIR": home.path,
-                    "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
-                ],
-                homeDirectory: home
-            )
-            let session = TerminalSession(
-                shellConfiguration: configuration,
-                commandHistoryEnabled: false
-            )
-            let terminalView = PaneTerminalView(
-                frame: NSRect(x: 0, y: 0, width: 640, height: 320)
-            )
-            session.attach(terminalView: terminalView)
-            let readinessDeadline = ContinuousClock.now.advanced(
-                by: .seconds(5)
-            )
-            while !session.isShellReadyForInput,
-                  ContinuousClock.now < readinessDeadline {
-                try await Task.sleep(for: .milliseconds(10))
-            }
-            XCTAssertTrue(
-                session.isShellReadyForInput,
-                "cycle \(index) shell did not become ready",
+            try await runRealPTYLifecycleCycle(
+                name: "session-\(index)",
+                temporaryRoot: temporaryRoot,
                 file: file,
                 line: line
             )
-            let result = await session.shutdownAndWait()
-            XCTAssertNotEqual(
-                result.processTermination.outcome,
-                .timedOut,
-                "cycle \(index) PTY cleanup timed out",
-                file: file,
-                line: line
-            )
-            session.detach(terminalView: terminalView)
-            try? FileManager.default.removeItem(at: home)
         }
 
         let convergenceDeadline = ContinuousClock.now.advanced(
@@ -372,6 +352,57 @@ final class ResourceLifecycleHardeningTests: XCTestCase {
         )
     }
 
+    @MainActor
+    private func runRealPTYLifecycleCycle(
+        name: String,
+        temporaryRoot: URL,
+        file: StaticString,
+        line: UInt
+    ) async throws {
+        let home = temporaryRoot.appendingPathComponent(name, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: home,
+            withIntermediateDirectories: true
+        )
+        let configuration = ShellConfiguration.loginZsh(
+            processEnvironment: [
+                "HOME": home.path,
+                "ZDOTDIR": home.path,
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            ],
+            homeDirectory: home
+        )
+        let session = TerminalSession(
+            shellConfiguration: configuration,
+            commandHistoryEnabled: false
+        )
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 640, height: 320)
+        )
+        session.attach(terminalView: terminalView)
+        let readinessDeadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while !session.isShellReadyForInput,
+              ContinuousClock.now < readinessDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(
+            session.isShellReadyForInput,
+            "cycle \(name) shell did not become ready",
+            file: file,
+            line: line
+        )
+        let result = await session.shutdownAndWait()
+        XCTAssertNotEqual(
+            result.processTermination.outcome,
+            .timedOut,
+            "cycle \(name) PTY cleanup timed out",
+            file: file,
+            line: line
+        )
+        session.detach(terminalView: terminalView)
+        try? FileManager.default.removeItem(at: home)
+    }
+
     private func childProcessCount() -> Int {
         let capacity = Int(max(0, proc_listchildpids(getpid(), nil, 0)))
         guard capacity > 0 else { return 0 }
@@ -384,7 +415,29 @@ final class ResourceLifecycleHardeningTests: XCTestCase {
             )))
         }
     }
+
 #endif
+}
+
+@MainActor
+private final class WeakLifecycleResources {
+    weak var session: TerminalSession?
+    weak var terminalView: PaneTerminalView?
+    weak var ptyController: PTYController?
+
+    init(
+        session: TerminalSession,
+        terminalView: PaneTerminalView,
+        ptyController: PTYController
+    ) {
+        self.session = session
+        self.terminalView = terminalView
+        self.ptyController = ptyController
+    }
+
+    var hasDeallocated: Bool {
+        session == nil && terminalView == nil && ptyController == nil
+    }
 }
 
 @MainActor

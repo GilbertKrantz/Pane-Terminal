@@ -43,6 +43,33 @@ final class TerminalWorkspaceControllerTests: XCTestCase {
         XCTAssertEqual(workspace.selectedTabID, original)
     }
 
+    func testTabLifecycleExposesCrashSimulationCheckpoints() async {
+        let recorder = WorkspaceLifecycleCheckpointRecorder()
+        let factory = DefaultTerminalSessionFactory(
+            runtimeStateControllerProvider: { nil },
+            commandHistoryEnabled: false
+        )
+        let workspace = TerminalWorkspaceController(
+            factory: factory,
+            snapshotURL: temporarySnapshotURL(),
+            lifecycleFaultCheckpointHandler: { recorder.record($0) }
+        )
+
+        await workspace.restoreWorkspace()
+        let tabID = await workspace.createTab(inBackground: true)!
+        XCTAssertEqual(
+            Array(recorder.checkpoints.suffix(3)),
+            [.tabCreationStarted, .tabCreationPTYStarted, .tabCreationInstalled]
+        )
+
+        _ = await workspace.closeTab(id: tabID, policy: .force)
+        XCTAssertEqual(
+            Array(recorder.checkpoints.suffix(3)),
+            [.tabCloseStarted, .tabCloseRemoved, .tabCloseCleanupCompleted]
+        )
+        await workspace.shutdown()
+    }
+
     func testClosingSelectedTabSelectsNeighbor() async {
         let workspace = makeWorkspace()
         await workspace.restoreWorkspace()
@@ -297,5 +324,14 @@ final class TerminalWorkspaceControllerTests: XCTestCase {
         )
 
         XCTAssertEqual(resolved, root.standardizedFileURL)
+    }
+}
+
+@MainActor
+private final class WorkspaceLifecycleCheckpointRecorder {
+    private(set) var checkpoints: [PaneLifecycleFaultCheckpoint] = []
+
+    func record(_ checkpoint: PaneLifecycleFaultCheckpoint) {
+        checkpoints.append(checkpoint)
     }
 }

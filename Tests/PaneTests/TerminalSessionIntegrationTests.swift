@@ -1895,6 +1895,53 @@ extension TerminalSessionIntegrationTests {
     }
 
     @MainActor
+    func testCommandAndRestartExposeCrashSimulationCheckpoints() async throws {
+        let recorder = SessionLifecycleCheckpointRecorder()
+        let session = TerminalSession(
+            shellConfiguration: testShellConfiguration,
+            lifecycleFaultCheckpointHandler: { recorder.record($0) }
+        )
+        let terminalView = TerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+
+        try await waitUntil("fault-checkpoint shell readiness", timeout: 5) {
+            session.isShellReadyForInput
+        }
+        let command = "printf 'PANE_FAULT_CHECKPOINT_COMMAND\\n'"
+        session.submit(command: command)
+        try await waitUntil("fault-checkpoint command completion", timeout: 5) {
+            session.blocks.contains {
+                $0.command == command && $0.isFinalized
+            }
+        }
+        XCTAssertTrue(
+            recorder.containsInOrder([
+                .commandFinalizationStarted,
+                .commandFinalizationCompleted,
+            ])
+        )
+
+        let previousGeneration = session.debugSnapshot.processGeneration
+        session.restartShell()
+        try await waitUntil("fault-checkpoint shell restart", timeout: 5) {
+            session.debugSnapshot.processGeneration > previousGeneration
+                && session.isShellReadyForInput
+        }
+        XCTAssertTrue(
+            recorder.containsInOrder([
+                .shellRestartRequested,
+                .interruptedCommandFinalizationStarted,
+                .shellRestartCommandFinalized,
+                .shellRestartPTYTerminated,
+                .shellRestartStartingReplacement,
+            ])
+        )
+    }
+
+    @MainActor
     func testApplicationExitPersistsSensitiveCommandAsNonRerunnablePlaceholder() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("Pane-SensitiveExit-\(UUID().uuidString)")
@@ -2104,5 +2151,26 @@ extension TerminalSessionIntegrationTests {
             outputSummariesEnabled: true,
             filePathCollectionEnabled: true
         )
+    }
+}
+
+@MainActor
+private final class SessionLifecycleCheckpointRecorder {
+    private(set) var checkpoints: [PaneLifecycleFaultCheckpoint] = []
+
+    func record(_ checkpoint: PaneLifecycleFaultCheckpoint) {
+        checkpoints.append(checkpoint)
+    }
+
+    func containsInOrder(
+        _ expected: [PaneLifecycleFaultCheckpoint]
+    ) -> Bool {
+        var expectedIndex = expected.startIndex
+        for checkpoint in checkpoints where expectedIndex < expected.endIndex {
+            if checkpoint == expected[expectedIndex] {
+                expected.formIndex(after: &expectedIndex)
+            }
+        }
+        return expectedIndex == expected.endIndex
     }
 }
