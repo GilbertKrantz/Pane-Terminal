@@ -101,6 +101,9 @@ struct CompletionDebugSnapshot: Sendable {
     let lastDiagnostics: [CompletionProviderDiagnostic]
     let rawCandidateCount: Int
     let mergedCandidateCount: Int
+    let canonicalCandidateCount: Int
+    let duplicateMergeCount: Int
+    let invalidCandidateCount: Int
     let publishedCandidateCount: Int
     let staleResponseCount: Int
     let timeoutCount: Int

@@ -20,6 +20,7 @@ actor CompletionService {
     private var debugDiagnostics: [CompletionProviderDiagnostic] = []
     private var debugRawCount = 0
     private var debugMergedCount = 0
+    private var debugInvalidCount = 0
     private var debugPublishedCount = 0
     private var debugStaleCount = 0
     private var debugTimeoutCount = 0
@@ -133,17 +134,19 @@ actor CompletionService {
                           await isValid() else { group.cancelAll(); return }
                     guard let result else { continue }
                     accumulated.append(contentsOf: result)
+                    let merged = ranker.deduplicate(accumulated, request: nativeRequest)
                     let enriched = await Self.enrich(
-                        accumulated,
+                        merged,
                         using: behavioralStore,
                         request: nativeRequest
                     )
-                    let ranked = ranker.rank(enriched, maximumResults: 12)
+                    let ranked = ranker.rank(enriched, request: nativeRequest, maximumResults: 12)
                         .map(Self.suggestion)
-                    let ids = ranked.map { Self.stableIdentity($0) }
+                    let rankedDeduplicated = Self.visibleDeduplicate(ranked, request: nativeRequest)
+                    let ids = rankedDeduplicated.map(\.id)
                     guard ids != lastIDs else { continue }
                     lastIDs = ids
-                    continuation.yield(ranked)
+                    continuation.yield(rankedDeduplicated)
                 }
             }
         }
@@ -167,6 +170,7 @@ actor CompletionService {
         debugDiagnostics = []
         debugRawCount = 0
         debugMergedCount = 0
+        debugInvalidCount = 0
         debugPublishedCount = 0
         debugRankingDuration = nil
         debugProjectID = request.projectContext?.identity
@@ -201,11 +205,13 @@ actor CompletionService {
                     all.append(contentsOf: result.candidates.prefix(Self.maximumRaw(result.id)))
                     if all.count > 500 { all = Array(all.prefix(500)) }
                     diagnostics.append(result.diagnostic)
-                    let ranked = ranker.rank(all, maximumResults: min(12, max(0, request.maximumResults)))
+                    let ranked = ranker.rank(all, request: request,
+                                             maximumResults: min(12, max(0, request.maximumResults)))
 #if DEBUG
                     await self?.recordRanking(
                         rawCount: all.count,
-                        mergedCount: ranker.deduplicate(all).count,
+                        mergedCount: ranker.deduplicate(all, request: request).count,
+                        invalidCount: all.lazy.filter { $0.resultIdentity(for: request) == nil }.count,
                         publishedCount: ranked.count,
                         duration: started.duration(to: clock.now)
                     )
@@ -286,10 +292,28 @@ actor CompletionService {
         case .fileSystem: source = .fileSystem; case .projectScript, .projectCommand: source = .projectScript }
         return .init(text: c.displayText, replacementText: c.replacementText,
                      replacementRange: c.replacementRange, source: source,
-                     isDirectory: c.isDirectory, detail: c.detail)
+                     isDirectory: c.isDirectory, detail: c.detail, stableID: c.id,
+                     supportingSources: Set(c.supportingSources.map(Self.suggestionSource)))
     }
-    private static func stableIdentity(_ value: CommandAutocompleteSuggestion) -> String {
-        "\(value.replacementText)|\(value.isDirectory)"
+    private static func suggestionSource(_ source: CompletionSource) -> CommandAutocompleteSuggestion.Source {
+        switch source {
+        case .zsh: return .zsh
+        case .history: return .history
+        case .builtIn: return .builtIn
+        case .executable: return .executable
+        case .fileSystem: return .fileSystem
+        case .projectScript, .projectCommand: return .projectScript
+        case .transition: return .transition
+        }
+    }
+    private static func visibleDeduplicate(_ values: [CommandAutocompleteSuggestion],
+                                           request: CompletionRequest) -> [CommandAutocompleteSuggestion] {
+        var seen = Set<String>()
+        return values.filter { value in
+            let candidate = Self.candidate(value)
+            guard let identity = candidate.resultIdentity(for: request) else { return false }
+            return seen.insert(identity.stableID).inserted
+        }
     }
 
 #if DEBUG
@@ -301,6 +325,9 @@ actor CompletionService {
             lastDiagnostics: debugDiagnostics,
             rawCandidateCount: debugRawCount,
             mergedCandidateCount: debugMergedCount,
+            canonicalCandidateCount: debugMergedCount,
+            duplicateMergeCount: max(0, debugRawCount - debugMergedCount - debugInvalidCount),
+            invalidCandidateCount: debugInvalidCount,
             publishedCandidateCount: debugPublishedCount,
             staleResponseCount: debugStaleCount,
             timeoutCount: debugTimeoutCount,
@@ -322,11 +349,13 @@ actor CompletionService {
     private func recordRanking(
         rawCount: Int,
         mergedCount: Int,
+        invalidCount: Int,
         publishedCount: Int,
         duration: Duration
     ) {
         debugRawCount = rawCount
         debugMergedCount = mergedCount
+        debugInvalidCount = invalidCount
         debugPublishedCount = publishedCount
         debugRankingDuration = duration
     }
@@ -338,9 +367,9 @@ actor CompletionService {
         request: CompletionRequest
     ) async -> [CompletionCandidate] {
         guard let store, !candidates.isEmpty else { return candidates }
-        let identities = candidates.map {
-            "\(CompletionCandidateIdentity($0).kind.rawValue)|\($0.isDirectory)|\(CompletionCandidateIdentity($0).normalizedReplacement)"
-        }
+        // Read canonical feedback and bounded legacy representations during
+        // migration; all new service-produced candidates carry a canonical id.
+        let identities = Array(Set(candidates.flatMap { [$0.id] + $0.feedbackIdentityAliases }))
         guard let aggregates = try? await store.feedbackAggregates(
             candidateIdentities: identities,
             projectID: request.projectContext?.identity,
@@ -350,9 +379,9 @@ actor CompletionService {
         let grouped = Dictionary(grouping: aggregates, by: \.candidateIdentity)
         return candidates.map { candidate in
             var candidate = candidate
-            let identity = CompletionCandidateIdentity(candidate)
-            let key = "\(identity.kind.rawValue)|\(candidate.isDirectory)|\(identity.normalizedReplacement)"
-            for feedback in grouped[key] ?? [] {
+            let feedbackValues = (grouped[candidate.id] ?? [])
+                + candidate.feedbackIdentityAliases.flatMap { grouped[$0] ?? [] }
+            for feedback in feedbackValues {
                 candidate.evidence.acceptanceCount = max(
                     candidate.evidence.acceptanceCount,
                     feedback.acceptanceCount

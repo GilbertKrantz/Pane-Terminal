@@ -756,14 +756,12 @@ final class CommandAutocompleteTests: XCTestCase {
             finalSuggestions = update
         }
         let suggestion = try XCTUnwrap(finalSuggestions.first {
-            $0.replacementText
+            CommandAutocomplete().accept($0, in: draft).draft
                 == "cd Documents/Work/Repo-gitlab/airflow-dags"
-        })
+        }, "Published replacements: \(finalSuggestions.map(\.replacementText))")
 
-        XCTAssertEqual(
-            suggestion.replacementRange,
-            NSRange(location: 0, length: (draft as NSString).length)
-        )
+        XCTAssertEqual(suggestion.id,
+                       "typedCompletion|false|cd Documents/Work/Repo-gitlab/airflow-dags")
         XCTAssertEqual(
             CommandAutocomplete().accept(suggestion, in: draft).draft,
             "cd Documents/Work/Repo-gitlab/airflow-dags"
@@ -950,6 +948,71 @@ final class CommandAutocompleteTests: XCTestCase {
         } == true)
     }
 
+    func testStagedProvidersNeverPublishDuplicateRowsAndKeepStableIdentity() async throws {
+        let service = CompletionService()
+        let request = makeCompletionRequest(
+            generation: 1,
+            draft: "git st",
+            tokenRange: NSRange(location: 4, length: 2)
+        )
+        var historyEvidence = CompletionEvidence()
+        historyEvidence.projectFrequency = 4
+        var zshEvidence = CompletionEvidence()
+        zshEvidence.acceptanceCount = 3
+        let stream = await service.responses(
+            for: request,
+            providers: [
+                FakeCompletionProvider(
+                    identifier: .history,
+                    delay: .zero,
+                    values: [
+                        CompletionCandidate(
+                            displayText: "git status",
+                            replacementText: "git status",
+                            replacementRange: NSRange(location: 0, length: 6),
+                            source: .history,
+                            kind: .fullCommand,
+                            evidence: historyEvidence
+                        )
+                    ]
+                ),
+                FakeCompletionProvider(
+                    identifier: .zsh,
+                    delay: .milliseconds(20),
+                    values: [
+                        CompletionCandidate(
+                            displayText: "status",
+                            replacementText: "status",
+                            replacementRange: NSRange(location: 4, length: 2),
+                            source: .zsh,
+                            kind: .argument,
+                            evidence: zshEvidence
+                        )
+                    ]
+                )
+            ]
+        )
+
+        var responses: [CompletionResponse] = []
+        for await response in stream { responses.append(response) }
+
+        XCTAssertGreaterThanOrEqual(responses.count, 2)
+        for response in responses {
+            XCTAssertEqual(Set(response.candidates.map(\.id)).count, response.candidates.count)
+            XCTAssertEqual(response.candidates.count, 1)
+            XCTAssertEqual(response.candidates[0].id, "typedCompletion|false|git status")
+        }
+        let final = try XCTUnwrap(responses.last?.candidates.first?.candidate)
+        XCTAssertEqual(final.source, .zsh)
+        XCTAssertEqual(final.supportingSources, [.zsh, .history])
+        XCTAssertEqual(final.evidence.projectFrequency, 4)
+        XCTAssertEqual(final.evidence.acceptanceCount, 3)
+        XCTAssertEqual(final.feedbackIdentityAliases, [
+            "argument|false|status",
+            "fullCommand|false|git status"
+        ])
+    }
+
     func testLateProviderResponseCannotOverwriteNewRequest() async throws {
         let service = CompletionService()
         let first = await service.responses(
@@ -1057,14 +1120,140 @@ final class CommandAutocompleteTests: XCTestCase {
         )
     }
 
-    private func makeCompletionRequest(generation: UInt64) -> CompletionRequest {
+    func testDifferentReplacementRangesProducingSameResultMerge() {
+        let request = makeCompletionRequest(generation: 1, draft: "git st",
+            tokenRange: NSRange(location: 4, length: 2))
+        let merged = CompletionRanker().deduplicate([
+            CompletionCandidate(displayText: "status", replacementText: "status",
+                replacementRange: NSRange(location: 4, length: 2), source: .zsh, kind: .argument),
+            CompletionCandidate(displayText: "git status", replacementText: "git status",
+                replacementRange: NSRange(location: 0, length: 6), source: .history, kind: .fullCommand)
+        ], request: request)
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged[0].source, .zsh)
+        XCTAssertEqual(merged[0].replacementRange, NSRange(location: 4, length: 2))
+        XCTAssertEqual(merged[0].supportingSources, [.zsh, .history])
+        XCTAssertEqual(merged[0].id, "typedCompletion|false|git status")
+    }
+
+    func testCanonicalIdentityPreservesSemanticDifferences() {
+        let request = makeCompletionRequest(generation: 1, draft: "git st",
+            tokenRange: NSRange(location: 4, length: 2))
+        let values = ["git status", "git Status", "git checkout -- foo", "git checkout foo",
+                      "cd folder", "cd folder/", "echo 'foo bar'", "echo foo\\ bar"]
+        let candidates = values.map {
+            CompletionCandidate(displayText: $0, replacementText: $0,
+                replacementRange: NSRange(location: 0, length: 6), source: .history,
+                kind: .fullCommand)
+        }
+        XCTAssertEqual(CompletionRanker().deduplicate(candidates, request: request).count, values.count)
+    }
+
+    func testSameReplacementAtDifferentRangesDoesNotMergeWhenResultsDiffer() {
+        let request = makeCompletionRequest(generation: 1, draft: "echo foo bar",
+            tokenRange: NSRange(location: 9, length: 3))
+        let candidates = [
+            CompletionCandidate(displayText: "baz", replacementText: "baz",
+                replacementRange: NSRange(location: 5, length: 3), source: .history, kind: .argument),
+            CompletionCandidate(displayText: "baz", replacementText: "baz",
+                replacementRange: NSRange(location: 9, length: 3), source: .zsh, kind: .argument)
+        ]
+        let merged = CompletionRanker().deduplicate(candidates, request: request)
+        XCTAssertEqual(Set(merged.compactMap { $0.resultIdentity(for: request)?.resultingText }),
+                       ["echo baz bar", "echo foo baz"])
+    }
+
+    func testProjectScriptAndHistoryProducingSameCommandMerge() {
+        let request = makeCompletionRequest(generation: 1, draft: "npm r",
+            tokenRange: NSRange(location: 4, length: 1))
+        var projectEvidence = CompletionEvidence()
+        projectEvidence.projectMatch = true
+        var historyEvidence = CompletionEvidence()
+        historyEvidence.projectFrequency = 6
+        let merged = CompletionRanker().deduplicate([
+            CompletionCandidate(displayText: "test", replacementText: "npm run test",
+                replacementRange: NSRange(location: 0, length: 5), source: .projectScript,
+                kind: .script, evidence: projectEvidence),
+            CompletionCandidate(displayText: "npm run test", replacementText: "npm run test",
+                replacementRange: NSRange(location: 0, length: 5), source: .history,
+                kind: .fullCommand, evidence: historyEvidence)
+        ], request: request)
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged[0].source, .projectScript)
+        XCTAssertEqual(merged[0].supportingSources, [.projectScript, .history])
+        XCTAssertTrue(merged[0].evidence.projectMatch)
+        XCTAssertEqual(merged[0].evidence.projectFrequency, 6)
+    }
+
+    func testCanonicalDeduplicationMeetsThousandCandidateLatencyTarget() {
+        let request = makeCompletionRequest(generation: 1, draft: "git st",
+            tokenRange: NSRange(location: 4, length: 2))
+        let candidates = (0..<500).flatMap { index in
+            let result = "git status-\(index)"
+            return [
+                CompletionCandidate(displayText: "status-\(index)", replacementText: "status-\(index)",
+                    replacementRange: NSRange(location: 4, length: 2), source: .zsh, kind: .argument),
+                CompletionCandidate(displayText: result, replacementText: result,
+                    replacementRange: NSRange(location: 0, length: 6), source: .history, kind: .fullCommand)
+            ]
+        }
+        let clock = ContinuousClock()
+        let started = clock.now
+        let merged = CompletionRanker().deduplicate(candidates, request: request)
+        let elapsed = started.duration(to: clock.now)
+
+        XCTAssertEqual(merged.count, 500)
+        XCTAssertLessThan(elapsed, .milliseconds(15))
+    }
+
+    func testNextCommandAndDirectoryRemainDistinct() {
+        let request = makeCompletionRequest(generation: 1, draft: "",
+            tokenRange: NSRange(location: 0, length: 0))
+        let candidates = [
+            CompletionCandidate(displayText: "Documents", replacementText: "Documents",
+                source: .history, kind: .fullCommand),
+            CompletionCandidate(displayText: "Documents", replacementText: "Documents",
+                source: .transition, kind: .nextCommand),
+            CompletionCandidate(displayText: "Documents", replacementText: "Documents",
+                source: .fileSystem, kind: .path, isDirectory: true)
+        ]
+        XCTAssertEqual(CompletionRanker().deduplicate(candidates, request: request).count, 3)
+    }
+
+    func testCanonicalIdentityHandlesUnicodeAndRejectsSplitSurrogateRange() {
+        let request = makeCompletionRequest(generation: 1, draft: "echo 😀x",
+            tokenRange: NSRange(location: 5, length: 3))
+        let valid = CompletionCandidate(displayText: "😀y", replacementText: "😀y",
+            replacementRange: NSRange(location: 5, length: 3), source: .zsh, kind: .argument)
+        let invalid = CompletionCandidate(displayText: "bad", replacementText: "bad",
+            replacementRange: NSRange(location: 6, length: 1), source: .zsh, kind: .argument)
+        XCTAssertEqual(valid.resultIdentity(for: request)?.resultingText, "echo 😀y")
+        XCTAssertNil(invalid.resultIdentity(for: request))
+        XCTAssertEqual(CompletionRanker().deduplicate([valid, invalid], request: request).count, 1)
+    }
+
+    func testTrailingWhitespaceDoesNotCreateDuplicate() {
+        let request = makeCompletionRequest(generation: 1, draft: "git",
+            tokenRange: NSRange(location: 0, length: 3))
+        let candidates = ["git status", "git status   "].map {
+            CompletionCandidate(displayText: $0, replacementText: $0,
+                replacementRange: NSRange(location: 0, length: 3), source: .history,
+                kind: .fullCommand)
+        }
+        XCTAssertEqual(CompletionRanker().deduplicate(candidates, request: request).count, 1)
+    }
+
+    private func makeCompletionRequest(generation: UInt64, draft: String = "git",
+                                       tokenRange: NSRange = NSRange(location: 0, length: 3)) -> CompletionRequest {
         CompletionRequest(
             id: UUID(),
             generation: generation,
-            draft: "git",
-            cursorUTF16Offset: 3,
+            draft: draft,
+            cursorUTF16Offset: (draft as NSString).length,
             tokenContext: CommandTokenContext(
-                replacementRange: NSRange(location: 0, length: 3),
+                replacementRange: tokenRange,
                 decodedPrefix: "git",
                 isCommandPosition: true
             ),

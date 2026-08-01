@@ -35,6 +35,7 @@ struct CompletionCandidate: Identifiable, Sendable {
     let replacementRange: NSRange?
     let source: CompletionSource
     var supportingSources: Set<CompletionSource>
+    var feedbackIdentityAliases: Set<String>
     let kind: CompletionKind
     let detail: String?
     let isDirectory: Bool
@@ -50,7 +51,8 @@ struct CompletionCandidate: Identifiable, Sendable {
         detail: String? = nil,
         isDirectory: Bool = false,
         evidence: CompletionEvidence = CompletionEvidence(),
-        supportingSources: Set<CompletionSource>? = nil
+        supportingSources: Set<CompletionSource>? = nil,
+        feedbackIdentityAliases: Set<String>? = nil
     ) {
         let normalizedIDText = replacementText.replacingOccurrences(
             of: #"\s+$"#,
@@ -67,11 +69,75 @@ struct CompletionCandidate: Identifiable, Sendable {
         self.replacementRange = replacementRange
         self.source = source
         self.supportingSources = supportingSources ?? [source]
+        self.feedbackIdentityAliases = feedbackIdentityAliases ?? [
+            "\(kind.rawValue)|\(isDirectory)|\(normalizedIDText)"
+        ]
         self.kind = kind
         self.detail = detail
         self.isDirectory = isDirectory
         self.evidence = evidence
     }
+}
+
+enum CompletionResultCategory: String, Hashable, Sendable {
+    case typedCompletion
+    case nextCommand
+}
+
+/// Provider-independent identity for the text that accepting a completion puts
+/// in the composer.  `resultingText` deliberately remains shell-sensitive.
+struct CompletionResultIdentity: Hashable, Sendable {
+    let resultingText: String
+    let category: CompletionResultCategory
+    let isDirectory: Bool
+
+    var stableID: String { "\(category.rawValue)|\(isDirectory)|\(resultingText)" }
+}
+
+extension CompletionCandidate {
+    func resultIdentity(for request: CompletionRequest) -> CompletionResultIdentity? {
+        guard let result = resultingText(for: request) else { return nil }
+        return CompletionResultIdentity(
+            resultingText: Self.canonicalResult(result),
+            category: kind == .nextCommand ? .nextCommand : .typedCompletion,
+            isDirectory: isDirectory
+        )
+    }
+
+    func resultingText(for request: CompletionRequest) -> String? {
+        let range: NSRange
+        if let replacementRange {
+            range = replacementRange
+        } else {
+            switch kind {
+            case .fullCommand, .nextCommand, .script:
+                range = NSRange(location: 0, length: (request.draft as NSString).length)
+            case .command, .argument, .path, .option:
+                range = request.tokenContext.replacementRange
+            }
+        }
+        return replacingUTF16Range(in: request.draft, range: range, with: replacementText)
+    }
+
+    private static func canonicalResult(_ value: String) -> String {
+        value.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: #"\s+$"#, with: "", options: .regularExpression)
+    }
+}
+
+/// Converts an NSRange without interpreting UTF-16 offsets as Characters and
+/// rejects boundaries which split a surrogate pair.
+func replacingUTF16Range(in text: String, range: NSRange, with replacement: String) -> String? {
+    let utf16 = text.utf16
+    guard range.location != NSNotFound,
+          range.location >= 0, range.length >= 0,
+          range.location <= utf16.count,
+          range.length <= utf16.count - range.location else { return nil }
+    let utf16Start = utf16.index(utf16.startIndex, offsetBy: range.location)
+    let utf16End = utf16.index(utf16Start, offsetBy: range.length)
+    guard let start = String.Index(utf16Start, within: text),
+          let end = String.Index(utf16End, within: text) else { return nil }
+    return text.replacingCharacters(in: start..<end, with: replacement)
 }
 
 enum CompletionRankReason: String, Sendable {
@@ -119,6 +185,27 @@ struct CompletionRanker: Sendable {
         return merged.map(score).sorted(by: precedes).prefix(max(0, maximumResults)).map { $0 }
     }
 
+    func rank(_ input: [CompletionCandidate], request: CompletionRequest,
+              maximumResults: Int = .max) -> [RankedCompletion] {
+        deduplicate(input, request: request).map(score).sorted(by: precedes)
+            .prefix(max(0, maximumResults)).map { $0 }
+    }
+
+    func deduplicate(_ candidates: [CompletionCandidate], request: CompletionRequest) -> [CompletionCandidate] {
+        var order: [CompletionResultIdentity] = []
+        var values: [CompletionResultIdentity: CompletionCandidate] = [:]
+        for candidate in candidates {
+            guard let identity = candidate.resultIdentity(for: request) else { continue }
+            guard let existing = values[identity] else {
+                order.append(identity)
+                values[identity] = withStableID(candidate, identity: identity)
+                continue
+            }
+            values[identity] = merge(existing, candidate, identity: identity)
+        }
+        return order.compactMap { values[$0] }
+    }
+
     func deduplicate(_ candidates: [CompletionCandidate]) -> [CompletionCandidate] {
         var order: [String] = []
         var values: [String: CompletionCandidate] = [:]
@@ -133,6 +220,8 @@ struct CompletionRanker: Sendable {
             merged.evidence = evidence
             merged.supportingSources.formUnion(existing.supportingSources)
             merged.supportingSources.formUnion(candidate.supportingSources)
+            merged.feedbackIdentityAliases.formUnion(existing.feedbackIdentityAliases)
+            merged.feedbackIdentityAliases.formUnion(candidate.feedbackIdentityAliases)
             // Prefer useful provider detail without changing executable text.
             if stronger.detail == nil, let detail = (stronger.id == existing.id ? candidate : existing).detail {
                 merged = CompletionCandidate(id: stronger.id, displayText: stronger.displayText,
@@ -140,7 +229,8 @@ struct CompletionRanker: Sendable {
                     replacementRange: stronger.replacementRange,
                     source: stronger.source, kind: stronger.kind,
                     detail: detail, isDirectory: stronger.isDirectory, evidence: evidence,
-                    supportingSources: merged.supportingSources)
+                    supportingSources: merged.supportingSources,
+                    feedbackIdentityAliases: merged.feedbackIdentityAliases)
             }
             values[key] = merged
         }
@@ -154,6 +244,65 @@ struct CompletionRanker: Sendable {
             "\($0.location):\($0.length)"
         } ?? "default"
         return "\(candidate.kind.rawValue)|\(candidate.isDirectory)|\(range)|\(trimmed)"
+    }
+
+    private func merge(_ existing: CompletionCandidate, _ candidate: CompletionCandidate,
+                       identity: CompletionResultIdentity) -> CompletionCandidate {
+        let primary = stronger(candidate, than: existing) ? candidate : existing
+        let operation = saferOperation(candidate, than: existing) ? candidate : existing
+        var sources = existing.supportingSources
+        sources.formUnion(candidate.supportingSources)
+        sources.insert(existing.source); sources.insert(candidate.source)
+        let details = [existing, candidate]
+        let detail = details.first { $0.source == .zsh && !($0.detail ?? "").isEmpty }?.detail
+            ?? details.first { $0.source == .projectScript && !($0.detail ?? "").isEmpty }?.detail
+            ?? primary.detail ?? details.first { !($0.detail ?? "").isEmpty }?.detail
+        return CompletionCandidate(
+            id: identity.stableID,
+            displayText: primary.displayText,
+            replacementText: operation.replacementText,
+            replacementRange: operation.replacementRange,
+            source: primary.source,
+            kind: primary.kind,
+            detail: detail,
+            isDirectory: primary.isDirectory,
+            evidence: merge(existing.evidence, candidate.evidence),
+            supportingSources: sources,
+            feedbackIdentityAliases: existing.feedbackIdentityAliases
+                .union(candidate.feedbackIdentityAliases)
+        )
+    }
+
+    private func withStableID(_ candidate: CompletionCandidate,
+                              identity: CompletionResultIdentity) -> CompletionCandidate {
+        CompletionCandidate(id: identity.stableID, displayText: candidate.displayText,
+            replacementText: candidate.replacementText, replacementRange: candidate.replacementRange,
+            source: candidate.source, kind: candidate.kind, detail: candidate.detail,
+            isDirectory: candidate.isDirectory, evidence: candidate.evidence,
+            supportingSources: candidate.supportingSources,
+            feedbackIdentityAliases: candidate.feedbackIdentityAliases)
+    }
+
+    private func stronger(_ lhs: CompletionCandidate, than rhs: CompletionCandidate) -> Bool {
+        if sourceBase(lhs.source) != sourceBase(rhs.source) {
+            return sourceBase(lhs.source) > sourceBase(rhs.source)
+        }
+        if (lhs.replacementRange != nil) != (rhs.replacementRange != nil) {
+            return lhs.replacementRange != nil
+        }
+        return !(lhs.detail ?? "").isEmpty && (rhs.detail ?? "").isEmpty
+    }
+
+    private func saferOperation(_ lhs: CompletionCandidate, than rhs: CompletionCandidate) -> Bool {
+        let lhsExplicit = lhs.replacementRange != nil
+        let rhsExplicit = rhs.replacementRange != nil
+        if lhsExplicit != rhsExplicit { return lhsExplicit }
+        if lhs.source == .zsh && rhs.source != .zsh { return true }
+        if rhs.source == .zsh && lhs.source != .zsh { return false }
+        let lhsLength = lhs.replacementRange?.length ?? Int.max
+        let rhsLength = rhs.replacementRange?.length ?? Int.max
+        if lhsLength != rhsLength { return lhsLength < rhsLength }
+        return stronger(lhs, than: rhs)
     }
 
     private func merge(_ a: CompletionEvidence, _ b: CompletionEvidence) -> CompletionEvidence {

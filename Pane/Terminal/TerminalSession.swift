@@ -652,14 +652,6 @@ final class TerminalSession: NSObject, ObservableObject {
         rank: Int
     ) {
         guard !isSecureInputActive, let runtimeStateController else { return }
-        let kind: CompletionKind
-        switch suggestion.source {
-        case .zsh: kind = .argument
-        case .history, .projectScript: kind = .fullCommand
-        case .builtIn, .executable: kind = .command
-        case .fileSystem: kind = .path
-        case .transition: kind = .nextCommand
-        }
         let source: CompletionSource
         switch suggestion.source {
         case .zsh: source = .zsh
@@ -670,11 +662,22 @@ final class TerminalSession: NSObject, ObservableObject {
         case .projectScript: source = .projectScript
         case .transition: source = .transition
         }
+        let supportingSources = Set(suggestion.supportingSources.map { supportingSource in
+            switch supportingSource {
+            case .zsh: return CompletionSource.zsh
+            case .history: return .history
+            case .builtIn: return .builtIn
+            case .executable: return .executable
+            case .fileSystem: return .fileSystem
+            case .projectScript: return .projectScript
+            case .transition: return .transition
+            }
+        })
         let record = CompletionFeedbackRecord(
-            candidateIdentity: "\(kind.rawValue)|\(suggestion.isDirectory)|\(suggestion.replacementText)",
+            candidateIdentity: suggestion.id,
             normalizedReplacement: suggestion.replacementText,
             source: source,
-            supportingSources: [source],
+            supportingSources: supportingSources,
             projectID: nil,
             directoryIdentity: currentDirectory ?? shellConfiguration.workingDirectory,
             action: action,

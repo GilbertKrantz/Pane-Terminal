@@ -23,9 +23,11 @@ struct CommandAutocompleteSuggestion: Identifiable, Equatable, Hashable, Sendabl
     let source: Source
     let isDirectory: Bool
     let detail: String?
+    let supportingSources: Set<Source>
+    private let stableID: String?
 
     var id: String {
-        "\(source.rawValue):\(replacementText)"
+        stableID ?? "\(source.rawValue):\(replacementText)"
     }
 
     init(
@@ -34,7 +36,9 @@ struct CommandAutocompleteSuggestion: Identifiable, Equatable, Hashable, Sendabl
         replacementRange: NSRange? = nil,
         source: Source,
         isDirectory: Bool = false,
-        detail: String? = nil
+        detail: String? = nil,
+        stableID: String? = nil,
+        supportingSources: Set<Source>? = nil
     ) {
         self.text = text
         self.replacementText = replacementText ?? text
@@ -42,6 +46,8 @@ struct CommandAutocompleteSuggestion: Identifiable, Equatable, Hashable, Sendabl
         self.source = source
         self.isDirectory = isDirectory
         self.detail = detail
+        self.stableID = stableID
+        self.supportingSources = supportingSources ?? [source]
     }
 }
 
