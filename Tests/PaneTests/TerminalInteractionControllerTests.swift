@@ -240,6 +240,42 @@ final class PTYGenerationGateTests: XCTestCase {
 
 final class PTYControllerTests: XCTestCase {
     @MainActor
+    func testOneHundredProcessGenerationsReturnToBaseline() {
+        var starts = 0
+        var terminations = 0
+        let controller = PTYController(
+            terminationDelay: .nanoseconds(0),
+            processFactory: { _ in
+                FakePTYProcessDriver { event in
+                    if event == "start" { starts += 1 }
+                    if event == "terminate" { terminations += 1 }
+                }
+            }
+        )
+        let configuration = ShellConfiguration(
+            executable: "/bin/zsh",
+            arguments: ["-f"],
+            environment: [],
+            workingDirectory: "/tmp"
+        )
+
+        for _ in 0..<100 {
+            XCTAssertTrue(controller.start(
+                configuration: configuration,
+                workingDirectory: "/tmp"
+            ).isRunning)
+            controller.terminate()
+            XCTAssertFalse(controller.isRunning)
+#if DEBUG
+            XCTAssertFalse(controller.debugHasProcessReference)
+#endif
+        }
+
+        XCTAssertEqual(starts, 100)
+        XCTAssertEqual(terminations, 100)
+    }
+
+    @MainActor
     func testStartWriteResizeAndTerminateAreOwnedByController() {
         var drivers: [FakePTYProcessDriver] = []
         var delegates: [LocalProcessDelegate] = []

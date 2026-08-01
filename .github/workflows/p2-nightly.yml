@@ -1,0 +1,140 @@
+name: P2 Nightly
+
+on:
+  schedule:
+    - cron: "30 17 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: p2-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.4.app/Contents/Developer
+  PANE_RUN_LARGE_COMPATIBILITY: "1"
+  PANE_STRESS_TAB_COUNT: "12"
+  PANE_STRESS_COMMANDS_PER_TAB: "20"
+  PANE_STRESS_SWITCH_COUNT: "500"
+  PANE_STRESS_BACKGROUND_PRODUCERS: "6"
+  PANE_STRESS_ALTERNATE_SCREEN_COUNT: "3"
+  PANE_STRESS_CLOSE_COUNT: "6"
+  PANE_STRESS_REPLACEMENT_COUNT: "6"
+  PANE_LIFECYCLE_CYCLES: "100"
+  PANE_RUN_RESOURCE_STRESS: "1"
+  PANE_CAPTURE_FAILURE_DIAGNOSTICS: "1"
+  PANE_FIXTURE_STARTUP_TIMEOUT_SECONDS: "5"
+  PANE_FIXTURE_READINESS_TIMEOUT_SECONDS: "5"
+  PANE_FIXTURE_ACTION_TIMEOUT_SECONDS: "5"
+  PANE_FIXTURE_CLEANUP_TIMEOUT_SECONDS: "2"
+  PANE_FIXTURE_TOTAL_TIMEOUT_SECONDS: "20"
+
+jobs:
+  hardening:
+    name: Compatibility, stress, resources, and recovery
+    runs-on: macos-26
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Verify toolchain and repository integrity
+        run: |
+          test -d "$DEVELOPER_DIR"
+          xcodebuild -version
+          swift --version
+          Scripts/P2/check-integrity.sh
+
+      - name: Cache SwiftPM and Xcode dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            .build
+            .ci/DerivedData
+            .ci/SourcePackages
+            ~/Library/Caches/org.swift.swiftpm
+          key: ${{ runner.os }}-p2-nightly-${{ hashFiles('Package.resolved', 'Pane.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-p2-nightly-
+
+      - name: Resolve packages
+        run: swift package resolve
+
+      - name: Inventory required nightly hooks
+        run: |
+          mkdir -p .ci/p2-artifacts
+          swift test list > .ci/p2-artifacts/swift-test-list.txt
+          Scripts/P2/check-nightly-test-inventory.sh \
+            .ci/p2-artifacts/swift-test-list.txt \
+            .ci/p2-artifacts/nightly-hook-status.json
+
+      - name: Run full compatibility suite
+        run: |
+          set -o pipefail
+          swift test --filter PaneCompatibilityTests \
+            2>&1 | tee .ci/p2-artifacts/compatibility.log
+
+      - name: Run real-PTY 12-tab baseline
+        env:
+          PANE_RUN_REAL_STRESS: "1"
+        run: |
+          set -o pipefail
+          swift test \
+            --filter 'PaneCompatibilityTests.WorkspaceStressRunnerTests/testRealPTYBaselineWhenExplicitlyEnabled' \
+            2>&1 | tee .ci/p2-artifacts/real-pty-stress.log
+
+      - name: Run stress, output, search, resource, and recovery suites
+        run: |
+          set -o pipefail
+          swift test \
+            --filter 'TerminalSessionHardeningTests|TerminalWorkspaceControllerTests|LargeOutputHardeningTests|ResourceLifecycleHardeningTests|ResourcePerformanceTests|RuntimeStateStoreTests|WorkspaceSnapshotStoreTests' \
+            2>&1 | tee .ci/p2-artifacts/hardening.log
+
+      - name: Clean native app build
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Pane.xcodeproj \
+            -scheme Pane \
+            -destination 'platform=macOS' \
+            -configuration Debug \
+            -derivedDataPath .ci/CleanDerivedData \
+            -clonedSourcePackagesDirPath .ci/SourcePackages \
+            CODE_SIGNING_ALLOWED=NO \
+            clean build \
+            2>&1 | tee .ci/p2-artifacts/clean-native-build.log
+
+      - name: Run both native test targets
+        run: |
+          xcodebuild \
+            -project Pane.xcodeproj \
+            -scheme Pane \
+            -destination 'platform=macOS' \
+            -configuration Debug \
+            -derivedDataPath .ci/DerivedData \
+            -clonedSourcePackagesDirPath .ci/SourcePackages \
+            -resultBundlePath .ci/P2Nightly.xcresult \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+      - name: Capture sanitized runner metadata
+        if: always()
+        run: Scripts/P2/collect-ci-metadata.sh .ci/p2-artifacts
+
+      - name: Upload nightly compatibility, diagnostics, and xcresult
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: Pane-P2-nightly-${{ github.run_id }}
+          path: |
+            .ci/P2Nightly.xcresult
+            .ci/p2-artifacts
+            Artifacts/P2
+            Tests/Compatibility/Snapshots/compatibility-evidence.json
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 30

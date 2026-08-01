@@ -11,25 +11,19 @@ struct LocalAutocompleteContext: Sendable {
 
 actor LocalAutocompleteProvider {
     private let executableIndex: ExecutableIndex
-    private let projectContextProvider: ProjectContextProvider
-    private let projectDefinitionCache: ProjectDefinitionCache
-    private let gitContextCache: GitContextCache
+    private let contextCoordinator: ComposerContextCoordinator
     private let autocomplete: CommandAutocomplete
     private let ranker: CompletionRanker
     private let maximumSuggestions: Int
 
     init(
         executableIndex: ExecutableIndex = ExecutableIndex(),
-        projectContextProvider: ProjectContextProvider = ProjectContextProvider(),
-        projectDefinitionCache: ProjectDefinitionCache = ProjectDefinitionCache(),
-        gitContextCache: GitContextCache = GitContextCache(),
+        contextCoordinator: ComposerContextCoordinator = ComposerContextCoordinator(),
         ranker: CompletionRanker = CompletionRanker(),
         maximumSuggestions: Int = 12
     ) {
         self.executableIndex = executableIndex
-        self.projectContextProvider = projectContextProvider
-        self.projectDefinitionCache = projectDefinitionCache
-        self.gitContextCache = gitContextCache
+        self.contextCoordinator = contextCoordinator
         self.ranker = ranker
         self.maximumSuggestions = max(0, maximumSuggestions)
         self.autocomplete = CommandAutocomplete(
@@ -38,29 +32,26 @@ actor LocalAutocompleteProvider {
     }
 
     func invalidateGitContext() async {
-        await gitContextCache.invalidate()
+        await contextCoordinator.invalidateGit()
     }
 
     func invalidateProjectContext() async {
-        await projectDefinitionCache.invalidate()
-        await gitContextCache.invalidate()
+        await contextCoordinator.invalidateAll()
     }
 
     func projectDefinition(for directory: URL) async -> ProjectContext? {
-        await projectDefinitionCache.value(for: directory) {
-            self.projectContextProvider.definition(for: directory)
-        }
+        await contextCoordinator.definition(for: directory)
     }
 
-    func projectContext(for directory: URL) async -> ProjectContext? {
-        guard let definition = await projectDefinition(for: directory) else { return nil }
-        let git = await gitContextCache.value(for: definition.root) {
-            await self.projectContextProvider.gitContext(root: definition.root)
-        }
-        return ProjectContext(
-            root: definition.root, identity: definition.identity, kind: definition.kind,
-            git: git, manifests: definition.manifests, scripts: definition.scripts,
-            detectedLanguages: definition.detectedLanguages, discoveredAt: definition.discoveredAt
+    func projectContext(
+        for directory: URL,
+        visibility: SessionVisibilityState = .selected,
+        reason: ContextRefreshReason = .ttlExpired
+    ) async -> ProjectContext? {
+        await contextCoordinator.context(
+            for: directory,
+            visibility: visibility,
+            reason: reason
         )
     }
 
@@ -73,28 +64,12 @@ actor LocalAutocompleteProvider {
             currentDirectory: context.currentDirectory,
             shellGeneration: context.shellGeneration
         )
-        async let discoveredDefinition = projectDefinitionCache.value(for: context.currentDirectory) {
-            self.projectContextProvider.definition(for: context.currentDirectory)
-        }
-        let (executables, definition) = await (indexedExecutables, discoveredDefinition)
-        let project: ProjectContext?
-        if let definition {
-            let git = await gitContextCache.value(for: definition.root) {
-                await self.projectContextProvider.gitContext(root: definition.root)
-            }
-            project = ProjectContext(
-                root: definition.root,
-                identity: definition.identity,
-                kind: definition.kind,
-                git: git,
-                manifests: definition.manifests,
-                scripts: definition.scripts,
-                detectedLanguages: definition.detectedLanguages,
-                discoveredAt: definition.discoveredAt
-            )
-        } else {
-            project = nil
-        }
+        async let discoveredProject = contextCoordinator.context(
+            for: context.currentDirectory,
+            visibility: .selected,
+            reason: .ttlExpired
+        )
+        let (executables, project) = await (indexedExecutables, discoveredProject)
         guard !Task.isCancelled else { return [] }
         var suggestions = autocomplete.suggestions(
             for: context.draft,

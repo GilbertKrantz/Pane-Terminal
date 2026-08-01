@@ -19,7 +19,7 @@ actor InMemoryRuntimeStateStore: RuntimeStateStore {
 
     func persistCommandEvent(_ event: PersistedCommandEvent) async throws {
         if let index = commandEvents.firstIndex(where: { $0.blockID == event.blockID }) {
-            commandEvents[index] = event
+            commandEvents[index] = commandEvents[index].monotonicallyMerged(with: event)
         } else {
             commandEvents.append(event)
         }

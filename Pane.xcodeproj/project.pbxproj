@@ -72,6 +72,29 @@
 		F10000000000000000000001 /* TerminalWorkspaceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000001 /* TerminalWorkspaceController.swift */; };
 		F10000000000000000000002 /* TerminalWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000002 /* TerminalWorkspaceView.swift */; };
 		F10000000000000000000003 /* TerminalWorkspaceControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000003 /* TerminalWorkspaceControllerTests.swift */; };
+		C10000000000000000000001 /* CompatibilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001 /* CompatibilityTests.swift */; };
+		C10000000000000000000002 /* CompatibilityModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000002 /* CompatibilityModels.swift */; };
+		C10000000000000000000003 /* FixtureLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003 /* FixtureLocator.swift */; };
+		C10000000000000000000004 /* FixtureProcessRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000004 /* FixtureProcessRunner.swift */; };
+		C10000000000000000000005 /* pane-fixture in Resources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000005 /* pane-fixture */; };
+		C10000000000000000000006 /* SessionRecoveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000006 /* SessionRecoveryTests.swift */; };
+		C10000000000000000000007 /* ScrollbackPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000008 /* ScrollbackPolicy.swift */; };
+		C10000000000000000000008 /* PaneDiagnosticsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000009 /* PaneDiagnosticsModels.swift */; };
+		C10000000000000000000009 /* PaneResourceCounters.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000A /* PaneResourceCounters.swift */; };
+		C1000000000000000000000A /* ComposerContextCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000B /* ComposerContextCoordinator.swift */; };
+		C1000000000000000000000B /* RuntimeStatePersistenceCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000C /* RuntimeStatePersistenceCoordinator.swift */; };
+		C1000000000000000000000C /* ResourcePerformanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000D /* ResourcePerformanceTests.swift */; };
+		C1000000000000000000000D /* PanePerformanceThresholds.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000E /* PanePerformanceThresholds.swift */; };
+		C1000000000000000000000F /* WorkspaceStressRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000F /* WorkspaceStressRunner.swift */; };
+		C10000000000000000000010 /* WorkspaceStressRunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000010 /* WorkspaceStressRunnerTests.swift */; };
+		D10000000000000000000001 /* BoundedOutputCompactor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000001 /* BoundedOutputCompactor.swift */; };
+		D10000000000000000000002 /* BlockSearchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000002 /* BlockSearchIndex.swift */; };
+		D10000000000000000000003 /* WorkspaceSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000003 /* WorkspaceSnapshotStore.swift */; };
+		D10000000000000000000004 /* PaneProcessMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000004 /* PaneProcessMetrics.swift */; };
+		D10000000000000000000005 /* PanePerformanceSignposts.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000005 /* PanePerformanceSignposts.swift */; };
+		D10000000000000000000006 /* LargeOutputHardeningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000006 /* LargeOutputHardeningTests.swift */; };
+		D10000000000000000000007 /* WorkspaceSnapshotStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000007 /* WorkspaceSnapshotStoreTests.swift */; };
+		D10000000000000000000008 /* ResourceLifecycleHardeningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000008 /* ResourceLifecycleHardeningTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -153,6 +176,30 @@
 		F200000000000000000000001 /* TerminalWorkspaceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceController.swift; sourceTree = "<group>"; };
 		F200000000000000000000002 /* TerminalWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceView.swift; sourceTree = "<group>"; };
 		F200000000000000000000003 /* TerminalWorkspaceControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceControllerTests.swift; sourceTree = "<group>"; };
+		C20000000000000000000001 /* CompatibilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompatibilityTests.swift; sourceTree = "<group>"; };
+		C20000000000000000000002 /* CompatibilityModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompatibilityModels.swift; sourceTree = "<group>"; };
+		C20000000000000000000003 /* FixtureLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureLocator.swift; sourceTree = "<group>"; };
+		C20000000000000000000004 /* FixtureProcessRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureProcessRunner.swift; sourceTree = "<group>"; };
+		C20000000000000000000005 /* pane-fixture */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "pane-fixture"; sourceTree = "<group>"; };
+		C20000000000000000000006 /* SessionRecoveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionRecoveryTests.swift; sourceTree = "<group>"; };
+		C20000000000000000000007 /* PaneCompatibilityTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PaneCompatibilityTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C20000000000000000000008 /* ScrollbackPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollbackPolicy.swift; sourceTree = "<group>"; };
+		C20000000000000000000009 /* PaneDiagnosticsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneDiagnosticsModels.swift; sourceTree = "<group>"; };
+		C2000000000000000000000A /* PaneResourceCounters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneResourceCounters.swift; sourceTree = "<group>"; };
+		C2000000000000000000000B /* ComposerContextCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerContextCoordinator.swift; sourceTree = "<group>"; };
+		C2000000000000000000000C /* RuntimeStatePersistenceCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeStatePersistenceCoordinator.swift; sourceTree = "<group>"; };
+		C2000000000000000000000D /* ResourcePerformanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourcePerformanceTests.swift; sourceTree = "<group>"; };
+		C2000000000000000000000E /* PanePerformanceThresholds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanePerformanceThresholds.swift; sourceTree = "<group>"; };
+		C2000000000000000000000F /* WorkspaceStressRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceStressRunner.swift; sourceTree = "<group>"; };
+		C20000000000000000000010 /* WorkspaceStressRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceStressRunnerTests.swift; sourceTree = "<group>"; };
+		D20000000000000000000001 /* BoundedOutputCompactor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoundedOutputCompactor.swift; sourceTree = "<group>"; };
+		D20000000000000000000002 /* BlockSearchIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockSearchIndex.swift; sourceTree = "<group>"; };
+		D20000000000000000000003 /* WorkspaceSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSnapshotStore.swift; sourceTree = "<group>"; };
+		D20000000000000000000004 /* PaneProcessMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaneProcessMetrics.swift; sourceTree = "<group>"; };
+		D20000000000000000000005 /* PanePerformanceSignposts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanePerformanceSignposts.swift; sourceTree = "<group>"; };
+		D20000000000000000000006 /* LargeOutputHardeningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LargeOutputHardeningTests.swift; sourceTree = "<group>"; };
+		D20000000000000000000007 /* WorkspaceSnapshotStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSnapshotStoreTests.swift; sourceTree = "<group>"; };
+		D20000000000000000000008 /* ResourceLifecycleHardeningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceLifecycleHardeningTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -165,6 +212,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		300000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C30000000000000000000001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -194,6 +248,8 @@
 				400000000000000000000004 /* Models */,
 				400000000000000000000005 /* Terminal */,
 				400000000000000000000006 /* Views */,
+				C40000000000000000000004 /* Diagnostics */,
+				C40000000000000000000005 /* Performance */,
 				20000000000000000000000B /* Info.plist */,
 			);
 			path = Pane;
@@ -235,6 +291,8 @@
 				20000000000000000000002B /* SQLiteRuntimeStateStore.swift */,
 				20000000000000000000002C /* RuntimeStateController.swift */,
 				20000000000000000000002D /* RuntimeStateSettings.swift */,
+				C2000000000000000000000C /* RuntimeStatePersistenceCoordinator.swift */,
+				D20000000000000000000003 /* WorkspaceSnapshotStore.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -251,7 +309,10 @@
 				B200000000000000000000002 /* PTYGenerationGate.swift */,
 				B200000000000000000000005 /* PTYController.swift */,
 				B200000000000000000000006 /* BlockLifecycleController.swift */,
+				D20000000000000000000001 /* BoundedOutputCompactor.swift */,
+				D20000000000000000000002 /* BlockSearchIndex.swift */,
 				B200000000000000000000003 /* TerminalInteractionController.swift */,
+				C20000000000000000000008 /* ScrollbackPolicy.swift */,
 				200000000000000000000016 /* BlockOutputSanitizer.swift */,
 				200000000000000000000032 /* TerminalReplaySanitizer.swift */,
 				200000000000000000000017 /* BlockStreamParser.swift */,
@@ -281,6 +342,7 @@
 			isa = PBXGroup;
 			children = (
 				400000000000000000000008 /* PaneTests */,
+				C40000000000000000000001 /* Compatibility */,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -307,8 +369,63 @@
 				200000000000000000000033 /* TerminalReplaySanitizerTests.swift */,
 				B200000000000000000000004 /* TerminalInteractionControllerTests.swift */,
 				B200000000000000000000007 /* BlockLifecycleControllerTests.swift */,
+				C20000000000000000000006 /* SessionRecoveryTests.swift */,
+				C2000000000000000000000D /* ResourcePerformanceTests.swift */,
+				D20000000000000000000006 /* LargeOutputHardeningTests.swift */,
+				D20000000000000000000007 /* WorkspaceSnapshotStoreTests.swift */,
+				D20000000000000000000008 /* ResourceLifecycleHardeningTests.swift */,
 			);
 			path = PaneTests;
+			sourceTree = "<group>";
+		};
+		C40000000000000000000001 /* Compatibility */ = {
+			isa = PBXGroup;
+			children = (
+				C20000000000000000000001 /* CompatibilityTests.swift */,
+				C20000000000000000000010 /* WorkspaceStressRunnerTests.swift */,
+				C40000000000000000000002 /* Support */,
+				C40000000000000000000003 /* Fixtures */,
+			);
+			path = Compatibility;
+			sourceTree = "<group>";
+		};
+		C40000000000000000000002 /* Support */ = {
+			isa = PBXGroup;
+			children = (
+				C20000000000000000000002 /* CompatibilityModels.swift */,
+				C20000000000000000000003 /* FixtureLocator.swift */,
+				C20000000000000000000004 /* FixtureProcessRunner.swift */,
+				C2000000000000000000000F /* WorkspaceStressRunner.swift */,
+			);
+			path = Support;
+			sourceTree = "<group>";
+		};
+		C40000000000000000000003 /* Fixtures */ = {
+			isa = PBXGroup;
+			children = (
+				C20000000000000000000005 /* pane-fixture */,
+			);
+			path = Fixtures;
+			sourceTree = "<group>";
+		};
+		C40000000000000000000004 /* Diagnostics */ = {
+			isa = PBXGroup;
+			children = (
+				C20000000000000000000009 /* PaneDiagnosticsModels.swift */,
+				C2000000000000000000000A /* PaneResourceCounters.swift */,
+				D20000000000000000000004 /* PaneProcessMetrics.swift */,
+			);
+			path = Diagnostics;
+			sourceTree = "<group>";
+		};
+		C40000000000000000000005 /* Performance */ = {
+			isa = PBXGroup;
+			children = (
+				C2000000000000000000000B /* ComposerContextCoordinator.swift */,
+				C2000000000000000000000E /* PanePerformanceThresholds.swift */,
+				D20000000000000000000005 /* PanePerformanceSignposts.swift */,
+			);
+			path = Performance;
 			sourceTree = "<group>";
 		};
 		400000000000000000000009 /* Products */ = {
@@ -316,6 +433,7 @@
 			children = (
 				200000000000000000000010 /* Pane.app */,
 				200000000000000000000011 /* PaneTests.xctest */,
+				C20000000000000000000007 /* PaneCompatibilityTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -361,6 +479,24 @@
 			productReference = 200000000000000000000011 /* PaneTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		CA0000000000000000000001 /* PaneCompatibilityTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C80000000000000000000001 /* Build configuration list for PBXNativeTarget "PaneCompatibilityTests" */;
+			buildPhases = (
+				C70000000000000000000001 /* Sources */,
+				C30000000000000000000001 /* Frameworks */,
+				C70000000000000000000002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CB0000000000000000000001 /* PBXTargetDependency */,
+			);
+			name = PaneCompatibilityTests;
+			productName = PaneCompatibilityTests;
+			productReference = C20000000000000000000007 /* PaneCompatibilityTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -375,6 +511,10 @@
 						CreatedOnToolsVersion = 16.0;
 					};
 					A00000000000000000000003 = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = A00000000000000000000002;
+					};
+					CA0000000000000000000001 = {
 						CreatedOnToolsVersion = 16.0;
 						TestTargetID = A00000000000000000000002;
 					};
@@ -398,6 +538,7 @@
 			targets = (
 				A00000000000000000000002 /* Pane */,
 				A00000000000000000000003 /* PaneTests */,
+				CA0000000000000000000001 /* PaneCompatibilityTests */,
 			);
 		};
 /* End PBXProject section */
@@ -419,6 +560,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C70000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C10000000000000000000005 /* pane-fixture in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -437,7 +586,10 @@
 				B10000000000000000000002 /* PTYGenerationGate.swift in Sources */,
 				B10000000000000000000005 /* PTYController.swift in Sources */,
 				B10000000000000000000006 /* BlockLifecycleController.swift in Sources */,
+				D10000000000000000000001 /* BoundedOutputCompactor.swift in Sources */,
+				D10000000000000000000002 /* BlockSearchIndex.swift in Sources */,
 				B10000000000000000000003 /* TerminalInteractionController.swift in Sources */,
+				C10000000000000000000007 /* ScrollbackPolicy.swift in Sources */,
 				100000000000000000000002 /* InputMode.swift in Sources */,
 				100000000000000000000003 /* CommandHistory.swift in Sources */,
 				100000000000000000000004 /* CommandSerializer.swift in Sources */,
@@ -469,6 +621,14 @@
 				10000000000000000000002C /* RuntimeStateController.swift in Sources */,
 				10000000000000000000002D /* RuntimeStateSettings.swift in Sources */,
 				10000000000000000000002E /* RuntimeStateSettingsView.swift in Sources */,
+				C10000000000000000000008 /* PaneDiagnosticsModels.swift in Sources */,
+				C10000000000000000000009 /* PaneResourceCounters.swift in Sources */,
+				C1000000000000000000000A /* ComposerContextCoordinator.swift in Sources */,
+				C1000000000000000000000B /* RuntimeStatePersistenceCoordinator.swift in Sources */,
+				D10000000000000000000003 /* WorkspaceSnapshotStore.swift in Sources */,
+				C1000000000000000000000D /* PanePerformanceThresholds.swift in Sources */,
+				D10000000000000000000004 /* PaneProcessMetrics.swift in Sources */,
+				D10000000000000000000005 /* PanePerformanceSignposts.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -495,6 +655,24 @@
 				100000000000000000000033 /* TerminalReplaySanitizerTests.swift in Sources */,
 				B10000000000000000000004 /* TerminalInteractionControllerTests.swift in Sources */,
 				B10000000000000000000007 /* BlockLifecycleControllerTests.swift in Sources */,
+				C10000000000000000000006 /* SessionRecoveryTests.swift in Sources */,
+				C1000000000000000000000C /* ResourcePerformanceTests.swift in Sources */,
+				D10000000000000000000006 /* LargeOutputHardeningTests.swift in Sources */,
+				D10000000000000000000007 /* WorkspaceSnapshotStoreTests.swift in Sources */,
+				D10000000000000000000008 /* ResourceLifecycleHardeningTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C70000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C10000000000000000000001 /* CompatibilityTests.swift in Sources */,
+				C10000000000000000000002 /* CompatibilityModels.swift in Sources */,
+				C10000000000000000000003 /* FixtureLocator.swift in Sources */,
+				C10000000000000000000004 /* FixtureProcessRunner.swift in Sources */,
+				C1000000000000000000000F /* WorkspaceStressRunner.swift in Sources */,
+				C10000000000000000000010 /* WorkspaceStressRunnerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -502,6 +680,11 @@
 
 /* Begin PBXTargetDependency section */
 		B00000000000000000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A00000000000000000000002 /* Pane */;
+			targetProxy = B00000000000000000000001 /* PBXContainerItemProxy */;
+		};
+		CB0000000000000000000001 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = A00000000000000000000002 /* Pane */;
 			targetProxy = B00000000000000000000001 /* PBXContainerItemProxy */;
@@ -685,6 +868,38 @@
 			};
 			name = Release;
 		};
+		C90000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gilbertkrantz.PaneCompatibilityTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Pane.app/Contents/MacOS/Pane";
+			};
+			name = Debug;
+		};
+		C90000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_STYLE = Automatic;
+				DEAD_CODE_STRIPPING = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gilbertkrantz.PaneCompatibilityTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Pane.app/Contents/MacOS/Pane";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -711,6 +926,15 @@
 			buildConfigurations = (
 				900000000000000000000005 /* Debug */,
 				900000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C80000000000000000000001 /* Build configuration list for PBXNativeTarget "PaneCompatibilityTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C90000000000000000000001 /* Debug */,
+				C90000000000000000000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -221,10 +221,37 @@ struct BlockPresentationModel: Equatable, Sendable {
     let directoryLabel: String
 }
 
+struct ScrollbackPruningNotice: Equatable, Sendable {
+    let removedBlockIDs: [UUID]
+    let removedRetainedByteCount: Int
+    let suggestedSelectionID: UUID?
+
+    var removedBlockCount: Int {
+        removedBlockIDs.count
+    }
+
+    var message: String {
+        let noun = removedBlockCount == 1 ? "block" : "blocks"
+        return "Pane pruned \(removedBlockCount) older \(noun) to keep this session responsive."
+    }
+
+    func replacementSelection(for selectedID: UUID?) -> UUID? {
+        guard let selectedID, removedBlockIDs.contains(selectedID) else {
+            return selectedID
+        }
+        return suggestedSelectionID
+    }
+}
+
 struct CommandBlockTimeline: Equatable, Sendable {
     private(set) var blocks: [CommandBlock] = []
     private(set) var activeBlockID: UUID?
     private var queuedBlockIDs: [UUID] = []
+    private var retainedOutputBytes = 0
+
+    var retainedOutputByteCount: Int {
+        retainedOutputBytes
+    }
 
     @discardableResult
     mutating func enqueue(
@@ -259,14 +286,18 @@ struct CommandBlockTimeline: Equatable, Sendable {
     mutating func finishActive(
         exitCode: Int32,
         output: String = "",
+        outputKind: PersistedOutputKind? = nil,
         terminalSnapshot: TerminalReplaySnapshot? = nil,
         at date: Date = Date()
     ) -> UUID? {
         guard let activeBlockID, let index = index(of: activeBlockID) else { return nil }
+        retainedOutputBytes -= Self.retainedByteCount(of: blocks[index])
         blocks[index].output = output
+        blocks[index].outputKind = outputKind ?? (output.isEmpty ? .none : .complete)
         blocks[index].terminalSnapshot = terminalSnapshot
         blocks[index].completedAt = date
         blocks[index].state = .completed(exitCode: exitCode)
+        retainedOutputBytes += Self.retainedByteCount(of: blocks[index])
         self.activeBlockID = nil
         return activeBlockID
     }
@@ -274,20 +305,25 @@ struct CommandBlockTimeline: Equatable, Sendable {
     mutating func interruptActive(
         exitCode: Int32? = nil,
         output: String = "",
+        outputKind: PersistedOutputKind? = nil,
         terminalSnapshot: TerminalReplaySnapshot? = nil,
         at date: Date = Date()
     ) {
         guard let activeBlockID, let index = index(of: activeBlockID) else { return }
+        retainedOutputBytes -= Self.retainedByteCount(of: blocks[index])
         blocks[index].output = output
+        blocks[index].outputKind = outputKind ?? (output.isEmpty ? .none : .complete)
         blocks[index].terminalSnapshot = terminalSnapshot
         blocks[index].completedAt = date
         blocks[index].state = .interrupted(exitCode: exitCode)
+        retainedOutputBytes += Self.retainedByteCount(of: blocks[index])
         self.activeBlockID = nil
     }
 
     mutating func interruptUnfinished(
         exitCode: Int32? = nil,
         activeOutput: String = "",
+        activeOutputKind: PersistedOutputKind? = nil,
         activeTerminalSnapshot: TerminalReplaySnapshot? = nil,
         at date: Date = Date()
     ) {
@@ -297,10 +333,14 @@ struct CommandBlockTimeline: Equatable, Sendable {
                 blocks[index].completedAt = date
                 blocks[index].state = .interrupted(exitCode: exitCode)
             case .running:
+                retainedOutputBytes -= Self.retainedByteCount(of: blocks[index])
                 blocks[index].output = activeOutput
+                blocks[index].outputKind = activeOutputKind
+                    ?? (activeOutput.isEmpty ? .none : .complete)
                 blocks[index].terminalSnapshot = activeTerminalSnapshot
                 blocks[index].completedAt = date
                 blocks[index].state = .interrupted(exitCode: exitCode)
+                retainedOutputBytes += Self.retainedByteCount(of: blocks[index])
             case .completed, .interrupted, .unknown:
                 break
             }
@@ -336,6 +376,9 @@ struct CommandBlockTimeline: Equatable, Sendable {
             seen.insert(block.id).inserted
         }
         blocks.insert(contentsOf: uniqueBlocks, at: 0)
+        retainedOutputBytes += uniqueBlocks.reduce(into: 0) { count, block in
+            count += Self.retainedByteCount(of: block)
+        }
     }
 
     @discardableResult
@@ -359,6 +402,9 @@ struct CommandBlockTimeline: Equatable, Sendable {
     }
 
     mutating func remove(id: UUID) {
+        if let block = block(id: id) {
+            retainedOutputBytes -= Self.retainedByteCount(of: block)
+        }
         blocks.removeAll { $0.id == id }
         queuedBlockIDs.removeAll { $0 == id }
         if activeBlockID == id {
@@ -370,11 +416,17 @@ struct CommandBlockTimeline: Equatable, Sendable {
         blocks.removeAll()
         queuedBlockIDs.removeAll()
         activeBlockID = nil
+        retainedOutputBytes = 0
     }
 
     /// Clears only immutable timeline entries. Running and queued commands
     /// remain tracked so their PTY lifecycle markers cannot be orphaned.
     mutating func clearFinalized() {
+        retainedOutputBytes -= blocks.reduce(into: 0) { count, block in
+            if block.isFinalized {
+                count += Self.retainedByteCount(of: block)
+            }
+        }
         blocks.removeAll { block in
             switch block.state {
             case .completed, .interrupted, .unknown:
@@ -389,12 +441,76 @@ struct CommandBlockTimeline: Equatable, Sendable {
         for index in blocks.indices {
             switch blocks[index].state {
             case .completed, .interrupted, .unknown:
+                retainedOutputBytes -= Self.retainedByteCount(of: blocks[index])
                 blocks[index].output = ""
                 blocks[index].terminalSnapshot = nil
+                blocks[index].outputKind = .none
             case .queued, .running:
                 break
             }
         }
+    }
+
+    /// Applies per-session history and retained-byte bounds in stable timeline
+    /// order. Only finalized entries are eligible; active and queued lifecycle
+    /// records are never discarded.
+    @discardableResult
+    mutating func enforceScrollbackPolicy(
+        _ policy: ScrollbackPolicy = .standard,
+        compactOversizedOutputs: Bool = true
+    ) -> ScrollbackPruningNotice? {
+        let outputLimit = max(0, policy.excerptByteLimit)
+        if compactOversizedOutputs {
+            for index in blocks.indices where blocks[index].isFinalized {
+                retainedOutputBytes -= Self.retainedByteCount(of: blocks[index])
+                let compacted = BoundedOutputCompactor.compact(
+                    blocks[index].output,
+                    byteLimit: outputLimit
+                )
+                blocks[index].output = compacted.text
+                if compacted.kind == .excerpt {
+                    blocks[index].outputKind = .excerpt
+                } else if blocks[index].output.isEmpty {
+                    blocks[index].outputKind = .none
+                } else if blocks[index].outputKind == .none {
+                    blocks[index].outputKind = .complete
+                }
+                retainedOutputBytes += Self.retainedByteCount(of: blocks[index])
+            }
+        }
+
+        let finalizedLimit = max(0, policy.finalizedBlockLimit)
+        let byteLimit = max(0, policy.retainedOutputByteLimit)
+        var finalizedCount = blocks.reduce(into: 0) { count, block in
+            if block.isFinalized { count += 1 }
+        }
+        var retainedBytes = retainedOutputByteCount
+        var removedIDs: [UUID] = []
+        var removedBytes = 0
+
+        for block in blocks where block.isFinalized {
+            guard finalizedCount > finalizedLimit || retainedBytes > byteLimit else {
+                break
+            }
+            let blockBytes = block.output.utf8.count
+                + (block.terminalSnapshot?.bytes.count ?? 0)
+            removedIDs.append(block.id)
+            removedBytes += blockBytes
+            finalizedCount -= 1
+            retainedBytes = max(0, retainedBytes - blockBytes)
+        }
+
+        guard !removedIDs.isEmpty else { return nil }
+        let removedSet = Set(removedIDs)
+        blocks.removeAll { removedSet.contains($0.id) }
+        queuedBlockIDs.removeAll { removedSet.contains($0) }
+        retainedOutputBytes = retainedBytes
+
+        return ScrollbackPruningNotice(
+            removedBlockIDs: removedIDs,
+            removedRetainedByteCount: removedBytes,
+            suggestedSelectionID: blocks.first?.id
+        )
     }
 
     func block(id: UUID) -> CommandBlock? {
@@ -404,6 +520,10 @@ struct CommandBlockTimeline: Equatable, Sendable {
 
     private func index(of id: UUID) -> Int? {
         blocks.firstIndex { $0.id == id }
+    }
+
+    private static func retainedByteCount(of block: CommandBlock) -> Int {
+        block.output.utf8.count + (block.terminalSnapshot?.bytes.count ?? 0)
     }
 }
 

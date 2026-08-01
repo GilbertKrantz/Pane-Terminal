@@ -39,6 +39,17 @@
                ReferencedContainer = "container:Pane.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "CA0000000000000000000001"
+               BuildableName = "PaneCompatibilityTests.xctest"
+               BlueprintName = "PaneCompatibilityTests"
+               ReferencedContainer = "container:Pane.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

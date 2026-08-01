@@ -17,6 +17,26 @@ enum CommandInterruptionReason: String, Codable, Sendable {
     case shellExit
 }
 
+/// Test-only crash simulation can terminate an isolated host when one of these
+/// checkpoints is observed. Production callers leave the handler unset; the
+/// hook deliberately does not alter lifecycle semantics or recover a live PTY.
+enum PaneLifecycleFaultCheckpoint: String, Sendable {
+    case shellRestartRequested
+    case shellRestartCommandFinalized
+    case shellRestartPTYTerminated
+    case shellRestartStartingReplacement
+    case commandFinalizationStarted
+    case commandFinalizationCompleted
+    case interruptedCommandFinalizationStarted
+    case interruptedCommandFinalizationCompleted
+    case tabCreationStarted
+    case tabCreationPTYStarted
+    case tabCreationInstalled
+    case tabCloseStarted
+    case tabCloseRemoved
+    case tabCloseCleanupCompleted
+}
+
 enum ShellReadiness: Equatable, Sendable {
     case starting
     case initializing
@@ -34,6 +54,12 @@ struct TerminalSessionDebugSnapshot: Equatable, Sendable {
     let terminalMount: ActiveTerminalPresentation
     let focusGeneration: UInt64
     let securityState: TerminalSecurityState
+}
+
+struct SessionShutdownResult: Equatable, Sendable {
+    let sessionID: UUID
+    let processTermination: PTYTerminationResult
+    let unfinishedCommandFinalized: Bool
 }
 
 @MainActor
@@ -68,8 +94,15 @@ final class TerminalSession: NSObject, ObservableObject {
     @Published private(set) var activeCommandVisibleLineCount = 1
     @Published var selectedBlockID: UUID?
     @Published var commandDraft = ""
-    @Published var blockSearchText = ""
-    @Published var blockSearchFilter: BlockSearchFilter = .all
+    @Published var blockSearchText = "" {
+        didSet { scheduleBlockSearch() }
+    }
+    @Published var blockSearchFilter: BlockSearchFilter = .all {
+        didSet { scheduleBlockSearch() }
+    }
+    @Published private(set) var scrollbackPruningNotice: ScrollbackPruningNotice?
+    @Published private var indexedBlockSearchIDs: [UUID]?
+    @Published private var indexedBlockSearchQuery: BlockSearchQuery?
     @Published private(set) var isBlockSearchPresented = false
     @Published private(set) var blockSearchFocusGeneration: UInt64 = 0
     @Published private(set) var sessionBoundaries: [UUID: SessionBoundary] = [:]
@@ -87,18 +120,35 @@ final class TerminalSession: NSObject, ObservableObject {
     @Published private(set) var composerContextGeneration: UInt64 = 0
     @Published var visibilityState: SessionVisibilityState = .selected {
         didSet {
-            if visibilityState != .selected { requestFocus(.none) }
+            if visibilityState != .selected {
+                requestFocus(.none)
+            } else if oldValue != .selected {
+                lastForegroundSnapshot = nil
+            }
+            if let terminalView = terminalView as? PaneTerminalView {
+                terminalView.caretViewTracksFocus = visibilityState == .selected
+            }
+            if oldValue != visibilityState {
+                composerContextGeneration &+= 1
+            }
+            updateForegroundProcessMonitoring(
+                refreshImmediately: visibilityState == .selected
+            )
         }
     }
 
     var onMeaningfulBackgroundOutput: (() -> Void)?
 
     private(set) var history = CommandHistory()
-    private let ptyController = PTYController()
+    private let ptyController: PTYController
+    private let lifecycleFaultCheckpointHandler:
+        (@MainActor @Sendable (PaneLifecycleFaultCheckpoint) -> Void)?
     private let blockLifecycleController = BlockLifecycleController()
     private let focusCoordinator = FocusCoordinator()
     private let interactionController = TerminalInteractionController(
-        debugLoggingEnabled: true
+        debugLoggingEnabled: ProcessInfo.processInfo.environment[
+            "PANE_INTERACTION_DEBUG"
+        ] == "1"
     )
     private var terminalView: TerminalView?
     private var authoritativeTerminalHostView: AuthoritativeTerminalHostView?
@@ -120,6 +170,7 @@ final class TerminalSession: NSObject, ObservableObject {
     private let commandAutocomplete = CommandAutocomplete()
     private let zshCompletionClient = WarmZshCompletionClient()
     private let completionService = CompletionService()
+    private let blockSearchIndex = BlockSearchIndex()
     private let runtimeStateController: RuntimeStateController?
     private let runtimeSessionID = UUID()
     private let runtimeSessionStartedAt = Date()
@@ -133,10 +184,18 @@ final class TerminalSession: NSObject, ObservableObject {
     private var shouldReturnToBlocksAfterAlternateScreen = false
     private var shouldRestoreBlocksViewportAfterAlternateScreen = false
     private var foregroundProcessTimer: Timer?
+    private var foregroundProcessTimerInterval: TimeInterval?
+    private var lastForegroundInspectionAt: Date?
     private var lastForegroundSnapshot: ForegroundProcessSnapshot?
     private(set) var focusGeneration: UInt64 = 0
     private var restartTask: Task<Void, Never>?
-    private var shutdownTask: Task<Void, Never>?
+    private var shutdownTask: Task<SessionShutdownResult, Never>?
+    private var completedShutdownResult: SessionShutdownResult?
+    private var blockSearchTask: Task<Void, Never>?
+#if DEBUG
+    private let lifecycleDebugID = UUID()
+    private(set) var debugShutdownCompleted = false
+#endif
 
     var blocks: [CommandBlock] {
         blockTimeline.blocks
@@ -144,7 +203,15 @@ final class TerminalSession: NSObject, ObservableObject {
 
     var visibleBlocks: [CommandBlock] {
         let query = BlockSearchQuery(text: blockSearchText, filter: blockSearchFilter)
-        return blockTimeline.blocks.filter(query.matches)
+        guard !query.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return blockTimeline.blocks
+        }
+        guard indexedBlockSearchQuery == query,
+              let indexedBlockSearchIDs else {
+            return []
+        }
+        let matches = Set(indexedBlockSearchIDs)
+        return blockTimeline.blocks.filter { matches.contains($0.id) }
     }
 
     var blockSearchMatches: [CommandBlock] {
@@ -247,7 +314,10 @@ final class TerminalSession: NSObject, ObservableObject {
         tabID: UUID = UUID(),
         shellConfiguration: ShellConfiguration = .loginZsh(),
         runtimeStateController: RuntimeStateController? = nil,
-        commandHistoryEnabled: Bool = true
+        commandHistoryEnabled: Bool = true,
+        ptyController: PTYController? = nil,
+        lifecycleFaultCheckpointHandler:
+            (@MainActor @Sendable (PaneLifecycleFaultCheckpoint) -> Void)? = nil
     ) {
         self.tabID = tabID
         self.shellConfiguration = shellConfiguration
@@ -255,17 +325,79 @@ final class TerminalSession: NSObject, ObservableObject {
         self.isCommandHistoryEnabled = commandHistoryEnabled
         self.isRuntimeStatePrepared = runtimeStateController == nil
         self.currentDirectory = shellConfiguration.workingDirectory
+        self.ptyController = ptyController ?? PTYController()
+        self.lifecycleFaultCheckpointHandler = lifecycleFaultCheckpointHandler
         super.init()
-        ptyController.onEvent = { [weak self] event in
+        PaneResourceCounters.increment(.session)
+        self.ptyController.onEvent = { [weak self] event in
             self?.handlePTYEvent(event)
         }
         blockLifecycleController.onTimelineChanged = { [weak self] timeline in
-            self?.blockTimeline = timeline
+            guard let self else { return }
+            self.blockTimeline = timeline
+            self.rebuildBlockSearchIndex(with: timeline.blocks)
+        }
+        blockLifecycleController.onTimelinePruned = { [weak self] notice in
+            guard let self else { return }
+            self.scrollbackPruningNotice = notice
+            self.selectedBlockID = notice.replacementSelection(
+                for: self.selectedBlockID
+            )
         }
         interactionController.onTransition = { [weak self] _, _, nextState in
             self?.applyInteractionProjection(nextState)
         }
         applyInteractionProjection(interactionController.state)
+        Task {
+            await PaneLifecycleEventRing.shared.append(PaneLifecycleEvent(
+                timestamp: Date(),
+                kind: .sessionCreated,
+                tabID: tabID,
+                sessionID: sessionID,
+                outcome: .succeeded
+            ))
+        }
+#if DEBUG
+        lifecycleLog("created")
+#endif
+    }
+
+    deinit {
+        PaneResourceCounters.decrement(.session)
+#if DEBUG
+        print("Pane lifecycle session[\(lifecycleDebugID.uuidString)] deallocated")
+#endif
+    }
+
+    func diagnostics() async -> TerminalSessionDiagnostics {
+#if DEBUG
+        let completionGeneration = await completionService.debugSnapshot().generation
+#else
+        let completionGeneration = processGeneration
+#endif
+        let retainedOutputBytes = blockTimeline.blocks.reduce(into: 0) { total, block in
+            total += block.output.utf8.count
+            total += block.terminalSnapshot?.bytes.count ?? 0
+        }
+        return TerminalSessionDiagnostics(
+            tabID: tabID,
+            sessionID: sessionID,
+            ptyGeneration: processGeneration,
+            interactionState: String(describing: interactionState),
+            focusTarget: String(describing: focusTarget),
+            visibilityState: String(describing: visibilityState),
+            shellReadiness: String(describing: shellReadiness),
+            foregroundProcessName: foregroundProcessName.map {
+                URL(fileURLWithPath: $0).lastPathComponent
+            },
+            activeBlockID: blockLifecycleController.activeOrAwaitingBlockID,
+            isAlternateScreenActive: isAlternateScreenActive,
+            isSecureInputActive: isSecureInputActive,
+            completionGeneration: completionGeneration,
+            contextRefreshStatus: "generation-\(composerContextGeneration)",
+            blockCount: blockTimeline.blocks.count,
+            estimatedRetainedOutputBytes: retainedOutputBytes
+        )
     }
 
     private func applyInteractionProjection(_ state: TerminalInteractionState) {
@@ -292,10 +424,12 @@ final class TerminalSession: NSObject, ObservableObject {
             font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         )
         terminalView.autoresizingMask = [.width, .height]
-        terminalView.changeScrollback(10_000)
+        terminalView.changeScrollback(
+            ScrollbackPolicy.standard.terminalLineLimit
+        )
         terminalView.optionAsMetaKey = true
         terminalView.allowMouseReporting = true
-        terminalView.caretViewTracksFocus = true
+        terminalView.caretViewTracksFocus = visibilityState == .selected
         attach(terminalView: terminalView)
         return terminalView
     }
@@ -401,6 +535,15 @@ final class TerminalSession: NSObject, ObservableObject {
         isShellRunning = startResult.isRunning
 
         if startResult.isRunning {
+            Task {
+                await PaneLifecycleEventRing.shared.append(PaneLifecycleEvent(
+                    timestamp: Date(),
+                    kind: .ptyStarted,
+                    tabID: tabID,
+                    sessionID: sessionID,
+                    outcome: .succeeded
+                ))
+            }
             shellReadiness = .initializing
             startForegroundProcessMonitoring()
             let installationCommand: String
@@ -424,6 +567,7 @@ final class TerminalSession: NSObject, ObservableObject {
 
     func restartShell() {
         guard restartTask == nil, !isShuttingDown else { return }
+        lifecycleFaultCheckpointHandler?(.shellRestartRequested)
         _ = interactionController.handle(.restartRequested)
         isRestartInProgress = true
         shellReadiness = .starting
@@ -434,17 +578,27 @@ final class TerminalSession: NSObject, ObservableObject {
                 self.isRestartInProgress = false
             }
             await self.finalizeUnfinishedCommand(reason: .shellRestart)
+            self.lifecycleFaultCheckpointHandler?(.shellRestartCommandFinalized)
             await self.runtimeStateController?.resetBehavioralTransitionContinuity()
             self.previousCompletedCommandSummary = nil
             await self.completionService.shellDidRestart()
             self.composerContextGeneration &+= 1
             self.isShellRunning = false
-            self.ptyController.terminate()
+            _ = await self.ptyController.terminateAndWait()
+            self.lifecycleFaultCheckpointHandler?(.shellRestartPTYTerminated)
             self.invalidateCompletionEndpoint()
             self.stopForegroundProcessMonitoring()
             self.leaveAlternateScreenIfNeeded()
             self.terminalView?.feed(text: "\r\n[Restarting shell]\r\n")
             self.lastShellRestartAt = Date()
+            await PaneLifecycleEventRing.shared.append(PaneLifecycleEvent(
+                timestamp: Date(),
+                kind: .shellRestarted,
+                tabID: self.tabID,
+                sessionID: self.sessionID,
+                outcome: .succeeded
+            ))
+            self.lifecycleFaultCheckpointHandler?(.shellRestartStartingReplacement)
             self.startShell()
         }
     }
@@ -463,48 +617,138 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     func shutdown() {
-        guard shutdownTask == nil, !isShuttingDown else { return }
+        guard shutdownTask == nil, completedShutdownResult == nil else { return }
+        shutdownTask = makeShutdownTask(reason: .controlledShutdown)
+    }
+
+    @discardableResult
+    func shutdownAndWait() async -> SessionShutdownResult {
+        if let completedShutdownResult {
+            return completedShutdownResult
+        }
+        if let shutdownTask {
+            return await shutdownTask.value
+        }
+        let task = makeShutdownTask(reason: .controlledShutdown)
+        shutdownTask = task
+        return await task.value
+    }
+
+    private func makeShutdownTask(
+        reason: CommandInterruptionReason
+    ) -> Task<SessionShutdownResult, Never> {
         _ = interactionController.handle(.applicationClosing)
         isShuttingDown = true
-        shutdownTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.finalizeUnfinishedCommand(reason: .controlledShutdown)
-            _ = await self.runtimeStateController?.closeCurrentSessionCleanly()
-            self.stopProcessForShutdown()
-            self.shutdownTask = nil
+        requestFocus(.none)
+        blockSearchFocusGeneration &+= 1
+        composerContextGeneration &+= 1
+#if DEBUG
+        lifecycleLog("shutdown started")
+#endif
+        cancelOwnedWorkForShutdown()
+        let pendingSearch = blockSearchTask
+        blockSearchTask?.cancel()
+        blockSearchTask = nil
+        let hadUnfinishedCommand = blockLifecycleController.activeOrAwaitingBlockID != nil
+        let renderedOutputAtShutdown = renderedActiveBlockOutput()
+        prepareProcessForShutdown()
+        let processTerminationTask = ptyController.startTermination()
+
+        return Task { @MainActor in
+            await PaneLifecycleEventRing.shared.append(PaneLifecycleEvent(
+                timestamp: Date(),
+                kind: .sessionClosing,
+                tabID: tabID,
+                sessionID: sessionID,
+                outcome: .requested
+            ))
+            _ = await blockSearchIndex.cancelPendingSearches()
+            await pendingSearch?.value
+            await finalizeUnfinishedCommand(
+                reason: reason,
+                renderedOutput: renderedOutputAtShutdown
+            )
+            _ = await runtimeStateController?.closeCurrentSessionCleanly()
+            await completionService.cancelPendingRequests()
+            let processTermination = await processTerminationTask.value
+            let result = SessionShutdownResult(
+                sessionID: sessionID,
+                processTermination: processTermination,
+                unfinishedCommandFinalized: hadUnfinishedCommand
+            )
+            completedShutdownResult = result
+            shutdownTask = nil
+#if DEBUG
+            debugShutdownCompleted = true
+            lifecycleLog("shutdown completed")
+#endif
+            await PaneLifecycleEventRing.shared.append(PaneLifecycleEvent(
+                timestamp: Date(),
+                kind: .sessionClosed,
+                tabID: tabID,
+                sessionID: sessionID,
+                outcome: processTermination.outcome == .timedOut ? .timedOut : .succeeded
+            ))
+            return result
         }
     }
 
-    private func stopProcessForShutdown() {
-        clearActiveBlockCapture()
+    private func cancelOwnedWorkForShutdown() {
+        restartTask?.cancel()
+        restartTask = nil
+        runtimeStateStartTask?.cancel()
+        runtimeStateStartTask = nil
+        onMeaningfulBackgroundOutput = nil
+    }
+
+    private func prepareProcessForShutdown() {
         isShellRunning = false
-        blockLifecycleController.markAwaitingStart(nil)
         shellReadiness = .stopped
-        ptyController.terminate()
         invalidateCompletionEndpoint()
         stopForegroundProcessMonitoring()
         zshCompletionClient.shutdown()
+        ptyController.onEvent = nil
+        terminalView?.terminalDelegate = nil
+        if let paneTerminalView = terminalView as? PaneTerminalView {
+            paneTerminalView.onAlternateScreenChanged = nil
+            paneTerminalView.onTerminalResponse = nil
+        }
+        liveCommandTerminalView = nil
+        authoritativeTerminalHostView = nil
+        terminalView = nil
     }
 
     /// App termination does not need to repaint status into a disappearing
     /// SwiftUI hierarchy. The PTY controller invalidates the active generation
     /// before terminating it, so a later process callback is a no-op.
     func terminateForApplicationExit() {
-        guard !isShuttingDown || ptyController.isRunning else { return }
-        _ = interactionController.handle(.applicationClosing)
-        isShuttingDown = true
-        stopProcessForShutdown()
+        guard shutdownTask == nil, completedShutdownResult == nil else { return }
+        shutdownTask = makeShutdownTask(reason: .applicationExit)
     }
 
     func finalizeApplicationExit() async {
         guard !isApplicationExitFinalized else { return }
         isApplicationExitFinalized = true
-        _ = interactionController.handle(.applicationClosing)
-        isShuttingDown = true
-        await finalizeUnfinishedCommand(reason: .applicationExit)
-        _ = await runtimeStateController?.closeCurrentSessionCleanly()
-        stopProcessForShutdown()
+        if completedShutdownResult != nil {
+            return
+        }
+        if let shutdownTask {
+            _ = await shutdownTask.value
+            return
+        }
+        let task = makeShutdownTask(reason: .applicationExit)
+        shutdownTask = task
+        _ = await task.value
     }
+
+
+#if DEBUG
+    var debugHasProcessReference: Bool { ptyController.debugHasProcessReference }
+
+    private func lifecycleLog(_ event: String) {
+        print("Pane lifecycle session[\(lifecycleDebugID.uuidString)] \(event)")
+    }
+#endif
 
     func submitDraft() {
         guard isShellReadyForInput else { return }
@@ -635,8 +879,20 @@ final class TerminalSession: NSObject, ObservableObject {
         )
     }
 
-    func composerProjectContext(for directory: URL) async -> ProjectContext? {
-        await completionService.projectContext(for: directory)
+    func composerProjectContext(
+        for directory: URL,
+        reason: ContextRefreshReason = .tabSelected
+    ) async -> ProjectContext? {
+        await completionService.projectContext(
+            for: directory,
+            visibility: visibilityState,
+            reason: reason
+        )
+    }
+
+    func refreshComposerContext() async {
+        await completionService.invalidateProjectContext()
+        composerContextGeneration &+= 1
     }
 
     var canSuggestNextCommand: Bool {
@@ -871,6 +1127,7 @@ final class TerminalSession: NSObject, ObservableObject {
             }
         }
         isBlockSearchPresented = true
+        scheduleBlockSearch()
         ensureBlockSearchSelection()
         // Searching temporarily owns AppKit focus. Advancing the shared
         // generation prevents a delayed composer or terminal remount callback
@@ -888,6 +1145,64 @@ final class TerminalSession: NSObject, ObservableObject {
             setMode(.terminal)
         } else {
             requestFocus(focusBeforeSearch == .none ? .composer : focusBeforeSearch)
+        }
+    }
+
+    func dismissScrollbackPruningNotice() {
+        scrollbackPruningNotice = nil
+        blockLifecycleController.dismissPruningNotice()
+    }
+
+    private func rebuildBlockSearchIndex(with blocks: [CommandBlock]) {
+        blockSearchTask?.cancel()
+        let query = BlockSearchQuery(
+            text: blockSearchText,
+            filter: blockSearchFilter
+        )
+        blockSearchTask = Task { @MainActor [weak self, blockSearchIndex] in
+            await blockSearchIndex.replace(blocks: blocks)
+            guard let self, !Task.isCancelled else { return }
+            await self.performBlockSearch(query)
+        }
+    }
+
+    private func scheduleBlockSearch() {
+        let query = BlockSearchQuery(
+            text: blockSearchText,
+            filter: blockSearchFilter
+        )
+        if query.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            blockSearchTask?.cancel()
+            blockSearchTask = nil
+            indexedBlockSearchQuery = query
+            indexedBlockSearchIDs = blockTimeline.blocks.map(\.id)
+            if isBlockSearchPresented {
+                ensureBlockSearchSelection()
+            }
+            return
+        }
+        blockSearchTask?.cancel()
+        blockSearchTask = Task { @MainActor [weak self] in
+            await self?.performBlockSearch(query)
+        }
+    }
+
+    private func performBlockSearch(_ query: BlockSearchQuery) async {
+        guard !Task.isCancelled,
+              let result = await blockSearchIndex.search(
+                  query,
+                  debounce: PanePerformanceThresholds.searchDebounce
+              ),
+              !Task.isCancelled,
+              result.query == BlockSearchQuery(
+                  text: blockSearchText,
+                  filter: blockSearchFilter
+              ) else { return }
+        indexedBlockSearchQuery = result.query
+        indexedBlockSearchIDs = result.blockIDs
+        blockSearchTask = nil
+        if isBlockSearchPresented {
+            ensureBlockSearchSelection()
         }
     }
 
@@ -1018,7 +1333,7 @@ final class TerminalSession: NSObject, ObservableObject {
         if visibilityState == .background, !bytes.isEmpty {
             onMeaningfulBackgroundOutput?()
         }
-        refreshForegroundProcessMode()
+        refreshForegroundProcessModeForOutputIfNeeded()
 
         // The persistent direct terminal is fed exactly once. The live block
         // terminal below is an independent emulator and receives parsed block
@@ -1048,6 +1363,7 @@ final class TerminalSession: NSObject, ObservableObject {
                     _ = interactionController.handle(.commandStarted)
                     beginActiveBlockCapture(blockID: id)
                     selectedBlockID = id
+                    updateForegroundProcessMonitoring(refreshImmediately: true)
                 }
 
             case .commandFinished(let exitCode, let workingDirectory):
@@ -1077,6 +1393,8 @@ final class TerminalSession: NSObject, ObservableObject {
                 }
 
                 if blockTimeline.activeBlockID != nil {
+                    lifecycleFaultCheckpointHandler?(.commandFinalizationStarted)
+                    let signpost = PanePerformanceSignposts.beginBlockFinalization()
                     let windowSize = ptyController.windowSize
                     if let id = blockLifecycleController.completeActive(
                         exitCode: exitCode,
@@ -1096,6 +1414,8 @@ final class TerminalSession: NSObject, ObservableObject {
                         }
                         persistCompletedBlock(id: id)
                     }
+                    lifecycleFaultCheckpointHandler?(.commandFinalizationCompleted)
+                    PanePerformanceSignposts.endBlockFinalization(signpost)
                     clearActiveBlockCapture()
                 } else if blockLifecycleController.awaitingStartID != nil {
                     // zsh emits precmd after an interrupted/incomplete buffer
@@ -1108,6 +1428,7 @@ final class TerminalSession: NSObject, ObservableObject {
                 _ = interactionController.handle(
                     exitCode == 128 + SIGINT ? .commandInterrupted : .commandCompleted
                 )
+                updateForegroundProcessMonitoring(refreshImmediately: false)
                 dispatchNextQueuedCommandIfNeeded()
             }
         }
@@ -1133,6 +1454,15 @@ final class TerminalSession: NSObject, ObservableObject {
         _ = interactionController.handle(.shellExited)
         invalidateCompletionEndpoint()
         stopForegroundProcessMonitoring()
+        Task {
+            await PaneLifecycleEventRing.shared.append(PaneLifecycleEvent(
+                timestamp: Date(),
+                kind: .ptyStopped,
+                tabID: tabID,
+                sessionID: sessionID,
+                outcome: .succeeded
+            ))
+        }
         shellExitStatus = exitCode
         leaveAlternateScreenIfNeeded()
         terminalView?.feed(
@@ -1156,8 +1486,10 @@ final class TerminalSession: NSObject, ObservableObject {
 
     private func finalizeUnfinishedCommand(
         exitCode: Int32? = nil,
-        reason: CommandInterruptionReason
+        reason: CommandInterruptionReason,
+        renderedOutput: String? = nil
     ) async {
+        lifecycleFaultCheckpointHandler?(.interruptedCommandFinalizationStarted)
         let blockID = blockLifecycleController.activeOrAwaitingBlockID
 
         guard let blockID else {
@@ -1169,7 +1501,7 @@ final class TerminalSession: NSObject, ObservableObject {
         let windowSize = ptyController.windowSize
         _ = blockLifecycleController.interruptUnfinished(
             exitCode: exitCode,
-            renderedOutput: renderedActiveBlockOutput(),
+            renderedOutput: renderedOutput ?? renderedActiveBlockOutput(),
             columns: Int(windowSize.ws_col),
             rows: Int(windowSize.ws_row)
         )
@@ -1180,9 +1512,13 @@ final class TerminalSession: NSObject, ObservableObject {
         }
 
         guard let block = blockTimeline.block(id: blockID),
-              block.origin == .live else { return }
+              block.origin == .live else {
+            lifecycleFaultCheckpointHandler?(.interruptedCommandFinalizationCompleted)
+            return
+        }
 
         await persistInterruptedBlock(block, reason: reason)
+        lifecycleFaultCheckpointHandler?(.interruptedCommandFinalizationCompleted)
     }
 
     private func persistInterruptedBlock(
@@ -1301,7 +1637,10 @@ final class TerminalSession: NSObject, ObservableObject {
 
         runtimeStateStartTask = Task { [weak self] in
             let result = await runtimeStateController.startSession(session)
-            guard let self else { return }
+            guard let self, !Task.isCancelled, !self.isShuttingDown else {
+                _ = await runtimeStateController.closeCurrentSessionCleanly()
+                return
+            }
             self.runtimeStateDiagnostic = result.diagnostic
             if let context = result.restoredContext {
                 self.restoreRuntimeContext(
@@ -1311,7 +1650,9 @@ final class TerminalSession: NSObject, ObservableObject {
                 )
             }
             self.isRuntimeStatePrepared = true
-            self.startShell()
+            if !Task.isCancelled, !self.isShuttingDown {
+                self.startShell()
+            }
         }
     }
 
@@ -1856,6 +2197,7 @@ final class TerminalSession: NSObject, ObservableObject {
             }
             shouldReturnToBlocksAfterAlternateScreen = false
         }
+        updateForegroundProcessMonitoring(refreshImmediately: !isActive)
     }
 
     func consumeBlocksViewportRestoreRequest() -> Bool {
@@ -1865,21 +2207,62 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     private func startForegroundProcessMonitoring() {
-        foregroundProcessTimer?.invalidate()
-        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
-            assert(Thread.isMainThread)
-            MainActor.assumeIsolated {
-                self?.refreshForegroundProcessMode()
+        updateForegroundProcessMonitoring(refreshImmediately: true)
+    }
+
+    private func updateForegroundProcessMonitoring(refreshImmediately: Bool) {
+        let desiredInterval = foregroundProcessMonitoringInterval
+        if desiredInterval != foregroundProcessTimerInterval {
+            foregroundProcessTimer?.invalidate()
+            foregroundProcessTimer = nil
+            foregroundProcessTimerInterval = desiredInterval
+            if let desiredInterval {
+                let timer = Timer(timeInterval: desiredInterval, repeats: true) { [weak self] _ in
+                    assert(Thread.isMainThread)
+                    MainActor.assumeIsolated {
+                        guard let self else { return }
+                        self.refreshForegroundProcessMode()
+                        self.updateForegroundProcessMonitoring(refreshImmediately: false)
+                    }
+                }
+                foregroundProcessTimer = timer
+                RunLoop.main.add(timer, forMode: .common)
             }
         }
-        foregroundProcessTimer = timer
-        RunLoop.main.add(timer, forMode: .common)
+        if refreshImmediately, desiredInterval != nil {
+            refreshForegroundProcessMode()
+        }
+    }
+
+    private var foregroundProcessMonitoringInterval: TimeInterval? {
+        guard isShellRunning,
+              !isShuttingDown,
+              !isAlternateScreenActive,
+              visibilityState != .closing else { return nil }
+        let needsInspection = shellReadiness != .ready
+            || blockLifecycleController.activeOrAwaitingBlockID != nil
+            || inputRequirement == .direct
+            || inputRequirement == .secure
+            || mode == .terminal
+            || lastForegroundSnapshot.map { !$0.isShellForeground } == true
+        guard needsInspection else { return nil }
+        return visibilityState == .selected ? 0.25 : 2
+    }
+
+    private func refreshForegroundProcessModeForOutputIfNeeded() {
+        let minimumInterval = visibilityState == .selected ? 0.25 : 2
+        if let lastForegroundInspectionAt,
+           Date().timeIntervalSince(lastForegroundInspectionAt) < minimumInterval {
+            return
+        }
         refreshForegroundProcessMode()
     }
 
     private func stopForegroundProcessMonitoring() {
         foregroundProcessTimer?.invalidate()
         foregroundProcessTimer = nil
+        foregroundProcessTimerInterval = nil
+        lastForegroundInspectionAt = nil
         lastForegroundSnapshot = nil
         updateSecurityState(echoEnabled: true, source: .terminalEchoState)
         if modeAttribution != .manual {
@@ -1889,6 +2272,7 @@ final class TerminalSession: NSObject, ObservableObject {
 
     private func refreshForegroundProcessMode() {
         guard isShellRunning, !isAlternateScreenActive else { return }
+        lastForegroundInspectionAt = Date()
         guard let snapshot = foregroundProcessSnapshot() else { return }
 
         // zsh's idle ZLE can temporarily disable ECHO while it owns the
@@ -1899,6 +2283,9 @@ final class TerminalSession: NSObject, ObservableObject {
             && blockTimeline.activeBlockID == nil
         updateSecurityState(
             echoEnabled: isIdleShellLineEditor ? true : snapshot.echoEnabled,
+            secureInputRequired: isIdleShellLineEditor
+                ? false
+                : snapshot.requiresSecureInputFromTermios,
             source: .terminalEchoState
         )
 
@@ -1944,9 +2331,11 @@ final class TerminalSession: NSObject, ObservableObject {
 
     private func updateSecurityState(
         echoEnabled: Bool,
+        secureInputRequired: Bool? = nil,
         source: SecureInputDetectionSource
     ) {
-        let inputMode: TerminalInputMode = echoEnabled ? .normal : .secure
+        let inputMode: TerminalInputMode =
+            (secureInputRequired ?? !echoEnabled) ? .secure : .normal
         if manualSecureInputActive, inputMode == .normal {
             return
         }
@@ -2248,6 +2637,18 @@ final class TerminalSession: NSObject, ObservableObject {
         ptyController.write(bytes)
     }
 
+    private func acceptsUserTerminalInteraction(from source: TerminalView) -> Bool {
+        terminalView === source
+            && visibilityState == .selected
+            && !isShuttingDown
+            && isShellReadyForInput
+            && (
+                mode == .terminal
+                    || inputRequirement == .direct
+                    || inputRequirement == .secure
+            )
+    }
+
     private func shellEnvironmentValue(named name: String) -> String? {
         let prefix = name + "="
         guard let entry = shellConfiguration.environment.first(where: {
@@ -2285,9 +2686,7 @@ extension TerminalSession: TerminalViewDelegate {
         let bytes = Array(data)
         assert(Thread.isMainThread)
         MainActor.assumeIsolated {
-            guard self.terminalView === source,
-                  self.isShellReadyForInput,
-                  self.mode == .terminal || self.inputRequirement == .direct || self.inputRequirement == .secure else { return }
+            guard self.acceptsUserTerminalInteraction(from: source) else { return }
             _ = self.send(bytes: bytes)
         }
     }
@@ -2295,7 +2694,9 @@ extension TerminalSession: TerminalViewDelegate {
     nonisolated func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
         assert(Thread.isMainThread)
         MainActor.assumeIsolated {
-            guard self.terminalView === source else { return }
+            guard self.terminalView === source,
+                  !self.isShuttingDown,
+                  self.visibilityState != .closing else { return }
             self.updateWindowSize(from: source)
         }
     }
@@ -2303,7 +2704,9 @@ extension TerminalSession: TerminalViewDelegate {
     nonisolated func setTerminalTitle(source: TerminalView, title: String) {
         assert(Thread.isMainThread)
         MainActor.assumeIsolated {
-            guard self.terminalView === source else { return }
+            guard self.terminalView === source,
+                  !self.isShuttingDown,
+                  self.visibilityState != .closing else { return }
             if self.terminalTitle != title {
                 self.terminalTitle = title
             }
@@ -2313,7 +2716,9 @@ extension TerminalSession: TerminalViewDelegate {
     nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {
         assert(Thread.isMainThread)
         MainActor.assumeIsolated {
-            guard self.terminalView === source else { return }
+            guard self.terminalView === source,
+                  !self.isShuttingDown,
+                  self.visibilityState != .closing else { return }
             if self.currentDirectory != directory {
                 self.currentDirectory = directory
             }
@@ -2326,6 +2731,7 @@ extension TerminalSession: TerminalViewDelegate {
         guard let string = String(data: content, encoding: .utf8) else { return }
         assert(Thread.isMainThread)
         MainActor.assumeIsolated {
+            guard self.acceptsUserTerminalInteraction(from: source) else { return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(string, forType: .string)
         }
@@ -2334,7 +2740,8 @@ extension TerminalSession: TerminalViewDelegate {
     nonisolated func clipboardRead(source: TerminalView) -> Data? {
         assert(Thread.isMainThread)
         return MainActor.assumeIsolated {
-            NSPasteboard.general.string(forType: .string)?.data(using: .utf8)
+            guard self.acceptsUserTerminalInteraction(from: source) else { return nil }
+            return NSPasteboard.general.string(forType: .string)?.data(using: .utf8)
         }
     }
 

@@ -5,6 +5,25 @@ struct RuntimeStateRetentionPolicy: Sendable, Equatable {
     var maximumAge: TimeInterval
     var maximumCommandEvents: Int
     var maximumDatabaseBytes: Int64
+    var maximumSessions: Int
+    var maximumFeatures: Int
+    var maximumProcessedIdentifiers: Int
+
+    init(
+        maximumAge: TimeInterval,
+        maximumCommandEvents: Int,
+        maximumDatabaseBytes: Int64,
+        maximumSessions: Int = 500,
+        maximumFeatures: Int = 50_000,
+        maximumProcessedIdentifiers: Int = 50_000
+    ) {
+        self.maximumAge = maximumAge
+        self.maximumCommandEvents = maximumCommandEvents
+        self.maximumDatabaseBytes = maximumDatabaseBytes
+        self.maximumSessions = maximumSessions
+        self.maximumFeatures = maximumFeatures
+        self.maximumProcessedIdentifiers = maximumProcessedIdentifiers
+    }
 
     static let `default` = RuntimeStateRetentionPolicy(
         maximumAge: 30 * 24 * 60 * 60,
@@ -13,16 +32,56 @@ struct RuntimeStateRetentionPolicy: Sendable, Equatable {
     )
 }
 
+enum RuntimeStatePersistenceFailureCategory: String, Codable, Sendable, Equatable {
+    case busyLocked
+    case permission
+    case unsupportedSchemaVersion
+    case corruption
+    case io
+    case closed
+}
+
+enum RuntimeStatePersistenceFaultCheckpoint: String, Sendable {
+    case beforeMigrationCommit
+    case beforeTransactionCommit
+}
+
 enum RuntimeStateStoreError: Error, LocalizedError {
-    case openFailed
+    case openFailed(code: Int32)
     case databaseFailure(operation: String, code: Int32)
+    case unsupportedSchemaVersion(found: Int, supported: Int)
+    case closed
+
+    var category: RuntimeStatePersistenceFailureCategory {
+        switch self {
+        case .openFailed(let code), .databaseFailure(_, let code):
+            switch code {
+            case SQLITE_BUSY, SQLITE_LOCKED:
+                return .busyLocked
+            case SQLITE_PERM, SQLITE_AUTH, SQLITE_READONLY, SQLITE_CANTOPEN:
+                return .permission
+            case SQLITE_CORRUPT, SQLITE_NOTADB:
+                return .corruption
+            default:
+                return .io
+            }
+        case .unsupportedSchemaVersion:
+            return .unsupportedSchemaVersion
+        case .closed:
+            return .closed
+        }
+    }
 
     var errorDescription: String? {
         switch self {
-        case .openFailed:
-            return "Unable to open the runtime-state database."
+        case .openFailed(let code):
+            return "Unable to open the runtime-state database (SQLite \(code))."
         case .databaseFailure(let operation, let code):
             return "Runtime-state database operation failed: \(operation) (SQLite \(code))."
+        case .unsupportedSchemaVersion(let found, let supported):
+            return "Runtime-state schema \(found) is newer than supported schema \(supported)."
+        case .closed:
+            return "The runtime-state database is closed."
         }
     }
 }
@@ -34,17 +93,20 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
     private let databaseURL: URL
     private let retentionPolicy: RuntimeStateRetentionPolicy
     private let sanitizer: any SensitiveDataSanitizing
+    private let faultInjector: (@Sendable (RuntimeStatePersistenceFaultCheckpoint) throws -> Void)?
     private var database: OpaquePointer?
     private var requiresBehavioralBackfill = false
 
     init(
         databaseURL: URL,
         retentionPolicy: RuntimeStateRetentionPolicy = .default,
-        sanitizer: any SensitiveDataSanitizing = SensitiveDataSanitizer()
+        sanitizer: any SensitiveDataSanitizing = SensitiveDataSanitizer(),
+        faultInjector: (@Sendable (RuntimeStatePersistenceFaultCheckpoint) throws -> Void)? = nil
     ) throws {
         self.databaseURL = databaseURL
         self.retentionPolicy = retentionPolicy
         self.sanitizer = sanitizer
+        self.faultInjector = faultInjector
 
         try FileManager.default.createDirectory(
             at: databaseURL.deletingLastPathComponent(),
@@ -58,19 +120,45 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
             SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX,
             nil
         ) == SQLITE_OK, let handle else {
+            let code = handle.map(sqlite3_errcode) ?? SQLITE_CANTOPEN
             if let handle { sqlite3_close(handle) }
-            throw RuntimeStateStoreError.openFailed
+            throw RuntimeStateStoreError.openFailed(code: code)
         }
         do {
+            guard sqlite3_busy_timeout(handle, 5_000) == SQLITE_OK else {
+                throw RuntimeStateStoreError.databaseFailure(
+                    operation: "configure busy timeout",
+                    code: sqlite3_errcode(handle)
+                )
+            }
             let version = try Self.userVersion(handle)
+            guard version <= 5 else {
+                throw RuntimeStateStoreError.unsupportedSchemaVersion(found: Int(version), supported: 5)
+            }
             requiresBehavioralBackfill = version > 0 && version < 5
-            try Self.backUpBeforeMigrationIfNeeded(handle, databaseURL: databaseURL)
-            try Self.configureAndMigrate(handle)
+            try Self.configureAndMigrate(
+                handle,
+                databaseURL: databaseURL,
+                faultInjector: faultInjector
+            )
         } catch {
             sqlite3_close(handle)
             throw error
         }
         database = handle
+    }
+
+    deinit {
+        if let database {
+            sqlite3_close_v2(database)
+        }
+    }
+
+    func close() {
+        guard let database else { return }
+        sqlite3_wal_checkpoint_v2(database, nil, SQLITE_CHECKPOINT_PASSIVE, nil, nil)
+        sqlite3_close_v2(database)
+        self.database = nil
     }
 
     func startSession(_ session: RuntimeSession) async throws {
@@ -110,6 +198,24 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
         let command = sanitizer.sanitizeCommand(event.command)
         let output = event.sanitizedOutputSummary.map(sanitizer.sanitizeOutput)
         let error = event.sanitizedErrorSummary.map(sanitizer.sanitizeError)
+        let sanitizedEvent = PersistedCommandEvent(
+            blockID: event.blockID,
+            sessionID: event.sessionID,
+            timestamp: event.timestamp,
+            workingDirectory: sanitizer.sanitizeCommand(event.workingDirectory).value,
+            command: command.value,
+            exitCode: event.exitCode,
+            durationMilliseconds: event.durationMilliseconds,
+            sanitizedOutputSummary: output.map { String($0.value.prefix(1_000)) },
+            sanitizedErrorSummary: error.map { String($0.value.prefix(1_000)) },
+            predictionSource: event.predictionSource,
+            predictionAction: event.predictionAction,
+            completion: event.completion,
+            isCollapsed: event.isCollapsed,
+            outputKind: event.outputKind
+        )
+        let persistedEvent = try commandEvent(blockID: event.blockID)?
+            .monotonicallyMerged(with: sanitizedEvent) ?? sanitizedEvent
         let sql = """
         INSERT INTO command_events (
             block_id, session_id, timestamp, working_directory, command, exit_code,
@@ -117,6 +223,7 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
             prediction_source, prediction_action, completion_state, is_collapsed, output_kind
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(block_id) DO UPDATE SET
+            session_id = excluded.session_id,
             timestamp = excluded.timestamp,
             working_directory = excluded.working_directory,
             command = excluded.command,
@@ -124,27 +231,67 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
             duration_ms = excluded.duration_ms,
             sanitized_output_summary = excluded.sanitized_output_summary,
             sanitized_error_summary = excluded.sanitized_error_summary,
+            prediction_source = excluded.prediction_source,
+            prediction_action = excluded.prediction_action,
             completion_state = excluded.completion_state,
             is_collapsed = excluded.is_collapsed,
             output_kind = excluded.output_kind
         """
         try withStatement(sql, operation: "persist command") { statement in
-            try bind(event.blockID.uuidString, at: 1, to: statement)
-            try bind(event.sessionID.uuidString, at: 2, to: statement)
-            try bind(milliseconds(event.timestamp), at: 3, to: statement)
-            try bind(sanitizer.sanitizeCommand(event.workingDirectory).value, at: 4, to: statement)
-            try bind(command.value, at: 5, to: statement)
-            try bind(event.exitCode.map(Int64.init), at: 6, to: statement)
-            try bind(event.durationMilliseconds.map(Int64.init), at: 7, to: statement)
-            try bind(output.map { String($0.value.prefix(1_000)) }, at: 8, to: statement)
-            try bind(error.map { String($0.value.prefix(1_000)) }, at: 9, to: statement)
-            try bind(event.predictionSource, at: 10, to: statement)
-            try bind(event.predictionAction, at: 11, to: statement)
-            try bind(event.completion.rawValue, at: 12, to: statement)
-            try bind(event.isCollapsed ? Int64(1) : Int64(0), at: 13, to: statement)
-            try bind(event.outputKind.rawValue, at: 14, to: statement)
+            try bind(persistedEvent.blockID.uuidString, at: 1, to: statement)
+            try bind(persistedEvent.sessionID.uuidString, at: 2, to: statement)
+            try bind(milliseconds(persistedEvent.timestamp), at: 3, to: statement)
+            try bind(persistedEvent.workingDirectory, at: 4, to: statement)
+            try bind(persistedEvent.command, at: 5, to: statement)
+            try bind(persistedEvent.exitCode.map(Int64.init), at: 6, to: statement)
+            try bind(persistedEvent.durationMilliseconds.map(Int64.init), at: 7, to: statement)
+            try bind(persistedEvent.sanitizedOutputSummary, at: 8, to: statement)
+            try bind(persistedEvent.sanitizedErrorSummary, at: 9, to: statement)
+            try bind(persistedEvent.predictionSource, at: 10, to: statement)
+            try bind(persistedEvent.predictionAction, at: 11, to: statement)
+            try bind(persistedEvent.completion.rawValue, at: 12, to: statement)
+            try bind(persistedEvent.isCollapsed ? Int64(1) : Int64(0), at: 13, to: statement)
+            try bind(persistedEvent.outputKind.rawValue, at: 14, to: statement)
             try stepDone(statement, operation: "persist command")
         }
+    }
+
+    private func commandEvent(blockID: UUID) throws -> PersistedCommandEvent? {
+        var event: PersistedCommandEvent?
+        try withStatement("""
+            SELECT block_id, session_id, timestamp, working_directory, command, exit_code,
+                   duration_ms, sanitized_output_summary, sanitized_error_summary,
+                   prediction_source, prediction_action, completion_state, is_collapsed, output_kind
+            FROM command_events WHERE block_id = ? LIMIT 1
+            """, operation: "load command for merge") { statement in
+            try bind(blockID.uuidString, at: 1, to: statement)
+            guard sqlite3_step(statement) == SQLITE_ROW,
+                  let blockText = columnText(statement, 0),
+                  let persistedBlockID = UUID(uuidString: blockText),
+                  let sessionText = columnText(statement, 1),
+                  let sessionID = UUID(uuidString: sessionText),
+                  let directory = columnText(statement, 3),
+                  let command = columnText(statement, 4) else { return }
+            event = PersistedCommandEvent(
+                blockID: persistedBlockID,
+                sessionID: sessionID,
+                timestamp: date(sqlite3_column_int64(statement, 2)),
+                workingDirectory: directory,
+                command: command,
+                exitCode: columnInt(statement, 5),
+                durationMilliseconds: columnInt(statement, 6),
+                sanitizedOutputSummary: columnText(statement, 7),
+                sanitizedErrorSummary: columnText(statement, 8),
+                predictionSource: columnText(statement, 9),
+                predictionAction: columnText(statement, 10),
+                completion: PersistedCommandEvent.Completion(
+                    rawValue: columnText(statement, 11) ?? ""
+                ) ?? .unknown,
+                isCollapsed: sqlite3_column_int64(statement, 12) != 0,
+                outputKind: PersistedOutputKind(rawValue: columnText(statement, 13) ?? "") ?? .none
+            )
+        }
+        return event
     }
 
     func updateCommandEventCollapsed(_ blockID: UUID, isCollapsed: Bool) async throws {
@@ -404,22 +551,53 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
         let behavioralCutoff = Date()
             .addingTimeInterval(-retentionPolicy.maximumAge)
             .timeIntervalSince1970
-        try execute("DELETE FROM command_events WHERE timestamp < \(cutoff)")
-        try execute("DELETE FROM runtime_features WHERE timestamp < \(cutoff)")
-        try execute("DELETE FROM command_aggregates WHERE last_used_at < \(behavioralCutoff)")
-        try execute("DELETE FROM command_transitions WHERE last_observed_at < \(behavioralCutoff)")
-        try execute("DELETE FROM completion_feedback_aggregates WHERE last_feedback_at < \(behavioralCutoff)")
-
         let maximumEvents = max(0, retentionPolicy.maximumCommandEvents)
-        try execute("""
-        DELETE FROM command_events
-        WHERE id NOT IN (
-            SELECT id FROM command_events ORDER BY timestamp DESC LIMIT \(maximumEvents)
-        )
-        """)
+        let maximumSessions = max(0, retentionPolicy.maximumSessions)
+        let maximumFeatures = max(0, retentionPolicy.maximumFeatures)
+        let maximumProcessed = max(0, retentionPolicy.maximumProcessedIdentifiers)
+        try transaction {
+            try execute("DELETE FROM command_events WHERE timestamp < \(cutoff)")
+            try execute("DELETE FROM runtime_features WHERE timestamp < \(cutoff)")
+            try execute("DELETE FROM command_aggregates WHERE last_used_at < \(behavioralCutoff)")
+            try execute("DELETE FROM command_transitions WHERE last_observed_at < \(behavioralCutoff)")
+            try execute("DELETE FROM completion_feedback_aggregates WHERE last_feedback_at < \(behavioralCutoff)")
+            try execute("""
+            DELETE FROM command_events
+            WHERE id NOT IN (
+                SELECT id FROM command_events ORDER BY timestamp DESC LIMIT \(maximumEvents)
+            )
+            """)
+            try execute("""
+            DELETE FROM runtime_features
+            WHERE id NOT IN (
+                SELECT id FROM runtime_features ORDER BY timestamp DESC LIMIT \(maximumFeatures)
+            )
+            """)
+            try execute("""
+            DELETE FROM runtime_sessions
+            WHERE lifecycle != 'active' AND id NOT IN (
+                SELECT id FROM runtime_sessions
+                ORDER BY last_active_at DESC LIMIT \(maximumSessions)
+            )
+            """)
+            try execute("""
+            DELETE FROM behavioral_processed_commands
+            WHERE rowid NOT IN (
+                SELECT rowid FROM behavioral_processed_commands
+                ORDER BY rowid DESC LIMIT \(maximumProcessed)
+            )
+            """)
+            try execute("""
+            DELETE FROM behavioral_processed_transitions
+            WHERE rowid NOT IN (
+                SELECT rowid FROM behavioral_processed_transitions
+                ORDER BY rowid DESC LIMIT \(maximumProcessed)
+            )
+            """)
+        }
 
         guard retentionPolicy.maximumDatabaseBytes > 0 else { return }
-        var size = try databaseSize()
+        var size = try physicalDatabaseSize()
         while size > retentionPolicy.maximumDatabaseBytes {
             let previousChanges = sqlite3_total_changes(database)
             try execute("""
@@ -434,11 +612,23 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
             """)
             guard sqlite3_total_changes(database) > previousChanges else { break }
             try execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            size = try databaseSize()
+            size = try physicalDatabaseSize()
+        }
+        try execute("PRAGMA optimize")
+        try execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        if try physicalDatabaseSize() > retentionPolicy.maximumDatabaseBytes {
+            // Retention runs outside the terminal hot path. Compact only after
+            // bounded deletion and a checkpoint still leave the on-disk store
+            // above policy.
+            try execute("VACUUM")
         }
     }
 
-    private static func configureAndMigrate(_ database: OpaquePointer) throws {
+    private static func configureAndMigrate(
+        _ database: OpaquePointer,
+        databaseURL: URL,
+        faultInjector: (@Sendable (RuntimeStatePersistenceFaultCheckpoint) throws -> Void)?
+    ) throws {
         func run(_ sql: String, operation: String) throws {
             guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
                 throw RuntimeStateStoreError.databaseFailure(
@@ -465,31 +655,50 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
             return false
         }
 
+        // Inspect the version before any PRAGMA that can persistently alter the
+        // database (notably journal_mode). Future-schema stores belong to a
+        // newer Pane and must remain byte-for-byte owned by that version while
+        // this launch falls back to memory.
+        let currentVersion = try userVersion(database)
+        guard currentVersion <= 5 else {
+            throw RuntimeStateStoreError.unsupportedSchemaVersion(
+                found: Int(currentVersion),
+                supported: 5
+            )
+        }
+
         try run("PRAGMA foreign_keys = ON", operation: "enable foreign keys")
         try run("PRAGMA journal_mode = WAL", operation: "enable WAL")
         try run("PRAGMA synchronous = NORMAL", operation: "configure synchronization")
 
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(database, "PRAGMA user_version", -1, &statement, nil) == SQLITE_OK,
-              let statement else {
-            throw RuntimeStateStoreError.databaseFailure(
-                operation: "read schema version",
-                code: sqlite3_errcode(database)
-            )
-        }
-        defer { sqlite3_finalize(statement) }
-        guard sqlite3_step(statement) == SQLITE_ROW else {
-            throw RuntimeStateStoreError.databaseFailure(
-                operation: "read schema version",
-                code: sqlite3_errcode(database)
-            )
-        }
-        let currentVersion = sqlite3_column_int64(statement, 0)
-        guard currentVersion <= 5 else { return }
+        // userVersion finalizes its statement before requesting a write lock.
+        // Keeping a live PRAGMA statement here lets concurrent openers deadlock
+        // one another: one owns the reserved lock while another still owns a
+        // read lock that prevents the first migration from completing.
         guard currentVersion < 5 else { return }
-        guard currentVersion == 0 else {
-            try run("BEGIN IMMEDIATE", operation: "begin migration")
-            do {
+        if currentVersion > 0 {
+            try backUpBeforeMigrationIfNeeded(
+                database,
+                databaseURL: databaseURL
+            )
+        }
+        try run("BEGIN IMMEDIATE", operation: "begin migration")
+        do {
+            // The schema may have advanced while BEGIN IMMEDIATE waited.
+            // Re-read under the migration lock so concurrent openers never
+            // replay a stale migration plan.
+            let lockedVersion = try userVersion(database)
+            guard lockedVersion <= 5 else {
+                throw RuntimeStateStoreError.unsupportedSchemaVersion(
+                    found: Int(lockedVersion),
+                    supported: 5
+                )
+            }
+            if lockedVersion == 5 {
+                try run("COMMIT", operation: "commit completed migration")
+                return
+            }
+            if lockedVersion > 0 {
                 if try !hasColumn("lifecycle", in: "runtime_sessions") {
                     try run("ALTER TABLE runtime_sessions ADD COLUMN lifecycle TEXT NOT NULL DEFAULT 'active'", operation: "add session lifecycle")
                 }
@@ -523,16 +732,7 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
                 try run("UPDATE command_events SET output_kind = 'excerpt' WHERE output_kind = 'none' AND (sanitized_output_summary IS NOT NULL OR sanitized_error_summary IS NOT NULL)", operation: "classify stored output excerpts")
                 try createBehavioralTables(run)
                 try run("PRAGMA user_version = 5", operation: "set schema version")
-                try run("COMMIT", operation: "commit migration")
-            } catch {
-                try? run("ROLLBACK", operation: "rollback migration")
-                throw error
-            }
-            return
-        }
-
-        try run("BEGIN IMMEDIATE", operation: "begin migration")
-        do {
+            } else {
             try run("""
             CREATE TABLE runtime_sessions (
                 id TEXT PRIMARY KEY,
@@ -583,6 +783,8 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
             try run("CREATE INDEX idx_runtime_features_session_time ON runtime_features(session_id, timestamp DESC)", operation: "index runtime features")
             try createBehavioralTables(run)
             try run("PRAGMA user_version = 5", operation: "set schema version")
+            }
+            try faultInjector?(.beforeMigrationCommit)
             try run("COMMIT", operation: "commit migration")
         } catch {
             try? run("ROLLBACK", operation: "rollback migration")
@@ -659,17 +861,53 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
             SQLITE_OPEN_CREATE | SQLITE_OPEN_READWRITE,
             nil
         ) == SQLITE_OK, let backupDatabase else {
+            let code = backupDatabase.map(sqlite3_errcode) ?? SQLITE_CANTOPEN
             if let backupDatabase { sqlite3_close(backupDatabase) }
-            throw RuntimeStateStoreError.openFailed
+            throw RuntimeStateStoreError.openFailed(code: code)
         }
-        defer { sqlite3_close(backupDatabase) }
         guard let backup = sqlite3_backup_init(backupDatabase, "main", database, "main") else {
-            throw RuntimeStateStoreError.databaseFailure(operation: "create migration backup", code: sqlite3_errcode(backupDatabase))
+            let code = sqlite3_errcode(backupDatabase)
+            sqlite3_close(backupDatabase)
+            throw RuntimeStateStoreError.databaseFailure(
+                operation: "create migration backup",
+                code: code
+            )
         }
         let result = sqlite3_backup_step(backup, -1)
         sqlite3_backup_finish(backup)
+        sqlite3_close(backupDatabase)
         guard result == SQLITE_DONE else {
             throw RuntimeStateStoreError.databaseFailure(operation: "write migration backup", code: result)
+        }
+        pruneMigrationBackups(for: databaseURL, keeping: 2)
+    }
+
+    private static func pruneMigrationBackups(
+        for databaseURL: URL,
+        keeping limit: Int
+    ) {
+        let manager = FileManager.default
+        let directory = databaseURL.deletingLastPathComponent()
+        let prefix = databaseURL.deletingPathExtension().lastPathComponent + ".v"
+        guard let candidates = try? manager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ).filter({
+            $0.lastPathComponent.hasPrefix(prefix)
+                && $0.lastPathComponent.hasSuffix(".backup.sqlite")
+        }) else { return }
+        let ordered = candidates.sorted { lhs, rhs in
+            let left = (try? lhs.resourceValues(
+                forKeys: [.contentModificationDateKey]
+            ).contentModificationDate) ?? .distantPast
+            let right = (try? rhs.resourceValues(
+                forKeys: [.contentModificationDateKey]
+            ).contentModificationDate) ?? .distantPast
+            return left > right
+        }
+        for url in ordered.dropFirst(max(0, limit)) {
+            try? manager.removeItem(at: url)
         }
     }
 
@@ -696,6 +934,7 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
         try execute("BEGIN IMMEDIATE")
         do {
             try body()
+            try faultInjector?(.beforeTransactionCommit)
             try execute("COMMIT")
         } catch {
             try? execute("ROLLBACK")
@@ -704,6 +943,7 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
     }
 
     private func execute(_ sql: String) throws {
+        guard let database else { throw RuntimeStateStoreError.closed }
         guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
             throw failure("execute statement")
         }
@@ -718,17 +958,14 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
         }
     }
 
-    private func scalarInt(_ sql: String) throws -> Int64 {
-        var result: Int64 = 0
-        try withStatement(sql, operation: "read scalar") { statement in
-            guard sqlite3_step(statement) == SQLITE_ROW else { throw failure("read scalar") }
-            result = sqlite3_column_int64(statement, 0)
-        }
-        return result
-    }
-
-    private func databaseSize() throws -> Int64 {
-        try scalarInt("PRAGMA page_count") * scalarInt("PRAGMA page_size")
+    private func physicalDatabaseSize() throws -> Int64 {
+        let manager = FileManager.default
+        return try [databaseURL, URL(fileURLWithPath: databaseURL.path + "-wal")]
+            .reduce(Int64(0)) { total, url in
+                guard manager.fileExists(atPath: url.path) else { return total }
+                let values = try url.resourceValues(forKeys: [.fileSizeKey])
+                return total + Int64(values.fileSize ?? 0)
+            }
     }
 
     private func withStatement(
@@ -736,6 +973,7 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
         operation: String,
         body: (OpaquePointer) throws -> Void
     ) throws {
+        guard let database else { throw RuntimeStateStoreError.closed }
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
               let statement else { throw failure(operation) }
