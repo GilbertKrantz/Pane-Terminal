@@ -1983,8 +1983,13 @@ extension TerminalSessionIntegrationTests {
         session.shutdown()
         session.submit(command: "echo must-not-run")
         XCTAssertTrue(session.isShuttingDown)
+#if DEBUG
+        // PTY teardown is synchronous with closing the tab; persistence is
+        // deliberately allowed to finish asynchronously afterward.
+        XCTAssertFalse(session.debugHasProcessReference)
+#endif
         try await waitUntil("controlled shutdown finalization", timeout: 5) {
-            !session.isShellRunning
+            !session.isShellRunning && session.debugShutdownCompleted
         }
 
         let context = try await ephemeralStore.loadRecentContext(

@@ -123,6 +123,9 @@ final class PTYController {
     private let processFactory: ProcessFactory
     private let resizeHandler: ResizeHandler
     private let terminationDelay: DispatchTimeInterval
+#if DEBUG
+    private let debugID = UUID()
+#endif
 
     init(
         initialWindowSize: winsize = winsize(
@@ -198,6 +201,10 @@ final class PTYController {
             workingDirectory: workingDirectory
         )
 
+#if DEBUG
+        Self.lifecycleLog("process started", id: debugID, detail: "generation=\(nextGeneration)")
+#endif
+
         let running = newProcess.running
         if !running {
             process = nil
@@ -235,15 +242,49 @@ final class PTYController {
     }
 
     func terminate() {
-        guard let termination = detachCurrentProcess() else { return }
+        _ = startTermination()
+    }
+
+    /// Detaches the active process synchronously so callers can release their
+    /// PTY references before awaiting bounded process reaping.
+    func startTermination(
+        gracefulWait: Duration = .seconds(1),
+        killWait: Duration = .milliseconds(500)
+    ) -> Task<PTYTerminationResult, Never> {
+        guard let termination = detachCurrentProcess() else {
+            return Task {
+                PTYTerminationResult(
+                    processID: nil,
+                    outcome: .notRunning,
+                    elapsed: .zero
+                )
+            }
+        }
         Self.signalProcessGroups(termination.identity, signal: SIGTERM)
         termination.process.terminate()
-        Task.detached(priority: .utility) {
-            _ = await Self.reapBounded(
+#if DEBUG
+        let lifecycleDebugID = debugID
+        Self.lifecycleLog(
+            "process termination requested",
+            id: lifecycleDebugID,
+            detail: "pid=\(termination.identity.processID)"
+        )
+#endif
+        let debugProcessID = termination.identity.processID
+        return Task.detached(priority: .utility) {
+            let result = await Self.reapBounded(
                 termination.identity,
-                gracefulWait: .seconds(1),
-                killWait: .milliseconds(500)
+                gracefulWait: gracefulWait,
+                killWait: killWait
             )
+#if DEBUG
+            Self.lifecycleLog(
+                "process terminated",
+                id: lifecycleDebugID,
+                detail: "pid=\(debugProcessID) outcome=\(result.outcome.rawValue)"
+            )
+#endif
+            return result
         }
     }
 
@@ -251,22 +292,17 @@ final class PTYController {
         gracefulWait: Duration = .seconds(1),
         killWait: Duration = .milliseconds(500)
     ) async -> PTYTerminationResult {
-        guard let termination = detachCurrentProcess() else {
+        guard process != nil else {
             return PTYTerminationResult(
                 processID: nil,
                 outcome: .notRunning,
                 elapsed: .zero
             )
         }
-        Self.signalProcessGroups(termination.identity, signal: SIGTERM)
-        termination.process.terminate()
-        return await Task.detached(priority: .utility) {
-            await Self.reapBounded(
-                termination.identity,
-                gracefulWait: gracefulWait,
-                killWait: killWait
-            )
-        }.value
+        return await startTermination(
+            gracefulWait: gracefulWait,
+            killWait: killWait
+        ).value
     }
 
     func foregroundStatus() -> PTYForegroundStatus? {
@@ -319,6 +355,9 @@ final class PTYController {
         process = nil
         processBridge = nil
         releaseRunningPTYCount()
+#if DEBUG
+        Self.lifecycleLog("process terminated", id: debugID, detail: "generation=\(generation)")
+#endif
         onEvent?(.terminated(waitStatus: waitStatus))
     }
 
@@ -430,6 +469,14 @@ final class PTYController {
         } while !Task.isCancelled
         return false
     }
+
+#if DEBUG
+    var debugHasProcessReference: Bool { process != nil || processBridge != nil }
+
+    nonisolated private static func lifecycleLog(_ event: String, id: UUID, detail: String) {
+        print("Pane lifecycle PTY[\(id.uuidString)] \(event) \(detail)")
+    }
+#endif
 
     nonisolated private static func equalWindowSizes(
         _ lhs: winsize,

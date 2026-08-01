@@ -238,6 +238,24 @@ final class CommandAutocompleteTests: XCTestCase {
         )
     }
 
+    func testGitContextStopsReadingWhenEmptyRemoteOutputReachesEOF() async throws {
+        let root = try makeTemporaryDirectory()
+        try initializeGitRepository(at: root)
+        let provider = ProjectContextProvider()
+        let clock = ContinuousClock()
+        let startedAt = clock.now
+
+        let context = await provider.gitContext(root: root)
+
+        XCTAssertNotNil(context)
+        XCTAssertEqual(context?.remoteNames, [])
+        XCTAssertLessThan(
+            startedAt.duration(to: clock.now),
+            .seconds(2),
+            "An empty Git stdout pipe must reach EOF without spinning"
+        )
+    }
+
     func testProjectDefinitionAndGitCachesHaveIndependentFreshness() async throws {
         let root = try makeTemporaryDirectory()
         let manifest = root.appendingPathComponent("Package.swift")
@@ -1100,6 +1118,17 @@ final class CommandAutocompleteTests: XCTestCase {
             [.posixPermissions: 0o755],
             ofItemAtPath: url.path
         )
+    }
+
+    private func initializeGitRepository(at directory: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["init", "--quiet", directory.path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
     }
 }
 

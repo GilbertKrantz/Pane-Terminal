@@ -133,7 +133,18 @@ actor GitContextCache {
 /// queried with prompts disabled and a small wall-clock timeout.
 struct ProjectContextProvider: Sendable {
     let maximumParentDepth: Int
-    init(maximumParentDepth: Int = 12) { self.maximumParentDepth = max(0, maximumParentDepth) }
+    private let gitExecutableURL: URL
+    private let gitArgumentPrefix: [String]
+
+    init(
+        maximumParentDepth: Int = 12,
+        gitExecutableURL: URL = URL(fileURLWithPath: "/usr/bin/env"),
+        gitArgumentPrefix: [String] = ["git"]
+    ) {
+        self.maximumParentDepth = max(0, maximumParentDepth)
+        self.gitExecutableURL = gitExecutableURL
+        self.gitArgumentPrefix = gitArgumentPrefix
+    }
 
     func context(for directory: URL) async -> ProjectContext? {
         guard let definition = definition(for: directory) else { return nil }
@@ -324,9 +335,15 @@ struct ProjectContextProvider: Sendable {
     private func runGit(_ arguments: [String], at directory: URL) async -> String? {
         let process = Process()
         let pipe = Pipe()
+        let readHandle = pipe.fileHandleForReading
+        let writeHandle = pipe.fileHandleForWriting
+#if DEBUG
+        let lifecycleDebugID = UUID()
+        print("Pane lifecycle git-pipe[\(lifecycleDebugID.uuidString)] opened")
+#endif
         let output = BoundedProcessOutput(maximumBytes: 1_048_576)
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["git"] + arguments
+        process.executableURL = gitExecutableURL
+        process.arguments = gitArgumentPrefix + arguments
         process.currentDirectoryURL = directory
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
@@ -335,16 +352,34 @@ struct ProjectContextProvider: Sendable {
         environment["GIT_CONFIG_NOSYSTEM"] = "1"
         environment["GIT_OPTIONAL_LOCKS"] = "0"
         process.environment = environment
-        pipe.fileHandleForReading.readabilityHandler = { handle in
-            output.append(handle.availableData)
+        readHandle.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty else {
+                // FileHandle continues delivering readability callbacks at EOF
+                // until the handler is explicitly removed. Leaving it installed
+                // turns an empty Git result into a full-core polling loop.
+                handle.readabilityHandler = nil
+                return
+            }
+            output.append(data)
+        }
+        defer {
+            readHandle.readabilityHandler = nil
+            try? readHandle.close()
+            try? writeHandle.close()
+#if DEBUG
+            print("Pane lifecycle git-pipe[\(lifecycleDebugID.uuidString)] closed")
+#endif
         }
 
         do {
             try process.run()
         } catch {
-            pipe.fileHandleForReading.readabilityHandler = nil
             return nil
         }
+        // Process has duplicated the descriptor. Keeping the parent's writer
+        // open prevents EOF and can retain the readability callback forever.
+        try? writeHandle.close()
 
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: .milliseconds(250))
@@ -360,10 +395,14 @@ struct ProjectContextProvider: Sendable {
         }
         if process.isRunning {
             _ = kill(process.processIdentifier, SIGKILL)
+            let killDeadline = clock.now.advanced(by: .milliseconds(250))
+            while process.isRunning, clock.now < killDeadline {
+                try? await Task.sleep(for: .milliseconds(5))
+            }
         }
-        process.waitUntilExit()
-        pipe.fileHandleForReading.readabilityHandler = nil
-        output.append(pipe.fileHandleForReading.readDataToEndOfFile())
+        guard !process.isRunning else { return nil }
+        readHandle.readabilityHandler = nil
+        output.append(readHandle.readDataToEndOfFile())
         guard !Task.isCancelled, process.terminationStatus == 0 else { return nil }
         return output.string()
     }

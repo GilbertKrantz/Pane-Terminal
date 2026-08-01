@@ -15,6 +15,9 @@ actor CompletionService {
     private var generation: UInt64 = 0
     private var currentTask: Task<Void, Never>?
 #if DEBUG
+    private let debugID = UUID()
+#endif
+#if DEBUG
     private var debugRequestID: UUID?
     private var debugInFlight: Set<CompletionProviderID> = []
     private var debugDiagnostics: [CompletionProviderDiagnostic] = []
@@ -37,6 +40,18 @@ actor CompletionService {
         PaneResourceCounters.decrement(.completionService)
     }
 
+    /// Cancels the single request owned by this service. TerminalSession calls
+    /// this explicitly during teardown; AsyncStream termination is only a
+    /// secondary cancellation path.
+    func shutdown() {
+        generation &+= 1
+        currentTask?.cancel()
+        currentTask = nil
+#if DEBUG
+        print("Pane lifecycle autocomplete[\(debugID.uuidString)] stopped")
+#endif
+    }
+
     func commandDidComplete(_ command: String) async {
         guard NormalizedCommand(command).executable == "git" else { return }
         await localProvider.invalidateGitContext()
@@ -54,10 +69,18 @@ actor CompletionService {
     /// cancellation so resource counters converge before session teardown ends.
     func cancelPendingRequests() async {
         generation &+= 1
-        guard let task = currentTask else { return }
+        guard let task = currentTask else {
+#if DEBUG
+            print("Pane lifecycle autocomplete[\(debugID.uuidString)] stopped")
+#endif
+            return
+        }
         currentTask = nil
         task.cancel()
         await task.value
+#if DEBUG
+        print("Pane lifecycle autocomplete[\(debugID.uuidString)] cancelled and stopped")
+#endif
     }
 
     func projectDefinition(for directory: URL) async -> ProjectContext? {
@@ -113,6 +136,9 @@ actor CompletionService {
             createdAt: ContinuousClock.now
         )
         currentTask?.cancel()
+#if DEBUG
+        print("Pane lifecycle autocomplete[\(debugID.uuidString)] request started")
+#endif
         var continuation: AsyncStream<[CommandAutocompleteSuggestion]>.Continuation!
         let stream = AsyncStream<[CommandAutocompleteSuggestion]> { continuation = $0 }
         let task = Task { [weak self, localProvider, autocomplete, ranker] in
@@ -204,6 +230,9 @@ actor CompletionService {
         debugProjectID = request.projectContext?.identity
 #endif
         currentTask?.cancel()
+#if DEBUG
+        print("Pane lifecycle autocomplete[\(debugID.uuidString)] request started")
+#endif
         var continuation: AsyncStream<CompletionResponse>.Continuation!
         let stream = AsyncStream<CompletionResponse> { continuation = $0 }
         let task = Task { [weak self, ranker] in

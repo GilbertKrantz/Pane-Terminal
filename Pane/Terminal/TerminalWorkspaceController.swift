@@ -657,7 +657,6 @@ final class TerminalWorkspaceController: ObservableObject {
         guard lifecycleState != .shuttingDown else { return }
         lifecycleState = .shuttingDown
         persistTask?.cancel()
-        await persistWorkspace()
         let sessions = Array(
             Dictionary(
                 uniqueKeysWithValues: (tabs + Array(closingTabs.values)).map {
@@ -665,6 +664,11 @@ final class TerminalWorkspaceController: ObservableObject {
                 }
             ).values
         )
+        // Detach every PTY before workspace persistence. A slow state store
+        // must not keep shells, completion sockets, or terminal callbacks alive
+        // while application termination is already in progress.
+        sessions.forEach { $0.terminateForApplicationExit() }
+        await persistWorkspace()
         await withTaskGroup(of: Void.self) { group in
             for session in sessions {
                 group.addTask { @MainActor in

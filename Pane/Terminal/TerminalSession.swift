@@ -170,6 +170,10 @@ final class TerminalSession: NSObject, ObservableObject {
     private var shutdownTask: Task<SessionShutdownResult, Never>?
     private var completedShutdownResult: SessionShutdownResult?
     private var blockSearchTask: Task<Void, Never>?
+#if DEBUG
+    private let lifecycleDebugID = UUID()
+    private(set) var debugShutdownCompleted = false
+#endif
 
     var blocks: [CommandBlock] {
         blockTimeline.blocks
@@ -328,10 +332,16 @@ final class TerminalSession: NSObject, ObservableObject {
                 outcome: .succeeded
             ))
         }
+#if DEBUG
+        lifecycleLog("created")
+#endif
     }
 
     deinit {
         PaneResourceCounters.decrement(.session)
+#if DEBUG
+        print("Pane lifecycle session[\(lifecycleDebugID.uuidString)] deallocated")
+#endif
     }
 
     func diagnostics() async -> TerminalSessionDiagnostics {
@@ -603,9 +613,17 @@ final class TerminalSession: NSObject, ObservableObject {
         requestFocus(.none)
         blockSearchFocusGeneration &+= 1
         composerContextGeneration &+= 1
-        restartTask?.cancel()
-        restartTask = nil
-        runtimeStateStartTask?.cancel()
+#if DEBUG
+        lifecycleLog("shutdown started")
+#endif
+        cancelOwnedWorkForShutdown()
+        let pendingSearch = blockSearchTask
+        blockSearchTask?.cancel()
+        blockSearchTask = nil
+        let hadUnfinishedCommand = blockLifecycleController.activeOrAwaitingBlockID != nil
+        let renderedOutputAtShutdown = renderedActiveBlockOutput()
+        prepareProcessForShutdown()
+        let processTerminationTask = ptyController.startTermination()
 
         return Task { @MainActor in
             await PaneLifecycleEventRing.shared.append(PaneLifecycleEvent(
@@ -615,16 +633,15 @@ final class TerminalSession: NSObject, ObservableObject {
                 sessionID: sessionID,
                 outcome: .requested
             ))
-            let pendingSearch = blockSearchTask
-            blockSearchTask?.cancel()
-            blockSearchTask = nil
             _ = await blockSearchIndex.cancelPendingSearches()
             await pendingSearch?.value
-            let hadUnfinishedCommand = blockLifecycleController.activeOrAwaitingBlockID != nil
-            await finalizeUnfinishedCommand(reason: reason)
+            await finalizeUnfinishedCommand(
+                reason: reason,
+                renderedOutput: renderedOutputAtShutdown
+            )
             _ = await runtimeStateController?.closeCurrentSessionCleanly()
             await completionService.cancelPendingRequests()
-            let processTermination = await stopProcessForShutdownAndWait()
+            let processTermination = await processTerminationTask.value
             let result = SessionShutdownResult(
                 sessionID: sessionID,
                 processTermination: processTermination,
@@ -632,6 +649,10 @@ final class TerminalSession: NSObject, ObservableObject {
             )
             completedShutdownResult = result
             shutdownTask = nil
+#if DEBUG
+            debugShutdownCompleted = true
+            lifecycleLog("shutdown completed")
+#endif
             await PaneLifecycleEventRing.shared.append(PaneLifecycleEvent(
                 timestamp: Date(),
                 kind: .sessionClosed,
@@ -643,34 +664,37 @@ final class TerminalSession: NSObject, ObservableObject {
         }
     }
 
+    private func cancelOwnedWorkForShutdown() {
+        restartTask?.cancel()
+        restartTask = nil
+        runtimeStateStartTask?.cancel()
+        runtimeStateStartTask = nil
+        onMeaningfulBackgroundOutput = nil
+    }
+
     private func prepareProcessForShutdown() {
-        clearActiveBlockCapture()
         isShellRunning = false
-        blockLifecycleController.markAwaitingStart(nil)
         shellReadiness = .stopped
         invalidateCompletionEndpoint()
         stopForegroundProcessMonitoring()
         zshCompletionClient.shutdown()
-    }
-
-    private func stopProcessForShutdown() {
-        prepareProcessForShutdown()
-        ptyController.terminate()
-    }
-
-    private func stopProcessForShutdownAndWait() async -> PTYTerminationResult {
-        prepareProcessForShutdown()
-        return await ptyController.terminateAndWait()
+        ptyController.onEvent = nil
+        terminalView?.terminalDelegate = nil
+        if let paneTerminalView = terminalView as? PaneTerminalView {
+            paneTerminalView.onAlternateScreenChanged = nil
+            paneTerminalView.onTerminalResponse = nil
+        }
+        liveCommandTerminalView = nil
+        authoritativeTerminalHostView = nil
+        terminalView = nil
     }
 
     /// App termination does not need to repaint status into a disappearing
     /// SwiftUI hierarchy. The PTY controller invalidates the active generation
     /// before terminating it, so a later process callback is a no-op.
     func terminateForApplicationExit() {
-        guard !isShuttingDown || ptyController.isRunning else { return }
-        _ = interactionController.handle(.applicationClosing)
-        isShuttingDown = true
-        stopProcessForShutdown()
+        guard shutdownTask == nil, completedShutdownResult == nil else { return }
+        shutdownTask = makeShutdownTask(reason: .applicationExit)
     }
 
     func finalizeApplicationExit() async {
@@ -687,6 +711,15 @@ final class TerminalSession: NSObject, ObservableObject {
         shutdownTask = task
         _ = await task.value
     }
+
+
+#if DEBUG
+    var debugHasProcessReference: Bool { ptyController.debugHasProcessReference }
+
+    private func lifecycleLog(_ event: String) {
+        print("Pane lifecycle session[\(lifecycleDebugID.uuidString)] \(event)")
+    }
+#endif
 
     func submitDraft() {
         guard isShellReadyForInput else { return }
@@ -1422,7 +1455,8 @@ final class TerminalSession: NSObject, ObservableObject {
 
     private func finalizeUnfinishedCommand(
         exitCode: Int32? = nil,
-        reason: CommandInterruptionReason
+        reason: CommandInterruptionReason,
+        renderedOutput: String? = nil
     ) async {
         let blockID = blockLifecycleController.activeOrAwaitingBlockID
 
@@ -1435,7 +1469,7 @@ final class TerminalSession: NSObject, ObservableObject {
         let windowSize = ptyController.windowSize
         _ = blockLifecycleController.interruptUnfinished(
             exitCode: exitCode,
-            renderedOutput: renderedActiveBlockOutput(),
+            renderedOutput: renderedOutput ?? renderedActiveBlockOutput(),
             columns: Int(windowSize.ws_col),
             rows: Int(windowSize.ws_row)
         )
