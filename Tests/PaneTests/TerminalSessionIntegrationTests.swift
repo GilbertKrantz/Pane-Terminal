@@ -1654,6 +1654,23 @@ extension TerminalSessionIntegrationTests {
     }
 
     @MainActor
+    func testDismissingSearchRestoresTheCompleteBlocksTimeline() {
+        let session = TerminalSession()
+        defer { session.shutdown() }
+        session.submit(command: "echo visible block")
+        XCTAssertEqual(session.visibleBlocks.map(\.id), session.blocks.map(\.id))
+
+        session.presentBlockSearch()
+        session.blockSearchText = "query-with-no-matches"
+        XCTAssertTrue(session.visibleBlocks.isEmpty)
+
+        session.dismissBlockSearch()
+
+        XCTAssertFalse(session.isBlockSearchPresented)
+        XCTAssertEqual(session.visibleBlocks.map(\.id), session.blocks.map(\.id))
+    }
+
+    @MainActor
     func testSearchFromFullTerminalReturnsToAuthoritativeTerminal() async throws {
         let session = makeTestSession()
         let terminalView = PaneTerminalView(

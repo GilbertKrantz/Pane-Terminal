@@ -202,6 +202,12 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     var visibleBlocks: [CommandBlock] {
+        // A dismissed search must not keep filtering the timeline invisibly.
+        // Preserve the query for the next search presentation, but show every
+        // block whenever the search UI is not present.
+        guard isBlockSearchPresented else {
+            return blockTimeline.blocks
+        }
         let query = BlockSearchQuery(text: blockSearchText, filter: blockSearchFilter)
         guard !query.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return blockTimeline.blocks
