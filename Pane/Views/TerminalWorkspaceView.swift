@@ -215,11 +215,12 @@ struct TerminalWorkspaceView: View {
                 }
             }
         } label: {
-            Image(systemName: "chevron.down")
-                .frame(width: 24, height: 26)
+            Text("")
         }
         .menuStyle(.borderlessButton)
+        .frame(width: 24, height: 26)
         .help("All Tabs")
+        .accessibilityLabel("All Tabs")
     }
 
     private func beginRenaming(_ tab: TerminalTab) {
