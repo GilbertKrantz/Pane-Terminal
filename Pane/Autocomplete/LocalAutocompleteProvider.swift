@@ -99,7 +99,32 @@ actor LocalAutocompleteProvider {
                 history: context.history
             )
         }
-        return ranker.rank(candidates, maximumResults: maximumSuggestions)
+        let tokenRange = autocomplete.replacementRange(
+            in: context.draft,
+            cursorUTF16Offset: context.cursorUTF16Offset
+        )
+        let request = CompletionRequest(
+            id: UUID(),
+            generation: context.shellGeneration,
+            draft: context.draft,
+            cursorUTF16Offset: context.cursorUTF16Offset,
+            tokenContext: CommandTokenContext(
+                replacementRange: tokenRange,
+                decodedPrefix: autocomplete.decodedPrefix(
+                    in: context.draft,
+                    cursorUTF16Offset: context.cursorUTF16Offset
+                ),
+                isCommandPosition: true
+            ),
+            currentDirectory: context.currentDirectory,
+            projectContext: project,
+            previousCommand: nil,
+            executableSearchPath: context.executableSearchPath,
+            shellGeneration: context.shellGeneration,
+            maximumResults: maximumSuggestions,
+            createdAt: ContinuousClock.now
+        )
+        return ranker.rank(candidates, request: request, maximumResults: maximumSuggestions)
             .map(Self.suggestion(from:))
     }
 
@@ -204,31 +229,8 @@ actor LocalAutocompleteProvider {
         prefix: String,
         history: [String]
     ) -> CompletionCandidate {
-        let source: CompletionSource
-        let kind: CompletionKind
-        switch suggestion.source {
-        case .zsh:
-            source = .zsh
-            kind = .argument
-        case .history:
-            source = .history
-            kind = .fullCommand
-        case .builtIn:
-            source = .builtIn
-            kind = .command
-        case .executable:
-            source = .executable
-            kind = .command
-        case .fileSystem:
-            source = .fileSystem
-            kind = .path
-        case .projectScript:
-            source = .projectScript
-            kind = .fullCommand
-        case .transition:
-            source = .transition
-            kind = .nextCommand
-        }
+        let source = CompletionSourceMapping.candidateSource(from: suggestion.source)
+        let kind = CompletionSourceMapping.defaultKind(for: suggestion.source)
 
         var evidence = CompletionEvidence()
         evidence.exactPrefixMatch = suggestion.replacementText.hasPrefix(prefix)
@@ -265,30 +267,18 @@ actor LocalAutocompleteProvider {
         from ranked: RankedCompletion
     ) -> CommandAutocompleteSuggestion {
         let candidate = ranked.candidate
-        let source: CommandAutocompleteSuggestion.Source
-        switch candidate.source {
-        case .zsh:
-            source = .zsh
-        case .history:
-            source = .history
-        case .builtIn:
-            source = .builtIn
-        case .executable:
-            source = .executable
-        case .fileSystem:
-            source = .fileSystem
-        case .projectScript, .projectCommand:
-            source = .projectScript
-        case .transition:
-            source = .transition
-        }
+        let source = CompletionSourceMapping.suggestionSource(from: candidate.source)
         return CommandAutocompleteSuggestion(
             text: candidate.displayText,
             replacementText: candidate.replacementText,
             replacementRange: candidate.replacementRange,
             source: source,
             isDirectory: candidate.isDirectory,
-            detail: candidate.detail
+            detail: candidate.detail,
+            stableID: candidate.id,
+            supportingSources: Set(candidate.supportingSources.map {
+                CompletionSourceMapping.suggestionSource(from: $0)
+            })
         )
     }
 

@@ -24,10 +24,12 @@ struct CommandAutocompleteSuggestion: Identifiable, Equatable, Hashable, Sendabl
     let isDirectory: Bool
     let detail: String?
     let supportingSources: Set<Source>
-    private let stableID: String?
+    /// Canonical result identity supplied by the completion pipeline. Legacy
+    /// presentation-only suggestions may omit it and use the fallback `id`.
+    let canonicalResultID: String?
 
     var id: String {
-        stableID ?? "\(source.rawValue):\(replacementText)"
+        canonicalResultID ?? "\(source.rawValue):\(replacementText)"
     }
 
     init(
@@ -46,7 +48,7 @@ struct CommandAutocompleteSuggestion: Identifiable, Equatable, Hashable, Sendabl
         self.source = source
         self.isDirectory = isDirectory
         self.detail = detail
-        self.stableID = stableID
+        self.canonicalResultID = stableID
         self.supportingSources = supportingSources ?? [source]
     }
 }

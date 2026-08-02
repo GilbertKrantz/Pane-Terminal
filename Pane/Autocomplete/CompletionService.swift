@@ -11,9 +11,9 @@ actor CompletionService {
 
     private let localProvider: LocalAutocompleteProvider
     private let autocomplete = CommandAutocomplete()
-    private let ranker = CompletionRanker()
+    private let pipeline = CompletionPipeline()
     private var generation: UInt64 = 0
-    private var currentTask: Task<Void, Never>?
+    private var completionRequestTask: Task<Void, Never>?
 #if DEBUG
     private let debugID = UUID()
 #endif
@@ -37,7 +37,7 @@ actor CompletionService {
     }
 
     deinit {
-        currentTask?.cancel()
+        completionRequestTask?.cancel()
         PaneResourceCounters.decrement(.completionService)
     }
 
@@ -46,8 +46,8 @@ actor CompletionService {
     /// secondary cancellation path.
     func shutdown() {
         generation &+= 1
-        currentTask?.cancel()
-        currentTask = nil
+        completionRequestTask?.cancel()
+        completionRequestTask = nil
 #if DEBUG
         print("Pane lifecycle autocomplete[\(debugID.uuidString)] stopped")
 #endif
@@ -70,13 +70,13 @@ actor CompletionService {
     /// cancellation so resource counters converge before session teardown ends.
     func cancelPendingRequests() async {
         generation &+= 1
-        guard let task = currentTask else {
+        guard let task = completionRequestTask else {
 #if DEBUG
             print("Pane lifecycle autocomplete[\(debugID.uuidString)] stopped")
 #endif
             return
         }
-        currentTask = nil
+        completionRequestTask = nil
         task.cancel()
         await task.value
 #if DEBUG
@@ -136,13 +136,13 @@ actor CompletionService {
             maximumResults: 12,
             createdAt: ContinuousClock.now
         )
-        currentTask?.cancel()
+        completionRequestTask?.cancel()
 #if DEBUG
         print("Pane lifecycle autocomplete[\(debugID.uuidString)] request started")
 #endif
         var continuation: AsyncStream<[CommandAutocompleteSuggestion]>.Continuation!
         let stream = AsyncStream<[CommandAutocompleteSuggestion]> { continuation = $0 }
-        let task = Task { [weak self, localProvider, autocomplete, ranker] in
+        let task = Task { [weak self, localProvider, autocomplete, pipeline] in
             PaneResourceCounters.increment(.completionTask)
             defer {
                 PaneResourceCounters.decrement(.completionTask)
@@ -192,15 +192,14 @@ actor CompletionService {
                           await isValid() else { group.cancelAll(); return }
                     guard let result else { continue }
                     accumulated.append(contentsOf: result)
-                    let merged = ranker.deduplicate(accumulated, request: nativeRequest)
-                    let enriched = await Self.enrich(
-                        merged,
-                        using: behavioralStore,
-                        request: nativeRequest
+                    let pipelineResult = await pipeline.process(
+                        candidates: accumulated,
+                        request: nativeRequest,
+                        store: behavioralStore
                     )
-                    let ranked = ranker.rank(enriched, request: nativeRequest, maximumResults: 12)
+                    let ranked = pipelineResult.ranked
                         .map(Self.suggestion)
-                    let rankedDeduplicated = Self.visibleDeduplicate(ranked, request: nativeRequest)
+                    let rankedDeduplicated = Self.visibleDeduplicate(ranked)
                     let ids = rankedDeduplicated.map(\.id)
                     guard ids != lastIDs else { continue }
                     lastIDs = ids
@@ -208,7 +207,7 @@ actor CompletionService {
                 }
             }
         }
-        currentTask = task
+        completionRequestTask = task
         continuation.onTermination = { _ in task.cancel() }
         return stream
     }
@@ -233,13 +232,13 @@ actor CompletionService {
         debugRankingDuration = nil
         debugProjectID = request.projectContext?.identity
 #endif
-        currentTask?.cancel()
+        completionRequestTask?.cancel()
 #if DEBUG
         print("Pane lifecycle autocomplete[\(debugID.uuidString)] request started")
 #endif
         var continuation: AsyncStream<CompletionResponse>.Continuation!
         let stream = AsyncStream<CompletionResponse> { continuation = $0 }
-        let task = Task { [weak self, ranker] in
+        let task = Task { [weak self, pipeline] in
             PaneResourceCounters.increment(.completionTask)
             defer {
                 PaneResourceCounters.decrement(.completionTask)
@@ -270,13 +269,17 @@ actor CompletionService {
                     all.append(contentsOf: result.candidates.prefix(Self.maximumRaw(result.id)))
                     if all.count > 500 { all = Array(all.prefix(500)) }
                     diagnostics.append(result.diagnostic)
-                    let ranked = ranker.rank(all, request: request,
-                                             maximumResults: min(12, max(0, request.maximumResults)))
+                    let pipelineResult = await pipeline.process(
+                        candidates: all,
+                        request: request,
+                        maximumResults: min(12, max(0, request.maximumResults))
+                    )
+                    let ranked = pipelineResult.ranked
 #if DEBUG
                     await self?.recordRanking(
-                        rawCount: all.count,
-                        mergedCount: ranker.deduplicate(all, request: request).count,
-                        invalidCount: all.lazy.filter { $0.resultIdentity(for: request) == nil }.count,
+                        rawCount: pipelineResult.rawCount,
+                        mergedCount: pipelineResult.canonicalCount,
+                        invalidCount: pipelineResult.invalidCount,
                         publishedCount: ranked.count,
                         duration: started.duration(to: clock.now)
                     )
@@ -293,7 +296,7 @@ actor CompletionService {
                 }
             }
         }
-        currentTask = task
+        completionRequestTask = task
         continuation.onTermination = { _ in task.cancel() }
         return stream
     }
@@ -333,51 +336,29 @@ actor CompletionService {
         _ suggestion: CommandAutocompleteSuggestion,
         fallbackRange: NSRange? = nil
     ) -> CompletionCandidate {
-        let source: CompletionSource
-        let kind: CompletionKind
-        switch suggestion.source {
-        case .zsh: source = .zsh; kind = .argument
-        case .history: source = .history; kind = .fullCommand
-        case .builtIn: source = .builtIn; kind = .command
-        case .executable: source = .executable; kind = .command
-        case .fileSystem: source = .fileSystem; kind = .path
-        case .projectScript: source = .projectScript; kind = .fullCommand
-        case .transition: source = .transition; kind = .nextCommand
-        }
+        let source = CompletionSourceMapping.candidateSource(from: suggestion.source)
+        let kind = CompletionSourceMapping.defaultKind(for: suggestion.source)
         return CompletionCandidate(displayText: suggestion.text, replacementText: suggestion.replacementText,
             replacementRange: suggestion.replacementRange ?? fallbackRange,
             source: source, kind: kind, detail: suggestion.detail, isDirectory: suggestion.isDirectory)
     }
     private static func suggestion(_ ranked: RankedCompletion) -> CommandAutocompleteSuggestion {
         let c = ranked.candidate
-        let source: CommandAutocompleteSuggestion.Source
-        switch c.source { case .zsh: source = .zsh; case .history: source = .history
-        case .transition: source = .transition
-        case .builtIn: source = .builtIn; case .executable: source = .executable
-        case .fileSystem: source = .fileSystem; case .projectScript, .projectCommand: source = .projectScript }
+        let source = CompletionSourceMapping.suggestionSource(from: c.source)
         return .init(text: c.displayText, replacementText: c.replacementText,
                      replacementRange: c.replacementRange, source: source,
                      isDirectory: c.isDirectory, detail: c.detail, stableID: c.id,
-                     supportingSources: Set(c.supportingSources.map(Self.suggestionSource)))
+                     supportingSources: Set(c.supportingSources.map {
+                         CompletionSourceMapping.suggestionSource(from: $0)
+                     }))
     }
-    private static func suggestionSource(_ source: CompletionSource) -> CommandAutocompleteSuggestion.Source {
-        switch source {
-        case .zsh: return .zsh
-        case .history: return .history
-        case .builtIn: return .builtIn
-        case .executable: return .executable
-        case .fileSystem: return .fileSystem
-        case .projectScript, .projectCommand: return .projectScript
-        case .transition: return .transition
-        }
-    }
-    private static func visibleDeduplicate(_ values: [CommandAutocompleteSuggestion],
-                                           request: CompletionRequest) -> [CommandAutocompleteSuggestion] {
+    private static func visibleDeduplicate(
+        _ values: [CommandAutocompleteSuggestion]
+    ) -> [CommandAutocompleteSuggestion] {
         var seen = Set<String>()
         return values.filter { value in
-            let candidate = Self.candidate(value)
-            guard let identity = candidate.resultIdentity(for: request) else { return false }
-            return seen.insert(identity.stableID).inserted
+            guard let identity = value.canonicalResultID else { return false }
+            return seen.insert(identity).inserted
         }
     }
 
@@ -426,37 +407,4 @@ actor CompletionService {
     }
 #endif
 
-    private static func enrich(
-        _ candidates: [CompletionCandidate],
-        using store: (any BehavioralCompletionStore)?,
-        request: CompletionRequest
-    ) async -> [CompletionCandidate] {
-        guard let store, !candidates.isEmpty else { return candidates }
-        // Read canonical feedback and bounded legacy representations during
-        // migration; all new service-produced candidates carry a canonical id.
-        let identities = Array(Set(candidates.flatMap { [$0.id] + $0.feedbackIdentityAliases }))
-        guard let aggregates = try? await store.feedbackAggregates(
-            candidateIdentities: identities,
-            projectID: request.projectContext?.identity,
-            directoryIdentity: request.currentDirectory.standardizedFileURL.path,
-            limit: min(500, identities.count * 3)
-        ) else { return candidates }
-        let grouped = Dictionary(grouping: aggregates, by: \.candidateIdentity)
-        return candidates.map { candidate in
-            var candidate = candidate
-            let feedbackValues = (grouped[candidate.id] ?? [])
-                + candidate.feedbackIdentityAliases.flatMap { grouped[$0] ?? [] }
-            for feedback in feedbackValues {
-                candidate.evidence.acceptanceCount = max(
-                    candidate.evidence.acceptanceCount,
-                    feedback.acceptanceCount
-                )
-                candidate.evidence.dismissalCount = max(
-                    candidate.evidence.dismissalCount,
-                    feedback.dismissalCount + feedback.replacementCount / 2
-                )
-            }
-            return candidate
-        }
-    }
 }

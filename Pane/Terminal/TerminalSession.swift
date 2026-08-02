@@ -81,16 +81,16 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     @Published private(set) var mode: InputMode = .blocks
-    @Published private(set) var isShellRunning = false
-    @Published private(set) var shellExitStatus: Int32?
+    @Published var isShellRunning = false
+    @Published var shellExitStatus: Int32?
     @Published private(set) var terminalTitle = "Pane"
-    @Published private(set) var currentDirectory: String?
+    @Published var currentDirectory: String?
     @Published private(set) var blockTimeline = CommandBlockTimeline()
     @Published private(set) var isAlternateScreenActive = false
     @Published private(set) var modeAttribution: InputModeAttribution = .manual
     @Published private(set) var inputRequirement: TerminalInputRequirement = .unknown
     @Published private(set) var terminalSecurityState: TerminalSecurityState = .normal
-    @Published private(set) var runtimeStateDiagnostic: String?
+    @Published var runtimeStateDiagnostic: String?
     @Published private(set) var activeCommandVisibleLineCount = 1
     @Published var selectedBlockID: UUID?
     @Published var commandDraft = ""
@@ -104,20 +104,20 @@ final class TerminalSession: NSObject, ObservableObject {
     @Published private var indexedBlockSearchIDs: [UUID]?
     @Published private var indexedBlockSearchQuery: BlockSearchQuery?
     @Published private(set) var isBlockSearchPresented = false
-    @Published private(set) var blockSearchFocusGeneration: UInt64 = 0
+    @Published var blockSearchFocusGeneration: UInt64 = 0
     @Published private(set) var sessionBoundaries: [UUID: SessionBoundary] = [:]
     @Published private(set) var restoredSessionOrder: [UUID] = []
     @Published private(set) var newShellBoundary: NewShellBoundary?
     @Published private(set) var restoredBlockIDs: Set<UUID> = []
     @Published var isRestartConfirmationPresented = false
-    @Published private(set) var lastShellRestartAt: Date?
+    @Published var lastShellRestartAt: Date?
     @Published private(set) var focusTarget: PaneFocusTarget = .none
     private var focusBeforeSearch: PaneFocusTarget = .none
     private var modeBeforeSearch: InputMode?
-    @Published private(set) var isRestartInProgress = false
-    @Published private(set) var isShuttingDown = false
-    @Published private(set) var shellReadiness: ShellReadiness = .starting
-    @Published private(set) var composerContextGeneration: UInt64 = 0
+    @Published var isRestartInProgress = false
+    @Published var isShuttingDown = false
+    @Published var shellReadiness: ShellReadiness = .starting
+    @Published var composerContextGeneration: UInt64 = 0
     @Published var visibilityState: SessionVisibilityState = .selected {
         didSet {
             if visibilityState != .selected {
@@ -140,47 +140,47 @@ final class TerminalSession: NSObject, ObservableObject {
     var onMeaningfulBackgroundOutput: (() -> Void)?
 
     private(set) var history = CommandHistory()
-    private let ptyController: PTYController
-    private let lifecycleFaultCheckpointHandler:
+    let ptyController: PTYController
+    let lifecycleFaultCheckpointHandler:
         (@MainActor @Sendable (PaneLifecycleFaultCheckpoint) -> Void)?
-    private let blockLifecycleController = BlockLifecycleController()
+    let blockLifecycleController = BlockLifecycleController()
     private let focusCoordinator = FocusCoordinator()
-    private let interactionController = TerminalInteractionController(
+    let interactionController = TerminalInteractionController(
         debugLoggingEnabled: ProcessInfo.processInfo.environment[
             "PANE_INTERACTION_DEBUG"
         ] == "1"
     )
-    private var terminalView: TerminalView?
-    private var authoritativeTerminalHostView: AuthoritativeTerminalHostView?
+    var terminalView: TerminalView?
+    var authoritativeTerminalHostView: AuthoritativeTerminalHostView?
     private var suspendedCommandDraft: String?
     private var pendingRestoredMode: InputMode?
     private var manualSecureInputActive = false
     private var behaviorallyIneligibleBlockIDs: Set<UUID> = []
-    private var previousCompletedCommandSummary: CompletedCommandSummary?
+    var previousCompletedCommandSummary: CompletedCommandSummary?
     private var modeBeforeManualSecureInput: InputMode?
-    private weak var liveCommandTerminalView: TerminalView?
+    weak var liveCommandTerminalView: TerminalView?
     private var liveCommandTerminalBlockID: UUID?
-    private var streamParser = BlockStreamParser()
-    private var transcriptFilter = AlternateScreenTranscriptFilter()
+    var streamParser = BlockStreamParser()
+    var transcriptFilter = AlternateScreenTranscriptFilter()
     private var pendingLiveCommandOutput = Data()
     private var isLiveCommandFlushScheduled = false
     private var activeCommandCompletedLineCount = 0
     private var activeCommandHasCurrentLineContent = false
-    private var shellConfiguration: ShellConfiguration
-    private let commandAutocomplete = CommandAutocomplete()
-    private let zshCompletionClient = WarmZshCompletionClient()
-    private let completionService = CompletionService()
-    private let blockSearchIndex = BlockSearchIndex()
-    private let runtimeStateController: RuntimeStateController?
+    var shellConfiguration: ShellConfiguration
+    let commandAutocomplete = CommandAutocomplete()
+    let zshCompletionClient = WarmZshCompletionClient()
+    let completionService = CompletionService()
+    let blockSearchIndex = BlockSearchIndex()
+    let runtimeStateController: RuntimeStateController?
     private let runtimeSessionID = UUID()
     private let runtimeSessionStartedAt = Date()
     private let sensitiveDataSanitizer = SensitiveDataSanitizer()
     private var restoredRuntimeEventKeys: Set<String> = []
     private var isCommandHistoryEnabled: Bool
-    private var runtimeStateStartTask: Task<Void, Never>?
-    private var isRuntimeStatePrepared: Bool
-    private var zshCompletionEndpoint: WarmZshCompletionEndpoint?
-    private var isApplicationExitFinalized = false
+    var runtimeStateStartTask: Task<Void, Never>?
+    var isRuntimeStatePrepared: Bool
+    var zshCompletionEndpoint: WarmZshCompletionEndpoint?
+    var isApplicationExitFinalized = false
     private var shouldReturnToBlocksAfterAlternateScreen = false
     private var shouldRestoreBlocksViewportAfterAlternateScreen = false
     private var foregroundProcessTimer: Timer?
@@ -188,13 +188,13 @@ final class TerminalSession: NSObject, ObservableObject {
     private var lastForegroundInspectionAt: Date?
     private var lastForegroundSnapshot: ForegroundProcessSnapshot?
     private(set) var focusGeneration: UInt64 = 0
-    private var restartTask: Task<Void, Never>?
-    private var shutdownTask: Task<SessionShutdownResult, Never>?
-    private var completedShutdownResult: SessionShutdownResult?
-    private var blockSearchTask: Task<Void, Never>?
+    var restartTask: Task<Void, Never>?
+    var shutdownTask: Task<SessionShutdownResult, Never>?
+    var completedShutdownResult: SessionShutdownResult?
+    var blockSearchTask: Task<Void, Never>?
 #if DEBUG
-    private let lifecycleDebugID = UUID()
-    private(set) var debugShutdownCompleted = false
+    let lifecycleDebugID = UUID()
+    var debugShutdownCompleted = false
 #endif
 
     var blocks: [CommandBlock] {
@@ -263,7 +263,7 @@ final class TerminalSession: NSObject, ObservableObject {
         interactionController.state.terminalAcceptsInput
     }
 
-    private var processGeneration: UInt64 {
+    var processGeneration: UInt64 {
         ptyController.generation
     }
 
@@ -281,7 +281,7 @@ final class TerminalSession: NSObject, ObservableObject {
         )
     }
 
-    private var isShellIntegrationReady: Bool {
+    var isShellIntegrationReady: Bool {
         shellReadiness == .ready
     }
 
@@ -512,249 +512,6 @@ final class TerminalSession: NSObject, ObservableObject {
         liveCommandTerminalBlockID = nil
     }
 
-    func startShell(in workingDirectory: String? = nil) {
-        guard !isShuttingDown, !ptyController.isRunning else { return }
-        _ = interactionController.handle(.shellStarted)
-        shellReadiness = .starting
-        guard isRuntimeStatePrepared else {
-            prepareRuntimeStateAndStartShell()
-            return
-        }
-
-        shellExitStatus = nil
-        streamParser = BlockStreamParser()
-        transcriptFilter = AlternateScreenTranscriptFilter()
-        let effectiveDirectory = Self.validatedWorkingDirectory(workingDirectory)
-            ?? Self.validatedWorkingDirectory(currentDirectory)
-            ?? Self.validatedWorkingDirectory(shellConfiguration.workingDirectory)
-            ?? FileManager.default.homeDirectoryForCurrentUser.path
-        currentDirectory = effectiveDirectory
-        let startResult = ptyController.start(
-            configuration: shellConfiguration,
-            workingDirectory: effectiveDirectory
-        )
-        let generation = startResult.generation
-        let completionEndpoint = try? zshCompletionClient.makeEndpoint(
-            for: generation
-        )
-        zshCompletionEndpoint = completionEndpoint
-        isShellRunning = startResult.isRunning
-
-        if startResult.isRunning {
-            Task {
-                await PaneLifecycleEventRing.shared.append(PaneLifecycleEvent(
-                    timestamp: Date(),
-                    kind: .ptyStarted,
-                    tabID: tabID,
-                    sessionID: sessionID,
-                    outcome: .succeeded
-                ))
-            }
-            shellReadiness = .initializing
-            startForegroundProcessMonitoring()
-            let installationCommand: String
-            if let completionEndpoint {
-                installationCommand = ShellIntegration.installationCommand(
-                    completionSocketPath: completionEndpoint.socketPath
-                )
-            } else {
-                installationCommand = ShellIntegration.installationCommand
-            }
-            _ = ptyController.write(
-                CommandSerializer.serializeCommand(installationCommand)
-            )
-        } else {
-            shellReadiness = .stopped
-            _ = interactionController.handle(.shellExited)
-            invalidateCompletionEndpoint()
-            terminalView?.feed(text: "\r\n[Unable to start \(shellConfiguration.executable)]\r\n")
-        }
-    }
-
-    func restartShell() {
-        guard restartTask == nil, !isShuttingDown else { return }
-        lifecycleFaultCheckpointHandler?(.shellRestartRequested)
-        _ = interactionController.handle(.restartRequested)
-        isRestartInProgress = true
-        shellReadiness = .starting
-        restartTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            defer {
-                self.restartTask = nil
-                self.isRestartInProgress = false
-            }
-            await self.finalizeUnfinishedCommand(reason: .shellRestart)
-            self.lifecycleFaultCheckpointHandler?(.shellRestartCommandFinalized)
-            await self.runtimeStateController?.resetBehavioralTransitionContinuity()
-            self.previousCompletedCommandSummary = nil
-            await self.completionService.shellDidRestart()
-            self.composerContextGeneration &+= 1
-            self.isShellRunning = false
-            _ = await self.ptyController.terminateAndWait()
-            self.lifecycleFaultCheckpointHandler?(.shellRestartPTYTerminated)
-            self.invalidateCompletionEndpoint()
-            self.stopForegroundProcessMonitoring()
-            self.leaveAlternateScreenIfNeeded()
-            self.terminalView?.feed(text: "\r\n[Restarting shell]\r\n")
-            self.lastShellRestartAt = Date()
-            await PaneLifecycleEventRing.shared.append(PaneLifecycleEvent(
-                timestamp: Date(),
-                kind: .shellRestarted,
-                tabID: self.tabID,
-                sessionID: self.sessionID,
-                outcome: .succeeded
-            ))
-            self.lifecycleFaultCheckpointHandler?(.shellRestartStartingReplacement)
-            self.startShell()
-        }
-    }
-
-    func requestRestartShell() {
-        if isCommandActive {
-            isRestartConfirmationPresented = true
-        } else {
-            restartShell()
-        }
-    }
-
-    func confirmRestartShell() {
-        isRestartConfirmationPresented = false
-        restartShell()
-    }
-
-    func shutdown() {
-        guard shutdownTask == nil, completedShutdownResult == nil else { return }
-        shutdownTask = makeShutdownTask(reason: .controlledShutdown)
-    }
-
-    @discardableResult
-    func shutdownAndWait() async -> SessionShutdownResult {
-        if let completedShutdownResult {
-            return completedShutdownResult
-        }
-        if let shutdownTask {
-            return await shutdownTask.value
-        }
-        let task = makeShutdownTask(reason: .controlledShutdown)
-        shutdownTask = task
-        return await task.value
-    }
-
-    private func makeShutdownTask(
-        reason: CommandInterruptionReason
-    ) -> Task<SessionShutdownResult, Never> {
-        _ = interactionController.handle(.applicationClosing)
-        isShuttingDown = true
-        requestFocus(.none)
-        blockSearchFocusGeneration &+= 1
-        composerContextGeneration &+= 1
-#if DEBUG
-        lifecycleLog("shutdown started")
-#endif
-        cancelOwnedWorkForShutdown()
-        let pendingSearch = blockSearchTask
-        blockSearchTask?.cancel()
-        blockSearchTask = nil
-        let hadUnfinishedCommand = blockLifecycleController.activeOrAwaitingBlockID != nil
-        let renderedOutputAtShutdown = renderedActiveBlockOutput()
-        prepareProcessForShutdown()
-        let processTerminationTask = ptyController.startTermination()
-
-        return Task { @MainActor in
-            await PaneLifecycleEventRing.shared.append(PaneLifecycleEvent(
-                timestamp: Date(),
-                kind: .sessionClosing,
-                tabID: tabID,
-                sessionID: sessionID,
-                outcome: .requested
-            ))
-            _ = await blockSearchIndex.cancelPendingSearches()
-            await pendingSearch?.value
-            await finalizeUnfinishedCommand(
-                reason: reason,
-                renderedOutput: renderedOutputAtShutdown
-            )
-            _ = await runtimeStateController?.closeCurrentSessionCleanly()
-            await completionService.cancelPendingRequests()
-            let processTermination = await processTerminationTask.value
-            let result = SessionShutdownResult(
-                sessionID: sessionID,
-                processTermination: processTermination,
-                unfinishedCommandFinalized: hadUnfinishedCommand
-            )
-            completedShutdownResult = result
-            shutdownTask = nil
-#if DEBUG
-            debugShutdownCompleted = true
-            lifecycleLog("shutdown completed")
-#endif
-            await PaneLifecycleEventRing.shared.append(PaneLifecycleEvent(
-                timestamp: Date(),
-                kind: .sessionClosed,
-                tabID: tabID,
-                sessionID: sessionID,
-                outcome: processTermination.outcome == .timedOut ? .timedOut : .succeeded
-            ))
-            return result
-        }
-    }
-
-    private func cancelOwnedWorkForShutdown() {
-        restartTask?.cancel()
-        restartTask = nil
-        runtimeStateStartTask?.cancel()
-        runtimeStateStartTask = nil
-        onMeaningfulBackgroundOutput = nil
-    }
-
-    private func prepareProcessForShutdown() {
-        isShellRunning = false
-        shellReadiness = .stopped
-        invalidateCompletionEndpoint()
-        stopForegroundProcessMonitoring()
-        zshCompletionClient.shutdown()
-        ptyController.onEvent = nil
-        terminalView?.terminalDelegate = nil
-        if let paneTerminalView = terminalView as? PaneTerminalView {
-            paneTerminalView.onAlternateScreenChanged = nil
-            paneTerminalView.onTerminalResponse = nil
-        }
-        liveCommandTerminalView = nil
-        authoritativeTerminalHostView = nil
-        terminalView = nil
-    }
-
-    /// App termination does not need to repaint status into a disappearing
-    /// SwiftUI hierarchy. The PTY controller invalidates the active generation
-    /// before terminating it, so a later process callback is a no-op.
-    func terminateForApplicationExit() {
-        guard shutdownTask == nil, completedShutdownResult == nil else { return }
-        shutdownTask = makeShutdownTask(reason: .applicationExit)
-    }
-
-    func finalizeApplicationExit() async {
-        guard !isApplicationExitFinalized else { return }
-        isApplicationExitFinalized = true
-        if completedShutdownResult != nil {
-            return
-        }
-        if let shutdownTask {
-            _ = await shutdownTask.value
-            return
-        }
-        let task = makeShutdownTask(reason: .applicationExit)
-        shutdownTask = task
-        _ = await task.value
-    }
-
-
-#if DEBUG
-    var debugHasProcessReference: Bool { ptyController.debugHasProcessReference }
-
-    private func lifecycleLog(_ event: String) {
-        print("Pane lifecycle session[\(lifecycleDebugID.uuidString)] \(event)")
-    }
-#endif
 
     func submitDraft() {
         guard isShellReadyForInput else { return }
@@ -826,131 +583,6 @@ final class TerminalSession: NSObject, ObservableObject {
 
     func historyNext() {
         commandDraft = history.next(currentDraft: commandDraft)
-    }
-
-    func autocompleteSuggestions(
-        for draft: String,
-        cursorUTF16Offset: Int
-    ) async -> AsyncStream<[CommandAutocompleteSuggestion]> {
-        guard terminalSecurityState.inputMode == .normal,
-              mode == .blocks,
-              isShellRunning,
-              isShellIntegrationReady,
-              !isCommandActive,
-              !isAlternateScreenActive,
-              terminalView?.terminal.isCurrentBufferAlternate != true,
-              let endpoint = zshCompletionEndpoint,
-              endpoint.generation == processGeneration else {
-            return AsyncStream { $0.finish() }
-        }
-
-        let directory = URL(
-            fileURLWithPath: currentDirectory ?? shellConfiguration.workingDirectory,
-            isDirectory: true
-        )
-        let generation = processGeneration
-        let projectContext = await completionService.projectDefinition(for: directory)
-        if let runtimeStateController {
-            _ = await runtimeStateController.updateCurrentProjectIdentity(projectContext?.identity)
-        }
-        let context = LocalAutocompleteContext(
-            draft: draft,
-            cursorUTF16Offset: cursorUTF16Offset,
-            history: history.commands,
-            currentDirectory: directory,
-            executableSearchPath: shellEnvironmentValue(named: "PATH") ?? "",
-            shellGeneration: generation
-        )
-        return await completionService.suggestions(
-            for: context,
-            zsh: { [zshCompletionClient] in
-                await zshCompletionClient.completions(
-                    for: draft,
-                    cursorUTF16Offset: cursorUTF16Offset,
-                    endpoint: endpoint
-                )
-            },
-            behavioralStore: runtimeStateController,
-            previousCommand: previousCompletedCommandSummary,
-            projectContext: projectContext,
-            isValid: { [weak self] in
-                guard let self else { return false }
-                return self.mode == .blocks
-                    && self.processGeneration == generation
-                    && self.zshCompletionEndpoint == endpoint
-                    && !self.isCommandActive
-                    && !self.isAlternateScreenActive
-                    && self.terminalSecurityState.inputMode == .normal
-            }
-        )
-    }
-
-    func composerProjectContext(
-        for directory: URL,
-        reason: ContextRefreshReason = .tabSelected
-    ) async -> ProjectContext? {
-        await completionService.projectContext(
-            for: directory,
-            visibility: visibilityState,
-            reason: reason
-        )
-    }
-
-    func refreshComposerContext() async {
-        await completionService.invalidateProjectContext()
-        composerContextGeneration &+= 1
-    }
-
-    var canSuggestNextCommand: Bool {
-        previousCompletedCommandSummary != nil
-            && !isCommandActive
-            && terminalSecurityState.inputMode == .normal
-            && interactionController.state == .shellIdle
-    }
-
-    func recordCompletionFeedback(
-        for suggestion: CommandAutocompleteSuggestion,
-        action: CompletionFeedbackAction,
-        rank: Int
-    ) {
-        guard !isSecureInputActive, let runtimeStateController else { return }
-        let source: CompletionSource
-        switch suggestion.source {
-        case .zsh: source = .zsh
-        case .history: source = .history
-        case .builtIn: source = .builtIn
-        case .executable: source = .executable
-        case .fileSystem: source = .fileSystem
-        case .projectScript: source = .projectScript
-        case .transition: source = .transition
-        }
-        let supportingSources = Set(suggestion.supportingSources.map { supportingSource in
-            switch supportingSource {
-            case .zsh: return CompletionSource.zsh
-            case .history: return .history
-            case .builtIn: return .builtIn
-            case .executable: return .executable
-            case .fileSystem: return .fileSystem
-            case .projectScript: return .projectScript
-            case .transition: return .transition
-            }
-        })
-        let record = CompletionFeedbackRecord(
-            candidateIdentity: suggestion.id,
-            normalizedReplacement: suggestion.replacementText,
-            source: source,
-            supportingSources: supportingSources,
-            projectID: nil,
-            directoryIdentity: currentDirectory ?? shellConfiguration.workingDirectory,
-            action: action,
-            rank: max(0, rank),
-            timestamp: Date()
-        )
-        Task { [weak self] in
-            if let diagnostic = await runtimeStateController.recordCompletionFeedback(record) {
-                self?.runtimeStateDiagnostic = diagnostic
-            }
-        }
     }
 
     func authoritativeTerminalDidLayout() {
@@ -1493,7 +1125,7 @@ final class TerminalSession: NSObject, ObservableObject {
         return 128 + terminatingSignal
     }
 
-    private func finalizeUnfinishedCommand(
+    func finalizeUnfinishedCommand(
         exitCode: Int32? = nil,
         reason: CommandInterruptionReason,
         renderedOutput: String? = nil
@@ -1629,7 +1261,7 @@ final class TerminalSession: NSObject, ObservableObject {
         blockLifecycleController.markAwaitingStart(nextCommand.id)
     }
 
-    private func prepareRuntimeStateAndStartShell() {
+    func prepareRuntimeStateAndStartShell() {
         guard runtimeStateStartTask == nil, let runtimeStateController else { return }
         let directory = currentDirectory ?? shellConfiguration.workingDirectory
         let session = RuntimeSession(
@@ -1993,7 +1625,7 @@ final class TerminalSession: NSObject, ObservableObject {
         }
     }
 
-    nonisolated private static func validatedWorkingDirectory(_ path: String?) -> String? {
+    nonisolated static func validatedWorkingDirectory(_ path: String?) -> String? {
         guard let path, !path.isEmpty else { return nil }
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
@@ -2018,7 +1650,7 @@ final class TerminalSession: NSObject, ObservableObject {
         scheduleLiveCommandOutputFlush()
     }
 
-    private func renderedActiveBlockOutput() -> String? {
+    func renderedActiveBlockOutput() -> String? {
         flushPendingLiveCommandOutput()
         if liveCommandTerminalBlockID == blockTimeline.activeBlockID,
            let liveCommandTerminalView {
@@ -2215,7 +1847,7 @@ final class TerminalSession: NSObject, ObservableObject {
         return true
     }
 
-    private func startForegroundProcessMonitoring() {
+    func startForegroundProcessMonitoring() {
         updateForegroundProcessMonitoring(refreshImmediately: true)
     }
 
@@ -2267,7 +1899,7 @@ final class TerminalSession: NSObject, ObservableObject {
         refreshForegroundProcessMode()
     }
 
-    private func stopForegroundProcessMonitoring() {
+    func stopForegroundProcessMonitoring() {
         foregroundProcessTimer?.invalidate()
         foregroundProcessTimer = nil
         foregroundProcessTimerInterval = nil
@@ -2632,7 +2264,7 @@ final class TerminalSession: NSObject, ObservableObject {
         return name.isEmpty ? nil : name
     }
 
-    private func leaveAlternateScreenIfNeeded() {
+    func leaveAlternateScreenIfNeeded() {
         guard terminalView?.terminal.isCurrentBufferAlternate == true else {
             handleAlternateScreenChanged(false)
             return
@@ -2658,7 +2290,7 @@ final class TerminalSession: NSObject, ObservableObject {
             )
     }
 
-    private func shellEnvironmentValue(named name: String) -> String? {
+    func shellEnvironmentValue(named name: String) -> String? {
         let prefix = name + "="
         guard let entry = shellConfiguration.environment.first(where: {
             $0.hasPrefix(prefix)
@@ -2666,7 +2298,7 @@ final class TerminalSession: NSObject, ObservableObject {
         return String(entry.dropFirst(prefix.count))
     }
 
-    private func invalidateCompletionEndpoint() {
+    func invalidateCompletionEndpoint() {
         guard let endpoint = zshCompletionEndpoint else { return }
         zshCompletionEndpoint = nil
         zshCompletionClient.invalidate(endpoint)

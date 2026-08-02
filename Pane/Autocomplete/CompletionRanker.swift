@@ -94,6 +94,21 @@ struct CompletionResultIdentity: Hashable, Sendable {
     var stableID: String { "\(category.rawValue)|\(isDirectory)|\(resultingText)" }
 }
 
+struct ResolvedCompletionCandidate: Sendable {
+    let candidate: CompletionCandidate
+    let result: CompletionResultIdentity
+}
+
+enum CompletionCandidateResolver {
+    static func resolve(
+        _ candidate: CompletionCandidate,
+        request: CompletionRequest
+    ) -> ResolvedCompletionCandidate? {
+        guard let result = candidate.resultIdentity(for: request) else { return nil }
+        return ResolvedCompletionCandidate(candidate: candidate, result: result)
+    }
+}
+
 extension CompletionCandidate {
     func resultIdentity(for request: CompletionRequest) -> CompletionResultIdentity? {
         guard let result = resultingText(for: request) else { return nil }
@@ -180,22 +195,34 @@ struct CompletionRanker: Sendable {
     let weights: CompletionRankingWeights
     init(weights: CompletionRankingWeights = .default) { self.weights = weights }
 
-    func rank(_ input: [CompletionCandidate], maximumResults: Int = .max) -> [RankedCompletion] {
-        let merged = deduplicate(input)
-        return merged.map(score).sorted(by: precedes).prefix(max(0, maximumResults)).map { $0 }
-    }
-
     func rank(_ input: [CompletionCandidate], request: CompletionRequest,
               maximumResults: Int = .max) -> [RankedCompletion] {
         deduplicate(input, request: request).map(score).sorted(by: precedes)
             .prefix(max(0, maximumResults)).map { $0 }
     }
 
+    func rankCanonical(
+        _ candidates: [CompletionCandidate],
+        maximumResults: Int = .max
+    ) -> [RankedCompletion] {
+        candidates.map(score).sorted(by: precedes)
+            .prefix(max(0, maximumResults)).map { $0 }
+    }
+
     func deduplicate(_ candidates: [CompletionCandidate], request: CompletionRequest) -> [CompletionCandidate] {
+        deduplicate(candidates.compactMap {
+            CompletionCandidateResolver.resolve($0, request: request)
+        }).map(\.candidate)
+    }
+
+    func deduplicate(
+        _ candidates: [ResolvedCompletionCandidate]
+    ) -> [ResolvedCompletionCandidate] {
         var order: [CompletionResultIdentity] = []
         var values: [CompletionResultIdentity: CompletionCandidate] = [:]
-        for candidate in candidates {
-            guard let identity = candidate.resultIdentity(for: request) else { continue }
+        for resolved in candidates {
+            let candidate = resolved.candidate
+            let identity = resolved.result
             guard let existing = values[identity] else {
                 order.append(identity)
                 values[identity] = withStableID(candidate, identity: identity)
@@ -203,47 +230,9 @@ struct CompletionRanker: Sendable {
             }
             values[identity] = merge(existing, candidate, identity: identity)
         }
-        return order.compactMap { values[$0] }
-    }
-
-    func deduplicate(_ candidates: [CompletionCandidate]) -> [CompletionCandidate] {
-        var order: [String] = []
-        var values: [String: CompletionCandidate] = [:]
-        for candidate in candidates {
-            let key = identity(for: candidate)
-            guard let existing = values[key] else {
-                order.append(key); values[key] = candidate; continue
-            }
-            let stronger = sourceBase(candidate.source) > sourceBase(existing.source) ? candidate : existing
-            let evidence = merge(existing.evidence, candidate.evidence)
-            var merged = stronger
-            merged.evidence = evidence
-            merged.supportingSources.formUnion(existing.supportingSources)
-            merged.supportingSources.formUnion(candidate.supportingSources)
-            merged.feedbackIdentityAliases.formUnion(existing.feedbackIdentityAliases)
-            merged.feedbackIdentityAliases.formUnion(candidate.feedbackIdentityAliases)
-            // Prefer useful provider detail without changing executable text.
-            if stronger.detail == nil, let detail = (stronger.id == existing.id ? candidate : existing).detail {
-                merged = CompletionCandidate(id: stronger.id, displayText: stronger.displayText,
-                    replacementText: stronger.replacementText,
-                    replacementRange: stronger.replacementRange,
-                    source: stronger.source, kind: stronger.kind,
-                    detail: detail, isDirectory: stronger.isDirectory, evidence: evidence,
-                    supportingSources: merged.supportingSources,
-                    feedbackIdentityAliases: merged.feedbackIdentityAliases)
-            }
-            values[key] = merged
+        return order.compactMap { identity in
+            values[identity].map { ResolvedCompletionCandidate(candidate: $0, result: identity) }
         }
-        return order.compactMap { values[$0] }
-    }
-
-    private func identity(for candidate: CompletionCandidate) -> String {
-        let trimmed = candidate.replacementText.replacingOccurrences(
-            of: #"\s+$"#, with: "", options: .regularExpression)
-        let range = candidate.replacementRange.map {
-            "\($0.location):\($0.length)"
-        } ?? "default"
-        return "\(candidate.kind.rawValue)|\(candidate.isDirectory)|\(range)|\(trimmed)"
     }
 
     private func merge(_ existing: CompletionCandidate, _ candidate: CompletionCandidate,
@@ -301,7 +290,18 @@ struct CompletionRanker: Sendable {
         if rhs.source == .zsh && lhs.source != .zsh { return false }
         let lhsLength = lhs.replacementRange?.length ?? Int.max
         let rhsLength = rhs.replacementRange?.length ?? Int.max
-        if lhsLength != rhsLength { return lhsLength < rhsLength }
+        if lhsLength != rhsLength {
+            // Whole-command candidates intentionally replace the complete
+            // draft. Preserve that semantic operation when canonical
+            // deduplication merges it with a token-sized edit that happens to
+            // produce the same resulting composer text.
+            switch lhs.kind {
+            case .fullCommand, .nextCommand, .script:
+                return lhsLength > rhsLength
+            case .command, .argument, .path, .option:
+                return lhsLength < rhsLength
+            }
+        }
         return stronger(lhs, than: rhs)
     }
 
@@ -379,12 +379,12 @@ struct CompletionRanker: Sendable {
 }
 
 protocol CompletionRanking: Sendable {
-    func rank(candidates: [CompletionCandidate], context: LocalAutocompleteContext) async -> [CompletionCandidate]
+    func rank(candidates: [CompletionCandidate], request: CompletionRequest) async -> [CompletionCandidate]
 }
 
 struct DeterministicCompletionRanker: CompletionRanking {
     let ranker = CompletionRanker()
-    func rank(candidates: [CompletionCandidate], context: LocalAutocompleteContext) async -> [CompletionCandidate] {
-        ranker.rank(candidates).map(\.candidate)
+    func rank(candidates: [CompletionCandidate], request: CompletionRequest) async -> [CompletionCandidate] {
+        ranker.rank(candidates, request: request).map(\.candidate)
     }
 }
