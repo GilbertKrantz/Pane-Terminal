@@ -39,6 +39,7 @@
 		10000000000000000000001B /* AlternateScreenTranscriptFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001F /* AlternateScreenTranscriptFilterTests.swift */; };
 		10000000000000000000001D /* CommandAutocomplete.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000021 /* CommandAutocomplete.swift */; };
 		10000000000000000000001E /* CommandAutocompleteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000022 /* CommandAutocompleteTests.swift */; };
+		100000000000000000000034 /* AutocompleteRequestGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000034 /* AutocompleteRequestGateTests.swift */; };
 		A10000000000000000000001 /* CompletionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000001 /* CompletionService.swift */; };
 		A10000000000000000000002 /* LocalAutocompleteProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000002 /* LocalAutocompleteProvider.swift */; };
 		A10000000000000000000003 /* ExecutableIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000003 /* ExecutableIndex.swift */; };
@@ -150,6 +151,7 @@
 		20000000000000000000001F /* AlternateScreenTranscriptFilterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlternateScreenTranscriptFilterTests.swift; sourceTree = "<group>"; };
 		200000000000000000000021 /* CommandAutocomplete.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandAutocomplete.swift; sourceTree = "<group>"; };
 		200000000000000000000022 /* CommandAutocompleteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandAutocompleteTests.swift; sourceTree = "<group>"; };
+		200000000000000000000034 /* AutocompleteRequestGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutocompleteRequestGateTests.swift; sourceTree = "<group>"; };
 		A200000000000000000000001 /* CompletionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionService.swift; sourceTree = "<group>"; };
 		A200000000000000000000002 /* LocalAutocompleteProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalAutocompleteProvider.swift; sourceTree = "<group>"; };
 		A200000000000000000000003 /* ExecutableIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExecutableIndex.swift; sourceTree = "<group>"; };
@@ -384,6 +386,7 @@
 				20000000000000000000001D /* CommandBlockTimelineTests.swift */,
 				20000000000000000000001F /* AlternateScreenTranscriptFilterTests.swift */,
 				200000000000000000000022 /* CommandAutocompleteTests.swift */,
+				200000000000000000000034 /* AutocompleteRequestGateTests.swift */,
 				A200000000000000000000009 /* ComposerContextTests.swift */,
 				A20000000000000000000000A /* ProjectContextProviderTests.swift */,
 				A20000000000000000000000B /* CompletionInteractionTests.swift */,
@@ -679,6 +682,7 @@
 				100000000000000000000019 /* CommandBlockTimelineTests.swift in Sources */,
 				10000000000000000000001B /* AlternateScreenTranscriptFilterTests.swift in Sources */,
 				10000000000000000000001E /* CommandAutocompleteTests.swift in Sources */,
+				100000000000000000000034 /* AutocompleteRequestGateTests.swift in Sources */,
 				A10000000000000000000009 /* ComposerContextTests.swift in Sources */,
 				A1000000000000000000000A /* ProjectContextProviderTests.swift in Sources */,
 				A1000000000000000000000B /* CompletionInteractionTests.swift in Sources */,

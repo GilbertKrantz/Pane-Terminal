@@ -102,6 +102,7 @@ struct CommandComposerView: View {
     @State private var caretUTF16Offset = 0
     @State private var autocompleteSuggestions: [CommandAutocompleteSuggestion] = []
     @State private var autocompleteSelection = CommandAutocompleteSelection()
+    @State private var autocompleteRequestGate = AutocompleteRequestGate()
     @State private var suggestionsQuery: AutocompleteQuery?
     @State private var dismissedQuery: AutocompleteQuery?
     @State private var selectionRequest: ComposerSelectionRequest?
@@ -121,7 +122,10 @@ struct CommandComposerView: View {
                 max(0, caretUTF16Offset),
                 (session.commandDraft as NSString).length
             ),
-            isCommandActive: session.isCommandActive
+            isCommandActive: session.isCommandActive,
+            isSecureInputActive: session.isSecureInputActive,
+            mode: session.mode,
+            visibilityState: session.visibilityState
         )
     }
 
@@ -129,7 +133,9 @@ struct CommandComposerView: View {
         let query = autocompleteQuery
         guard !session.isSecureInputActive,
               !query.isCommandActive,
-              (query.hasCurrentToken || (query.draft.isEmpty && session.canSuggestNextCommand)),
+              query.mode == .blocks,
+              query.visibilityState == .selected,
+              query.hasCurrentToken,
               suggestionsQuery == query,
               dismissedQuery != query else { return [] }
         return autocompleteSuggestions
@@ -172,6 +178,7 @@ struct CommandComposerView: View {
             .task(id: contextRefreshID) {
                 await refreshComposerContextWhileVisible()
             }
+            .onDisappear { invalidateAutocomplete() }
     }
 
     private var composerContent: some View {
@@ -397,7 +404,7 @@ struct CommandComposerView: View {
                 && session.focusTarget == .composer,
             focusGeneration: session.focusGeneration,
             shouldRouteTerminalControlKeys: session.isCommandActive,
-            onSubmit: { session.submitDraft() },
+            onSubmit: { submitDraft() },
             onInterrupt: { session.sendInterrupt() },
             onEndOfFile: { session.sendEndOfFile() },
             onHistoryPrevious: historyPreviousAction,
@@ -411,7 +418,7 @@ struct CommandComposerView: View {
     private var submitButton: some View {
         Button {
             guard !session.isSecureInputActive else { return }
-            session.submitDraft()
+            submitDraft()
         } label: {
             Image(systemName: presentedCommandBlock != nil ? "return" : "arrow.up")
                 .font(.system(size: 12, weight: .semibold))
@@ -478,31 +485,36 @@ struct CommandComposerView: View {
 
     @MainActor
     private func refreshAutocomplete(for query: AutocompleteQuery) async {
+        clearAutocompletePresentation()
+
         guard !session.isSecureInputActive,
               !query.isCommandActive,
-              (query.hasCurrentToken || (query.draft.isEmpty && session.canSuggestNextCommand)),
+              query.mode == .blocks,
+              query.visibilityState == .selected,
+              query.hasCurrentToken,
               dismissedQuery != query else {
-            if suggestionsQuery != nil || !autocompleteSuggestions.isEmpty {
-                suggestionsQuery = nil
-                autocompleteSuggestions = []
-                autocompleteSelection.reset()
-            }
+            autocompleteRequestGate.invalidate()
             return
         }
+        guard let request = autocompleteRequestGate.begin(
+            input: query.draft,
+            sessionID: session.sessionID,
+            tabID: session.tabID
+        ) else { return }
 
         do {
             try await Task.sleep(for: PanePerformanceThresholds.autocompleteDebounce)
         } catch {
             return
         }
-        guard !Task.isCancelled, autocompleteQuery == query else { return }
+        guard !Task.isCancelled, requestIsCurrent(request) else { return }
 
         let updates = await session.autocompleteSuggestions(
             for: query.draft,
             cursorUTF16Offset: query.caretUTF16Offset
         )
         for await suggestions in updates {
-            guard !Task.isCancelled, autocompleteQuery == query else { return }
+            guard !Task.isCancelled, requestIsCurrent(request) else { return }
             if suggestionsQuery != query {
                 suggestionsQuery = query
                 autocompleteSelection.reset()
@@ -536,6 +548,7 @@ struct CommandComposerView: View {
             }
             autocompleteSuggestions = []
             suggestionsQuery = nil
+            autocompleteRequestGate.invalidate()
             let query = autocompleteQuery
             return .accept(session.autocompleteEdit(
                 for: suggestion,
@@ -552,11 +565,14 @@ struct CommandComposerView: View {
         let query = AutocompleteQuery(
             draft: draft,
             caretUTF16Offset: cursorUTF16Offset,
-            isCommandActive: session.isCommandActive
+            isCommandActive: session.isCommandActive,
+            isSecureInputActive: session.isSecureInputActive,
+            mode: session.mode,
+            visibilityState: session.visibilityState
         )
         guard !session.isSecureInputActive,
               !query.isCommandActive,
-              (query.hasCurrentToken || (query.draft.isEmpty && session.canSuggestNextCommand)),
+              query.hasCurrentToken,
               suggestionsQuery == query,
               dismissedQuery != query,
               let suggestion = autocompleteSelection.selected(
@@ -573,6 +589,7 @@ struct CommandComposerView: View {
         autocompleteSelection.reset()
         autocompleteSuggestions = []
         suggestionsQuery = nil
+        autocompleteRequestGate.invalidate()
 
         return session.autocompleteEdit(
             for: suggestion,
@@ -633,6 +650,40 @@ struct CommandComposerView: View {
         autocompleteSelection.reset()
         autocompleteSuggestions = []
         suggestionsQuery = nil
+        autocompleteRequestGate.invalidate()
+    }
+
+    @MainActor
+    private func requestIsCurrent(_ request: AutocompleteRequestContext) -> Bool {
+        !session.isSecureInputActive
+            && !session.isCommandActive
+            && session.mode == .blocks
+            && session.visibilityState == .selected
+            && autocompleteRequestGate.permits(
+                request,
+                currentInput: session.commandDraft,
+                sessionID: session.sessionID,
+                tabID: session.tabID
+            )
+    }
+
+    @MainActor
+    private func clearAutocompletePresentation() {
+        suggestionsQuery = nil
+        autocompleteSuggestions = []
+        autocompleteSelection.reset()
+    }
+
+    @MainActor
+    private func invalidateAutocomplete() {
+        autocompleteRequestGate.invalidate()
+        clearAutocompletePresentation()
+    }
+
+    @MainActor
+    private func submitDraft() {
+        invalidateAutocomplete()
+        session.submitDraft()
     }
 }
 
@@ -663,6 +714,9 @@ private struct AutocompleteQuery: Equatable {
     let draft: String
     let caretUTF16Offset: Int
     let isCommandActive: Bool
+    let isSecureInputActive: Bool
+    let mode: InputMode
+    let visibilityState: SessionVisibilityState
 
     var hasCurrentToken: Bool {
         guard !draft.isEmpty else { return false }

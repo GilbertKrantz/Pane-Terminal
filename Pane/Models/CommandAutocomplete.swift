@@ -1,5 +1,61 @@
 import Foundation
 
+struct AutocompleteRequestContext: Equatable, Sendable {
+    let sessionID: UUID
+    let tabID: UUID
+    let generation: UInt64
+    let query: String
+}
+
+/// Main-actor request identity for composer autocomplete. Cancellation is an
+/// optimization; this gate is the authority that prevents a late provider
+/// result from being presented after its input or owner changed.
+@MainActor
+struct AutocompleteRequestGate {
+    private(set) var generation: UInt64 = 0
+    private(set) var context: AutocompleteRequestContext?
+
+    static func normalize(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    mutating func begin(
+        input: String,
+        sessionID: UUID,
+        tabID: UUID
+    ) -> AutocompleteRequestContext? {
+        invalidate()
+        let query = Self.normalize(input)
+        guard !query.isEmpty else { return nil }
+        let context = AutocompleteRequestContext(
+            sessionID: sessionID,
+            tabID: tabID,
+            generation: generation,
+            query: query
+        )
+        self.context = context
+        return context
+    }
+
+    mutating func invalidate() {
+        generation &+= 1
+        context = nil
+    }
+
+    func permits(
+        _ request: AutocompleteRequestContext,
+        currentInput: String,
+        sessionID: UUID,
+        tabID: UUID
+    ) -> Bool {
+        context == request
+            && generation == request.generation
+            && sessionID == request.sessionID
+            && tabID == request.tabID
+            && Self.normalize(currentInput) == request.query
+    }
+}
+
 struct ZshCompletionCandidate: Equatable, Sendable {
     let replacementText: String
     let detail: String?
