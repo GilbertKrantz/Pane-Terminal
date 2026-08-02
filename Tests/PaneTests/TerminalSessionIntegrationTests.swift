@@ -180,11 +180,19 @@ final class TerminalSessionIntegrationTests: XCTestCase {
             return self.findTextView(in: hostingView) != nil && session.isShellRunning
         }
 
-        let command = "caffeinate"
+        // The shell's preexec marker arrives before the child has necessarily
+        // taken the foreground process group. Emit a marker from the child
+        // itself so Control-C is sent only after it can reach caffeinate.
+        let readinessMarker = "__pane_control_c_ready__"
+        let command = "sh -c 'printf \"\(readinessMarker)\\n\"; exec caffeinate'"
         session.submit(command: command)
-        try await waitUntil("caffeinate to become active", timeout: 5) {
-            guard let block = session.activeCommandBlock else { return false }
-            return block.command == command && block.state == .running
+        try await waitUntil("caffeinate child to become active", timeout: 5) {
+            guard let block = session.activeCommandBlock,
+                  let terminalView = session.terminalView else { return false }
+            return block.command == command
+                && block.state == .running
+                && self.bufferText(in: terminalView, kind: .active)
+                    .contains(readinessMarker)
         }
 
         session.commandDraft = "draft must remain"

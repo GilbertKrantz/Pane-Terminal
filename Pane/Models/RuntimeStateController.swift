@@ -67,6 +67,16 @@ actor RuntimeStateController {
         self.persistenceCoordinator = persistenceCoordinator
     }
 
+    /// Releases the durable SQLite handle when a controller is used outside
+    /// Pane's shared application coordinator, such as isolated test or tool
+    /// runs. The application continues to shut its shared coordinator down
+    /// once after every workspace session has finalized.
+    func shutdown() async {
+        await persistenceCoordinator.shutdown()
+        currentSession = nil
+        previousBehavioralCommand = nil
+    }
+
     func startSession(_ session: RuntimeSession, restoreLimit: Int = 200) async -> RuntimeStateOperationResult {
         previousBehavioralCommand = nil
         currentSession = storageSafeSession(session)

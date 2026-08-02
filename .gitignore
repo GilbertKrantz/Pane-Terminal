@@ -2,6 +2,7 @@
 .build/
 DerivedData/
 Build/
+Artifacts/
 *.xcuserstate
 xcuserdata/
 .swiftpm/

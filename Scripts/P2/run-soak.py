@@ -386,10 +386,16 @@ class AppDriver:
         executable: pathlib.Path,
         state_path: pathlib.Path,
         diagnostics_directory: pathlib.Path,
+        artifact: pathlib.Path,
+        duration_seconds: int,
+        interval_seconds: int,
     ) -> None:
         self.executable = executable
         self.state_path = state_path
         self.diagnostics_directory = diagnostics_directory
+        self.artifact = artifact
+        self.duration_seconds = duration_seconds
+        self.interval_seconds = interval_seconds
 
     def _base(self, command: str) -> list[str]:
         return [
@@ -399,6 +405,8 @@ class AppDriver:
             str(self.state_path),
             "--diagnostics-dir",
             str(self.diagnostics_directory),
+            "--artifact",
+            str(self.artifact),
         ]
 
     def start(self) -> None:
@@ -413,8 +421,12 @@ class AppDriver:
                 "2",
                 "--idle-tabs",
                 "2",
+                "--duration-seconds",
+                str(self.duration_seconds),
+                "--interval-seconds",
+                str(self.interval_seconds),
             ],
-            20.0,
+            120.0,
         )
 
     def exercise(self, iteration: int) -> list[str]:
@@ -604,6 +616,9 @@ def main() -> int:
             driver_path,
             diagnostics_directory / "driver-state.json",
             diagnostics_directory,
+            artifact,
+            duration_seconds,
+            arguments.interval_seconds,
         )
     else:
         if arguments.require_app_driver:
@@ -634,11 +649,12 @@ def main() -> int:
     failure_stage: str | None = None
     cleanup_error: Exception | None = None
     sample_count = 0
-    started_monotonic = time.monotonic()
+    started_monotonic = 0.0
 
     try:
         failure_stage = "startup"
         driver.start()
+        started_monotonic = time.monotonic()
         deadline = started_monotonic + duration_seconds
         iteration = 0
         while time.monotonic() < deadline and not STOP_REQUESTED.is_set():

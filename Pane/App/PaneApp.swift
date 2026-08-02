@@ -114,7 +114,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         // compiled icon that ships in the bundle so Dock, App Expose, and
         // window previews never fall back to the generic application tile.
         guard
-            let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+            let iconURL = Bundle.main.url(forResource: "AppIcons", withExtension: "icns"),
             let icon = NSImage(contentsOf: iconURL)
         else { return }
 

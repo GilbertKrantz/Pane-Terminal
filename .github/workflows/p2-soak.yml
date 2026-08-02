@@ -28,14 +28,13 @@ jobs:
     timeout-minutes: 540
     env:
       DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
-      PANE_SOAK_DRIVER: ${{ vars.PANE_SOAK_DRIVER_PATH }}
+      PANE_SOAK_DRIVER: ${{ github.workspace }}/Scripts/P2/pane-soak-driver.py
     steps:
       - uses: actions/checkout@v5
 
       - name: Verify reference runner and app driver
         run: |
           test -d "$DEVELOPER_DIR"
-          test -n "$PANE_SOAK_DRIVER"
           test -x "$PANE_SOAK_DRIVER"
           xcodebuild -version
           Scripts/P2/check-integrity.sh

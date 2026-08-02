@@ -123,6 +123,8 @@ final class RuntimeStateStoreTests: XCTestCase {
 
         XCTAssertNil(restored.diagnostic)
         XCTAssertEqual(restored.restoredContext?.commandEvents.map(\.command), ["swift test"])
+        await firstController.shutdown()
+        await secondController.shutdown()
     }
 
     func testControllerDisabledPersistenceUsesMemoryWithoutCreatingDatabase() async throws {
@@ -206,6 +208,8 @@ final class RuntimeStateStoreTests: XCTestCase {
         XCTAssertEqual(context.commandEvents.first?.workingDirectory, "")
         XCTAssertNil(context.commandEvents.first?.sanitizedOutputSummary)
         XCTAssertNil(context.commandEvents.first?.sanitizedErrorSummary)
+        await store.close()
+        await controller.shutdown()
     }
 
     func testSQLiteStoreSurvivesRecreationAndSanitizesAtStorageBoundary() async throws {
@@ -531,11 +535,13 @@ final class RuntimeStateStoreTests: XCTestCase {
                     filePathCollectionEnabled: true
                 )
             )
-            return await controller.startSession(RuntimeSession(
+            let result = await controller.startSession(RuntimeSession(
                 id: UUID(), workspaceID: nil, repositoryID: nil,
                 shell: "/bin/zsh", initialWorkingDirectory: "/tmp",
                 startedAt: Date(), lastActiveAt: Date()
             ))
+            await controller.shutdown()
+            return result
         }
 
         let historyOnly = await result(commandHistory: true, visibleRecovery: false)
@@ -547,6 +553,7 @@ final class RuntimeStateStoreTests: XCTestCase {
         XCTAssertFalse(recoveryOnly.restoresCommandHistory)
         XCTAssertTrue(recoveryOnly.restoresVisibleBlocks)
         XCTAssertEqual(recoveryOnly.restoredContext?.commandEvents.map(\.command), ["pwd"])
+        await store.close()
     }
 
     func testPartiallyMigratedVersionThreeDatabaseFinishesSchemaFiveMigration() async throws {
@@ -633,6 +640,7 @@ final class RuntimeStateStoreTests: XCTestCase {
                 atPath: recoveryFile.path + "-shm"
             ))
         }
+        await controller.shutdown()
     }
 
     private func temporaryDirectory(named name: String) -> URL {
@@ -880,18 +888,20 @@ extension RuntimeStateStoreTests {
             shell: "/bin/zsh", initialWorkingDirectory: "/tmp/a",
             startedAt: Date(), lastActiveAt: Date()
         )
-        let scoped = await RuntimeStateController(
+        let scopedController = RuntimeStateController(
             databaseURL: databaseURL,
             configuration: baseConfiguration
-        ).startSession(currentA)
+        )
+        let scoped = await scopedController.startSession(currentA)
         XCTAssertEqual(scoped.restoredContext?.commandEvents.map(\.command), ["echo a"])
 
         var globalConfiguration = baseConfiguration
         globalConfiguration.restoreAcrossWorkspacesEnabled = true
-        let global = await RuntimeStateController(
+        let globalController = RuntimeStateController(
             databaseURL: databaseURL,
             configuration: globalConfiguration
-        ).startSession(RuntimeSession(
+        )
+        let global = await globalController.startSession(RuntimeSession(
             id: UUID(), workspaceID: "workspace-c", repositoryID: "repo-c",
             shell: "/bin/zsh", initialWorkingDirectory: "/tmp/c",
             startedAt: Date(), lastActiveAt: Date()
@@ -900,16 +910,21 @@ extension RuntimeStateStoreTests {
 
         var noPathConfiguration = baseConfiguration
         noPathConfiguration.filePathCollectionEnabled = false
-        let noPathRestore = await RuntimeStateController(
+        let noPathController = RuntimeStateController(
             databaseURL: databaseURL,
             configuration: noPathConfiguration
-        ).startSession(RuntimeSession(
+        )
+        let noPathRestore = await noPathController.startSession(RuntimeSession(
             id: UUID(), workspaceID: "workspace-a", repositoryID: "repo-a",
             shell: "/bin/zsh", initialWorkingDirectory: "/tmp/a",
             startedAt: Date(), lastActiveAt: Date()
         ))
         XCTAssertTrue(noPathRestore.restoredContext?.commandEvents.isEmpty == true)
         XCTAssertTrue(noPathRestore.restoredContext?.sessions.isEmpty == true)
+        await scopedController.shutdown()
+        await globalController.shutdown()
+        await noPathController.shutdown()
+        await store.close()
     }
 
     func testSQLiteSessionAndWorkspaceDeletionCascadeCommandEvents() async throws {

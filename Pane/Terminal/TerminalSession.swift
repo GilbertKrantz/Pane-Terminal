@@ -117,6 +117,7 @@ final class TerminalSession: NSObject, ObservableObject {
     @Published var isRestartInProgress = false
     @Published var isShuttingDown = false
     @Published var shellReadiness: ShellReadiness = .starting
+    private var isShellStartScheduled = false
     @Published var composerContextGeneration: UInt64 = 0
     @Published var visibilityState: SessionVisibilityState = .selected {
         didSet {
@@ -467,8 +468,24 @@ final class TerminalSession: NSObject, ObservableObject {
         }
         updateWindowSize(from: terminalView)
 
-        if !ptyController.isRunning, !isShuttingDown {
-            startShell()
+        scheduleShellStartIfNeeded()
+    }
+
+    /// Attaching happens while SwiftUI is creating or updating an AppKit
+    /// representable. Starting zsh changes published session state, so defer
+    /// that work until the current view transaction has completed.
+    private func scheduleShellStartIfNeeded() {
+        guard !ptyController.isRunning,
+              !isShuttingDown,
+              !isShellStartScheduled else { return }
+        isShellStartScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isShellStartScheduled = false
+            guard self.terminalView != nil,
+                  !self.ptyController.isRunning,
+                  !self.isShuttingDown else { return }
+            self.startShell()
         }
     }
 

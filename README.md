@@ -11,6 +11,8 @@ Pane takes inspiration from modern terminal projects like [Warp](https://github.
 Unlike terminals that run every command as an isolated subprocess, Pane keeps one long-running `/bin/zsh -l -i` session inside a real pseudoterminal. Your `cd`, aliases, exports, functions, virtual environments, prompt setup, Oh My Zsh configuration, and shell history all stay alive for the session.
 
 See [DESIGN.md](DESIGN.md) for the implemented visual hierarchy, color system, spacing, and rendering boundaries.
+For the current no-cost direct-download package and its Gatekeeper limitations,
+see [the unsigned beta guide](docs/unsigned-beta.md).
 
 ## Why Pane?
 

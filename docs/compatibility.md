@@ -45,6 +45,13 @@ The validator rejects Pass cells without a dated source and fails when this gene
 
 Every integration runner has startup, readiness, action, cleanup, and total deadlines. A failure records its fixture mode and stage, drains stdout/stderr concurrently, and performs bounded SIGTERM/SIGKILL cleanup. There are no unconditional retries.
 
+## Unsigned beta support labels
+
+The unsigned beta supports only rows with dated Pane evidence. Docker, tmux,
+fzf, Neovim, OpenCode, Codex, htop, and btop remain **Unverified** until a
+manual Pane run is recorded; fixture-only output must never upgrade them to
+Pass.
+
 ## Manual P2 release validation
 
 Use the full [P2 release-validation checklist](p2-release-validation.md) as the

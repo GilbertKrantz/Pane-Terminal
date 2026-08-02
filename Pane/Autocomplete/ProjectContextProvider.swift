@@ -44,6 +44,23 @@ final class BoundedProcessOutput: @unchecked Sendable {
     }
 }
 
+private final class ProcessOutputDrainState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didFinish = false
+
+    func markFinished() {
+        lock.lock()
+        didFinish = true
+        lock.unlock()
+    }
+
+    var isFinished: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return didFinish
+    }
+}
+
 enum ProjectKind: String, Sendable { case git, node, swift, xcode, python, rust, go, make, just, mixed }
 enum ProjectLanguage: String, Hashable, Sendable { case swift, javaScript, python, rust, go }
 
@@ -351,11 +368,22 @@ struct ProjectContextProvider: Sendable {
         let pipe = Pipe()
         let readHandle = pipe.fileHandleForReading
         let writeHandle = pipe.fileHandleForWriting
-#if DEBUG
-        let lifecycleDebugID = UUID()
-        print("Pane lifecycle git-pipe[\(lifecycleDebugID.uuidString)] opened")
-#endif
         let output = BoundedProcessOutput(maximumBytes: 1_048_576)
+        let drainState = ProcessOutputDrainState()
+        DispatchQueue.global(qos: .utility).async {
+            defer { drainState.markFinished() }
+            while true {
+                do {
+                    guard let chunk = try readHandle.read(upToCount: 16_384),
+                          !chunk.isEmpty else {
+                        return
+                    }
+                    output.append(chunk)
+                } catch {
+                    return
+                }
+            }
+        }
         process.executableURL = gitExecutableURL
         process.arguments = gitArgumentPrefix + arguments
         process.currentDirectoryURL = directory
@@ -366,21 +394,33 @@ struct ProjectContextProvider: Sendable {
         environment["GIT_CONFIG_NOSYSTEM"] = "1"
         environment["GIT_OPTIONAL_LOCKS"] = "0"
         process.environment = environment
-        readHandle.readabilityHandler = { handle in
-            output.drainAvailableData(from: handle)
-        }
-        defer {
-            readHandle.readabilityHandler = nil
+        func finishDraining() async {
+            let clock = ContinuousClock()
+            let deadline = clock.now.advanced(by: .milliseconds(250))
+            while !drainState.isFinished,
+                  clock.now < deadline {
+                try? await Task.sleep(for: .milliseconds(5))
+            }
+
+            // A descendant holding stdout open must never retain the pipe or
+            // its background reader after the bounded process lifetime.
+            if !drainState.isFinished {
+                try? readHandle.close()
+                let forcedDeadline = clock.now.advanced(by: .milliseconds(50))
+                while !drainState.isFinished,
+                      clock.now < forcedDeadline {
+                    try? await Task.sleep(for: .milliseconds(5))
+                }
+            }
             try? readHandle.close()
-            try? writeHandle.close()
-#if DEBUG
-            print("Pane lifecycle git-pipe[\(lifecycleDebugID.uuidString)] closed")
-#endif
         }
 
         do {
             try process.run()
         } catch {
+            try? writeHandle.close()
+            try? readHandle.close()
+            await finishDraining()
             return nil
         }
         // Process has duplicated the descriptor. Keeping the parent's writer
@@ -406,10 +446,13 @@ struct ProjectContextProvider: Sendable {
                 try? await Task.sleep(for: .milliseconds(5))
             }
         }
-        guard !process.isRunning else { return nil }
-        readHandle.readabilityHandler = nil
-        output.append(readHandle.readDataToEndOfFile())
-        guard !Task.isCancelled, process.terminationStatus == 0 else { return nil }
+        let didExit = !process.isRunning
+        try? writeHandle.close()
+        await finishDraining()
+        guard didExit,
+              drainState.isFinished,
+              !Task.isCancelled,
+              process.terminationStatus == 0 else { return nil }
         return output.string()
     }
 }

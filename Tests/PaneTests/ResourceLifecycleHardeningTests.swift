@@ -27,19 +27,23 @@ final class ResourceLifecycleHardeningTests: XCTestCase {
         let root = try makeTemporaryGitRoot()
         try initializeGitRepository(at: root)
         let provider = ProjectContextProvider()
+        let warmContext = await provider.gitContext(root: root)
+        XCTAssertNotNil(warmContext, "Git warm-up failed")
+        try await Task.sleep(for: .milliseconds(25))
         let warmMetrics = PaneProcessMetrics.snapshot()
         let warmChildProcesses = childProcessCount()
 
-        for iteration in 0..<100 {
-            let context = await provider.gitContext(root: root)
-            XCTAssertNotNil(context, "Git refresh \(iteration) failed")
-            XCTAssertEqual(context?.remoteNames, [])
+        for burst in 0..<4 {
+            for iteration in 0..<25 {
+                let context = await provider.gitContext(root: root)
+                XCTAssertNotNil(context, "Git refresh \(burst):\(iteration) failed")
+                XCTAssertEqual(context?.remoteNames, [])
+            }
+            await assertProcessResourcesConverge(
+                descriptors: warmMetrics.fileDescriptorCount,
+                children: warmChildProcesses
+            )
         }
-
-        await assertProcessResourcesConverge(
-            descriptors: warmMetrics.fileDescriptorCount,
-            children: warmChildProcesses
-        )
 #endif
     }
 
