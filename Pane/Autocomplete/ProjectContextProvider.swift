@@ -61,6 +61,23 @@ private final class ProcessOutputDrainState: @unchecked Sendable {
     }
 }
 
+private final class ProcessTerminationState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didTerminate = false
+
+    func markTerminated() {
+        lock.lock()
+        didTerminate = true
+        lock.unlock()
+    }
+
+    var isTerminated: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return didTerminate
+    }
+}
+
 enum ProjectKind: String, Sendable { case git, node, swift, xcode, python, rust, go, make, just, mixed }
 enum ProjectLanguage: String, Hashable, Sendable { case swift, javaScript, python, rust, go }
 
@@ -370,6 +387,7 @@ struct ProjectContextProvider: Sendable {
         let writeHandle = pipe.fileHandleForWriting
         let output = BoundedProcessOutput(maximumBytes: 1_048_576)
         let drainState = ProcessOutputDrainState()
+        let terminationState = ProcessTerminationState()
         DispatchQueue.global(qos: .utility).async {
             defer { drainState.markFinished() }
             while true {
@@ -389,6 +407,9 @@ struct ProjectContextProvider: Sendable {
         process.currentDirectoryURL = directory
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
+        process.terminationHandler = { _ in
+            terminationState.markTerminated()
+        }
         var environment = ProcessInfo.processInfo.environment
         environment["GIT_TERMINAL_PROMPT"] = "0"
         environment["GIT_CONFIG_NOSYSTEM"] = "1"
@@ -446,7 +467,16 @@ struct ProjectContextProvider: Sendable {
                 try? await Task.sleep(for: .milliseconds(5))
             }
         }
-        let didExit = !process.isRunning
+        // `Process.isRunning` becomes false when the child exits, but its
+        // reaping callback can arrive later. Retain the Process and wait for
+        // that callback before returning so repeated cancellation cannot leave
+        // a short-lived zombie owned by the app.
+        let reapDeadline = clock.now.advanced(by: .milliseconds(250))
+        while !terminationState.isTerminated,
+              clock.now < reapDeadline {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        let didExit = !process.isRunning && terminationState.isTerminated
         try? writeHandle.close()
         await finishDraining()
         guard didExit,

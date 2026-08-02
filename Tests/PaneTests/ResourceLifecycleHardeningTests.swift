@@ -72,8 +72,9 @@ final class ResourceLifecycleHardeningTests: XCTestCase {
         let root = try makeTemporaryGitRoot()
         let provider = slowGitProvider()
 
-        var warmMetrics = PaneProcessMetrics.snapshot()
-        var warmChildProcesses = childProcessCount()
+        var baseline = await settledProcessResources()
+        var warmMetrics = baseline.metrics
+        var warmChildProcesses = baseline.children
         let timeoutStartedAt = ContinuousClock.now
         let timedOutContext = await provider.gitContext(root: root)
         XCTAssertNil(timedOutContext)
@@ -86,8 +87,9 @@ final class ResourceLifecycleHardeningTests: XCTestCase {
             children: warmChildProcesses
         )
 
-        warmMetrics = PaneProcessMetrics.snapshot()
-        warmChildProcesses = childProcessCount()
+        baseline = await settledProcessResources()
+        warmMetrics = baseline.metrics
+        warmChildProcesses = baseline.children
         let cancellationStartedAt = ContinuousClock.now
         let task = Task { await provider.gitContext(root: root) }
         try await Task.sleep(for: .milliseconds(20))
@@ -170,6 +172,40 @@ final class ResourceLifecycleHardeningTests: XCTestCase {
             file: file,
             line: line
         )
+    }
+
+    /// The native test host creates Pane's initial SwiftUI scenes asynchronously.
+    /// Capture a baseline only after those unrelated shell launches have been
+    /// quiet for a short window, then require the Git operation to return to it.
+    private func settledProcessResources() async -> (
+        metrics: PaneProcessMetricsSnapshot,
+        children: Int
+    ) {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(2))
+        var latest = (
+            metrics: PaneProcessMetrics.snapshot(),
+            children: childProcessCount()
+        )
+        var unchangedSince = clock.now
+
+        while clock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(25))
+            let current = (
+                metrics: PaneProcessMetrics.snapshot(),
+                children: childProcessCount()
+            )
+            if current.metrics.fileDescriptorCount == latest.metrics.fileDescriptorCount,
+               current.children == latest.children {
+                if unchangedSince.duration(to: clock.now) >= .milliseconds(250) {
+                    return current
+                }
+            } else {
+                unchangedSince = clock.now
+            }
+            latest = current
+        }
+        return latest
     }
 
     @MainActor

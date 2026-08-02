@@ -180,19 +180,29 @@ final class TerminalSessionIntegrationTests: XCTestCase {
             return self.findTextView(in: hostingView) != nil && session.isShellRunning
         }
 
-        // The shell's preexec marker arrives before the child has necessarily
-        // taken the foreground process group. Emit a marker from the child
-        // itself so Control-C is sent only after it can reach caffeinate.
-        let readinessMarker = "__pane_control_c_ready__"
-        let command = "sh -c 'printf \"\(readinessMarker)\\n\"; exec caffeinate'"
+        // A block becoming active is not enough: zsh can publish its preexec
+        // marker before the child owns the PTY foreground process group. The
+        // child itself confirms `tcgetpgrp(0) == getpgrp()` through a sidecar
+        // file, avoiding reads from SwiftTerm's concurrently-rendered buffer.
+        let readinessURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Pane-ControlC-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: readinessURL) }
+        let command = """
+        /usr/bin/perl -MPOSIX -e 'my $marker = "\(readinessURL.path)";
+        while (POSIX::tcgetpgrp(0) != POSIX::getpgrp()) {
+            select undef, undef, undef, 0.01;
+        }
+        open(my $file, ">", $marker) or die $!;
+        close($file);
+        exec "/usr/bin/caffeinate";'
+        """
         session.submit(command: command)
         try await waitUntil("caffeinate child to become active", timeout: 5) {
-            guard let block = session.activeCommandBlock,
-                  let terminalView = session.terminalView else { return false }
+            guard let block = session.activeCommandBlock else { return false }
             return block.command == command
                 && block.state == .running
-                && self.bufferText(in: terminalView, kind: .active)
-                    .contains(readinessMarker)
+                && FileManager.default.fileExists(atPath: readinessURL.path)
+                && self.findTextView(in: hostingView) != nil
         }
 
         session.commandDraft = "draft must remain"
@@ -212,11 +222,12 @@ final class TerminalSessionIntegrationTests: XCTestCase {
                 keyCode: 8
             )
         )
-        // Send through NSApplication, not directly to the text view, so the
-        // test covers the same key-equivalent/responder path as real typing.
-        NSApplication.shared.sendEvent(controlC)
+        // Route through this window's responder chain, not directly to the
+        // text view. Asking NSApplication to choose a key window is dependent
+        // on unrelated windows left by earlier UI tests.
+        window.sendEvent(controlC)
 
-        try await waitUntil("Control-C to interrupt caffeinate", timeout: 5) {
+        try await waitUntil("Control-C to interrupt foreground command", timeout: 5) {
             guard let block = session.blocks.first(where: { $0.command == command }) else {
                 return false
             }
