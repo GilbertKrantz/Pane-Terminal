@@ -114,23 +114,8 @@ struct BlocksView: View {
                 }
                 .onChange(of: lastFinalizedBlockID) { _, blockID in
                     guard blockID != nil else { return }
-                    scrollToTimelineBottom(using: proxy)
+                    restoreTimelineViewport(using: proxy)
                 }
-            }
-        }
-    }
-
-    private func scrollToTimelineBottom(using proxy: ScrollViewProxy) {
-        // The finalized AppKit output view receives its proposed width during
-        // the next layout pass. Scroll to the end marker, then pin it again on
-        // the following pass so newly wrapped output cannot leave the viewport
-        // slightly above the true bottom.
-        DispatchQueue.main.async {
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
-                proxy.scrollTo(TimelineAnchor.bottom, anchor: .bottom)
-            }
-            DispatchQueue.main.async {
-                proxy.scrollTo(TimelineAnchor.bottom, anchor: .bottom)
             }
         }
     }
