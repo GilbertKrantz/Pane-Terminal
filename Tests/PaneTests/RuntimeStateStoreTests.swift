@@ -8,19 +8,19 @@ final class RuntimeStateStoreTests: XCTestCase {
         let suiteName = "Pane.RuntimeStateSettingsTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        let settings = RuntimeStateSettings(defaults: defaults)
-        XCTAssertFalse(settings.outputSummariesEnabled)
+        let settings = PanePreferences(store: PanePreferencesStore(defaults: defaults))
+        XCTAssertFalse(settings.snapshot.history.outputSummariesEnabled)
 
-        settings.persistenceEnabled = false
-        settings.commandHistoryEnabled = false
-        settings.visibleSessionRecoveryEnabled = false
-        settings.predictionContextEnabled = false
-        settings.outputSummariesEnabled = false
-        settings.filePathCollectionEnabled = false
+        settings.update(\.history.persistenceEnabled, to: false, key: .historyConfiguration)
+        settings.update(\.history.commandHistoryEnabled, to: false, key: .historyConfiguration)
+        settings.update(\.history.visibleSessionRecoveryEnabled, to: false, key: .historyConfiguration)
+        settings.update(\.history.predictionContextEnabled, to: false, key: .historyConfiguration)
+        settings.update(\.history.outputSummariesEnabled, to: false, key: .historyConfiguration)
+        settings.update(\.history.filePathCollectionEnabled, to: false, key: .historyConfiguration)
 
-        let restored = RuntimeStateSettings(defaults: defaults)
+        let restored = PanePreferences(store: PanePreferencesStore(defaults: defaults))
         XCTAssertEqual(
-            restored.configuration,
+            restored.snapshot.history.runtimeConfiguration,
             RuntimeStateConfiguration(
                 persistenceEnabled: false,
                 commandHistoryEnabled: false,
@@ -42,16 +42,16 @@ final class RuntimeStateStoreTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suiteName) }
         defaults.set(false, forKey: "runtimeState.predictionHistoryEnabled")
 
-        let migrated = RuntimeStateSettings(defaults: defaults)
-        XCTAssertFalse(migrated.commandHistoryEnabled)
-        XCTAssertFalse(migrated.visibleSessionRecoveryEnabled)
-        XCTAssertFalse(migrated.predictionContextEnabled)
+        let migrated = PanePreferences(store: PanePreferencesStore(defaults: defaults))
+        XCTAssertFalse(migrated.snapshot.history.commandHistoryEnabled)
+        XCTAssertFalse(migrated.snapshot.history.visibleSessionRecoveryEnabled)
+        XCTAssertFalse(migrated.snapshot.history.predictionContextEnabled)
 
         defaults.set(true, forKey: "runtimeState.predictionHistoryEnabled")
-        let restored = RuntimeStateSettings(defaults: defaults)
-        XCTAssertFalse(restored.commandHistoryEnabled)
-        XCTAssertFalse(restored.visibleSessionRecoveryEnabled)
-        XCTAssertFalse(restored.predictionContextEnabled)
+        let restored = PanePreferences(store: PanePreferencesStore(defaults: defaults))
+        XCTAssertFalse(restored.snapshot.history.commandHistoryEnabled)
+        XCTAssertFalse(restored.snapshot.history.visibleSessionRecoveryEnabled)
+        XCTAssertFalse(restored.snapshot.history.predictionContextEnabled)
     }
 
     @MainActor
@@ -806,9 +806,9 @@ extension RuntimeStateStoreTests {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        let settings = RuntimeStateSettings(defaults: defaults)
-        XCTAssertFalse(settings.restoreAcrossWorkspacesEnabled)
-        XCTAssertFalse(settings.configuration.restoreAcrossWorkspacesEnabled)
+        let settings = PanePreferences(store: PanePreferencesStore(defaults: defaults))
+        XCTAssertFalse(settings.snapshot.history.restoreAcrossWorkspacesEnabled)
+        XCTAssertFalse(settings.snapshot.history.runtimeConfiguration.restoreAcrossWorkspacesEnabled)
     }
 
     func testInMemoryRestoreScopesWorkspacesUnlessGlobalRequested() async throws {

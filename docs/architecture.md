@@ -81,3 +81,18 @@ The current checkpoint has extracted autocomplete and lifecycle behavior into
 cross-file `TerminalSession` extensions. Stored state remains in the main class;
 the remaining block, focus, search, and diagnostics extractions are intentionally
 tracked separately so each can pass its subsystem tests before the next move.
+# Preference ownership and propagation
+
+`PaneApp` owns one `PanePreferences` instance and one `PaneLocalDataManager`.
+Preferences are encoded as a versioned `PanePreferencesSnapshot` under the
+single `pane.preferences.snapshot` defaults key. Views mutate preferences only
+through `PanePreferences`; sessions never write preference storage or subscribe
+to that observable object.
+
+Preference changes cross into terminal state through
+`TerminalWorkspaceController.applyPreferences(_:changedKeys:)`. The workspace
+uses stable keys to apply targeted runtime configuration to existing sessions
+and retains new-session-only values for later tab creation. Shell-affecting
+changes do not restart a PTY implicitly. Local-data deletion is deliberately
+owned by `PaneLocalDataManager`, keeping preference reset independent from
+history, workspace snapshots, and saved excerpts.

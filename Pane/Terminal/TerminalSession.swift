@@ -436,11 +436,32 @@ final class TerminalSession: NSObject, ObservableObject {
         terminalView.changeScrollback(
             ScrollbackPolicy.standard.terminalLineLimit
         )
-        terminalView.optionAsMetaKey = true
+        terminalView.optionAsMetaKey = false
         terminalView.allowMouseReporting = true
         terminalView.caretViewTracksFocus = visibilityState == .selected
         attach(terminalView: terminalView)
         return terminalView
+    }
+
+    func applyAppearancePreferences(_ preferences: AppearancePreferences) {
+        guard let terminalView = terminalView as? PaneTerminalView else { return }
+        let size = CGFloat(preferences.terminalFont.size)
+        if let name = preferences.terminalFont.postScriptName,
+           let font = NSFont(name: name, size: size) {
+            terminalView.font = font
+        } else {
+            terminalView.font = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        }
+    }
+
+    func applyKeyboardPreferences(_ preferences: TerminalPreferences) {
+        (terminalView as? PaneTerminalView)?.optionAsMetaKey = preferences.optionKeyBehaviour == .meta
+    }
+
+    func applyScrollbackPreference(_ preferences: TerminalPreferences) {
+        // SwiftTerm updates the existing buffer in place, so this does not
+        // rebuild the authoritative view or disturb its PTY/focus ownership.
+        (terminalView as? PaneTerminalView)?.changeScrollback(preferences.scrollbackLimit)
     }
 
     func makeAuthoritativeTerminalHostView() -> AuthoritativeTerminalHostView {

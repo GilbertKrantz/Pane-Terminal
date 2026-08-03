@@ -401,6 +401,7 @@ final class TerminalWorkspaceController: ObservableObject {
     private let snapshotURL: URL
     private let snapshotStore: WorkspaceSnapshotStore
     private let defaultShell: ShellConfiguration
+    private var preferenceSnapshot = PanePreferencesSnapshot.defaults
     private var selectionGeneration: UInt64 = 0
     private var closingTabs: [UUID: TerminalTab] = [:]
     private var persistTask: Task<Void, Never>?
@@ -445,10 +446,14 @@ final class TerminalWorkspaceController: ObservableObject {
         creationLimitReached = false
         lifecycleFaultCheckpointHandler?(.tabCreationStarted)
         let session = factory.makeSession(configuration: configuration)
+        session.applyRuntimeStateConfiguration(preferenceSnapshot.history.runtimeConfiguration)
         session.visibilityState = select ? .selected : .background
         // Starting is independent of mounting: background tabs must own a
         // live PTY and continue receiving output before they are first shown.
         session.ensureAuthoritativeTerminalIsRunning()
+        session.applyAppearancePreferences(preferenceSnapshot.appearance)
+        session.applyKeyboardPreferences(preferenceSnapshot.terminal)
+        session.applyScrollbackPreference(preferenceSnapshot.terminal)
         lifecycleFaultCheckpointHandler?(.tabCreationPTYStarted)
         let tab = TerminalTab(
             id: configuration.tabID,
@@ -471,13 +476,14 @@ final class TerminalWorkspaceController: ObservableObject {
     }
 
     @discardableResult
-    func createTab(directoryPolicy: NewTabDirectoryPolicy = .selectedTabDirectory, inBackground: Bool = false) async -> UUID? {
+    func createTab(directoryPolicy: NewTabDirectoryPolicy? = nil, inBackground: Bool = false) async -> UUID? {
         guard lifecycleState != .shuttingDown else { return nil }
         guard tabs.count < Self.maximumLiveTabs else { creationLimitReached = true; return nil }
-        let directory = resolvedDirectory(for: directoryPolicy)
+        let directory = resolvedDirectory(for: directoryPolicy ?? preferredNewTabDirectoryPolicy)
         let id = UUID()
         let config = TerminalSessionConfiguration(tabID: id, initialDirectory: directory,
-            shellConfiguration: defaultShell, restoredMode: nil, restoredDraft: nil, restoredTitle: nil)
+            shellConfiguration: configuredShell, restoredMode: preferenceSnapshot.general.defaultInputMode,
+            restoredDraft: nil, restoredTitle: nil)
         return await createTab(configuration: config, select: !inBackground)
     }
 
@@ -553,6 +559,27 @@ final class TerminalWorkspaceController: ObservableObject {
 
     func applyRuntimeStateConfiguration(_ configuration: RuntimeStateConfiguration) {
         tabs.forEach { $0.session.applyRuntimeStateConfiguration(configuration) }
+    }
+
+    /// Central propagation boundary: sessions consume targeted configuration,
+    /// never the mutable application preference owner.
+    func applyPreferences(_ snapshot: PanePreferencesSnapshot, changedKeys: Set<PanePreferenceKey>) {
+        preferenceSnapshot = snapshot
+        if changedKeys.contains(.historyConfiguration) {
+            applyRuntimeStateConfiguration(snapshot.history.runtimeConfiguration)
+        }
+        if !changedKeys.isDisjoint(with: [.appearanceMode, .terminalFont, .terminalFontSize]) {
+            tabs.forEach { $0.session.applyAppearancePreferences(snapshot.appearance) }
+        }
+        if changedKeys.contains(.optionKeyBehaviour) {
+            tabs.forEach { $0.session.applyKeyboardPreferences(snapshot.terminal) }
+        }
+        if changedKeys.contains(.scrollbackLimit) {
+            tabs.forEach { $0.session.applyScrollbackPreference(snapshot.terminal) }
+        }
+        // Presentation, keyboard, and completion propagation are deliberately
+        // routed here as their session configuration APIs evolve; shell values
+        // are only consumed by newly-created or explicitly restarted shells.
     }
 
     func restoreWorkspace() async {
@@ -719,6 +746,29 @@ final class TerminalWorkspaceController: ObservableObject {
         case .explicit(let url): proposed = url
         }
         return Self.nearestExistingDirectory(proposed.path)
+    }
+
+    private var preferredNewTabDirectoryPolicy: NewTabDirectoryPolicy {
+        switch preferenceSnapshot.general.newTabDirectoryPolicy {
+        case .selectedTabDirectory: return .selectedTabDirectory
+        case .homeDirectory: return .homeDirectory
+        case .customDirectory:
+            guard let path = preferenceSnapshot.general.customDefaultDirectoryPath else {
+                return .homeDirectory
+            }
+            return .explicit(URL(fileURLWithPath: path, isDirectory: true))
+        }
+    }
+
+    private var configuredShell: ShellConfiguration {
+        var shell = defaultShell
+        if preferenceSnapshot.terminal.shellSelection == .customExecutable,
+           let executable = preferenceSnapshot.terminal.customShellPath,
+           FileManager.default.isExecutableFile(atPath: executable) {
+            shell.executable = executable
+        }
+        shell.arguments = preferenceSnapshot.terminal.launchAsLoginShell ? ["-l", "-i"] : ["-i"]
+        return shell
     }
 
     static func nearestExistingDirectory(_ path: String) -> URL {

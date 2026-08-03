@@ -6,11 +6,12 @@ import UniformTypeIdentifiers
 struct PaneApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var workspace: TerminalWorkspaceController
-    @StateObject private var runtimeStateSettings: RuntimeStateSettings
+    @StateObject private var preferences: PanePreferences
+    @StateObject private var localDataManager: PaneLocalDataManager
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
-        let settings = RuntimeStateSettings()
+        let preferences = PanePreferences()
         let persistenceCoordinator = RuntimeStatePersistenceCoordinator(
             databaseURL: Self.runtimeStateDatabaseURL
         )
@@ -18,16 +19,25 @@ struct PaneApp: App {
             runtimeStateControllerProvider: {
                 RuntimeStateController(
                     persistenceCoordinator: persistenceCoordinator,
-                    configuration: settings.configuration
+                    configuration: preferences.snapshot.history.runtimeConfiguration
                 )
             },
-            commandHistoryEnabledProvider: { settings.commandHistoryEnabled }
+            commandHistoryEnabledProvider: { preferences.snapshot.history.commandHistoryEnabled }
         )
         let workspace = TerminalWorkspaceController(
             factory: factory,
             snapshotURL: Self.workspaceSnapshotURL
         )
-        _runtimeStateSettings = StateObject(wrappedValue: settings)
+        let dataManager = PaneLocalDataManager(
+            workspace: workspace,
+            applicationSupportURL: Self.runtimeStateDatabaseURL.deletingLastPathComponent()
+        )
+        preferences.onChange = { [weak workspace] snapshot, keys in
+            workspace?.applyPreferences(snapshot, changedKeys: keys)
+        }
+        workspace.applyPreferences(preferences.snapshot, changedKeys: [.historyConfiguration])
+        _preferences = StateObject(wrappedValue: preferences)
+        _localDataManager = StateObject(wrappedValue: dataManager)
         _workspace = StateObject(wrappedValue: workspace)
         AppDelegate.sharedWorkspace = workspace
         AppDelegate.sharedRuntimeStatePersistenceCoordinator = persistenceCoordinator
@@ -37,11 +47,13 @@ struct PaneApp: App {
         Window("Pane", id: "main") {
             TerminalWorkspaceView(workspace: workspace)
                 .frame(minWidth: 760, minHeight: 520)
+                .preferredColorScheme(preferredColorScheme)
         }
         .defaultSize(width: 1120, height: 720)
         .windowToolbarStyle(.unifiedCompact)
         .commands {
             TerminalCommands(workspace: workspace)
+            FontSizeCommands(preferences: preferences)
             CommandGroup(after: .help) {
                 Button("Pane Onboarding") {
                     NotificationCenter.default.post(name: .showPaneOnboarding, object: nil)
@@ -50,15 +62,16 @@ struct PaneApp: App {
         }
 
         Settings {
-            if let session = workspace.selectedTab?.session {
-                RuntimeStateSettingsView(
-                    settings: runtimeStateSettings,
-                    session: session,
-                    applyConfigurationToAllSessions: workspace.applyRuntimeStateConfiguration
-                )
-            } else {
-                Text("Terminal workspace is starting…").padding()
-            }
+            PaneSettingsView(preferences: preferences, dataManager: localDataManager)
+                .preferredColorScheme(preferredColorScheme)
+        }
+    }
+
+    private var preferredColorScheme: ColorScheme? {
+        switch preferences.snapshot.appearance.mode {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
         }
     }
 
@@ -75,6 +88,21 @@ struct PaneApp: App {
     private static var workspaceSnapshotURL: URL {
         runtimeStateDatabaseURL.deletingLastPathComponent().appendingPathComponent("workspace.json")
     }
+}
+
+private struct FontSizeCommands: Commands {
+    @ObservedObject var preferences: PanePreferences
+    var body: some Commands {
+        CommandGroup(after: .textEditing) {
+            Button("Increase Font Size") { set(preferences.snapshot.appearance.terminalFont.size + 1) }
+                .keyboardShortcut("+", modifiers: .command)
+            Button("Decrease Font Size") { set(preferences.snapshot.appearance.terminalFont.size - 1) }
+                .keyboardShortcut("-", modifiers: .command)
+            Button("Reset Font Size") { set(AppearancePreferences.defaults.terminalFont.size) }
+                .keyboardShortcut("0", modifiers: .command)
+        }
+    }
+    private func set(_ size: Double) { preferences.update(\.appearance.terminalFont.size, to: size, key: .terminalFontSize) }
 }
 
 @MainActor
