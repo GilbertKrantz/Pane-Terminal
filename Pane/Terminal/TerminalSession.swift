@@ -86,6 +86,7 @@ final class TerminalSession: NSObject, ObservableObject {
     @Published private(set) var terminalTitle = "Pane"
     @Published var currentDirectory: String?
     @Published private(set) var blockTimeline = CommandBlockTimeline()
+    @Published private(set) var blockTimelineGeneration: UInt64 = 0
     @Published private(set) var isAlternateScreenActive = false
     @Published private(set) var modeAttribution: InputModeAttribution = .manual
     @Published private(set) var inputRequirement: TerminalInputRequirement = .unknown
@@ -342,6 +343,7 @@ final class TerminalSession: NSObject, ObservableObject {
         blockLifecycleController.onTimelineChanged = { [weak self] timeline in
             guard let self else { return }
             self.blockTimeline = timeline
+            self.blockTimelineGeneration &+= 1
             self.rebuildBlockSearchIndex(with: timeline.blocks)
         }
         blockLifecycleController.onTimelinePruned = { [weak self] notice in

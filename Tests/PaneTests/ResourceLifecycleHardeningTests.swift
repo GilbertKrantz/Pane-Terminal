@@ -29,9 +29,7 @@ final class ResourceLifecycleHardeningTests: XCTestCase {
         let provider = ProjectContextProvider()
         let warmContext = await provider.gitContext(root: root)
         XCTAssertNotNil(warmContext, "Git warm-up failed")
-        try await Task.sleep(for: .milliseconds(25))
-        let warmMetrics = PaneProcessMetrics.snapshot()
-        let warmChildProcesses = childProcessCount()
+        let warmBaseline = await settledProcessResources()
 
         for burst in 0..<4 {
             for iteration in 0..<25 {
@@ -40,8 +38,8 @@ final class ResourceLifecycleHardeningTests: XCTestCase {
                 XCTAssertEqual(context?.remoteNames, [])
             }
             await assertProcessResourcesConverge(
-                descriptors: warmMetrics.fileDescriptorCount,
-                children: warmChildProcesses
+                descriptors: warmBaseline.metrics.fileDescriptorCount,
+                children: warmBaseline.children
             )
         }
 #endif

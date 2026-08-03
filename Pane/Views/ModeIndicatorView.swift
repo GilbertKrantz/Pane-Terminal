@@ -39,6 +39,7 @@ enum PaneMetrics {
     static let blockOuterInset: CGFloat = 12
     static let blockInnerInset: CGFloat = 16
     static let blockVerticalSpacing: CGFloat = 18
+    static let blockOutputMaxHeight: CGFloat = 320
     static let timelineRailWidth: CGFloat = 2
     static let systemEventHeight: CGFloat = 32
     static let composerOuterInset: CGFloat = 12

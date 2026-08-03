@@ -3,6 +3,7 @@ import SwiftUI
 struct BlocksView: View {
     @ObservedObject var session: TerminalSession
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var renderedFinalizedBlockCount = 0
 
     private enum TimelineAnchor: Hashable {
         case bottom
@@ -90,7 +91,18 @@ struct BlocksView: View {
                 .defaultScrollAnchor(.bottom)
                 .background(PaneTheme.contentSurface)
                 .onAppear {
-                    if session.consumeBlocksViewportRestoreRequest() {
+                    let shouldRestoreAfterTerminal = session.consumeBlocksViewportRestoreRequest()
+                    renderedFinalizedBlockCount = finalizedBlocks.count
+                    if shouldRestoreAfterTerminal || !finalizedBlocks.isEmpty {
+                        restoreTimelineViewport(using: proxy)
+                    }
+                }
+                .onChange(of: session.blockTimelineGeneration) { _, _ in
+                    let currentCount = finalizedBlocks.count
+                    let needsBulkViewportRecovery = currentCount < renderedFinalizedBlockCount
+                        || currentCount > renderedFinalizedBlockCount + 1
+                    renderedFinalizedBlockCount = currentCount
+                    if needsBulkViewportRecovery {
                         restoreTimelineViewport(using: proxy)
                     }
                 }

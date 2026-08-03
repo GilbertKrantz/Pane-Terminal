@@ -83,13 +83,16 @@ struct CommandBlockView: View {
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
-            CommandClickableTextView(
-                text: block.output,
-                font: .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular),
-                textColor: .labelColor
-            )
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, 2)
+            ScrollView(.vertical) {
+                CommandClickableTextView(
+                    text: block.output,
+                    font: .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular),
+                    textColor: .labelColor
+                )
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 2)
+            }
+            .frame(maxHeight: PaneMetrics.blockOutputMaxHeight)
             .help("Command-click links to open them")
         }
     }
