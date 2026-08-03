@@ -48,6 +48,18 @@ jobs:
           xcodebuild -version
           swift --version
 
+      - name: Configure fixture Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Export fixture Python path
+        run: |
+          fixture_python="$(python3 -c 'import sys; print(sys.executable)')"
+          test -x "$fixture_python"
+          printf 'PANE_FIXTURE_PYTHON=%s\n' "$fixture_python" >> "$GITHUB_ENV"
+          "$fixture_python" --version
+
       - name: Cache SwiftPM
         uses: actions/cache@v5
         with:
@@ -104,6 +116,18 @@ jobs:
         run: |
           test -d "$DEVELOPER_DIR"
           xcodebuild -version
+
+      - name: Configure fixture Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Export fixture Python path
+        run: |
+          fixture_python="$(python3 -c 'import sys; print(sys.executable)')"
+          test -x "$fixture_python"
+          printf 'PANE_FIXTURE_PYTHON=%s\n' "$fixture_python" >> "$GITHUB_ENV"
+          "$fixture_python" --version
 
       - name: Cache Xcode dependencies and build data
         uses: actions/cache@v5

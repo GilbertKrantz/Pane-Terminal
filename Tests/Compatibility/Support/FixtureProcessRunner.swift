@@ -55,13 +55,20 @@ final class FixtureProcessRunner {
 
     private let fixtureURL: URL
     private let timeouts: FixtureTimeouts
+    private let pythonExecutableURL: URL
+    private let environment: [String: String]
 
     init(
         fixtureURL: URL,
         timeouts: FixtureTimeouts = .standard
-    ) {
+    ) throws {
         self.fixtureURL = fixtureURL
         self.timeouts = timeouts
+        let inheritedEnvironment = ProcessInfo.processInfo.environment
+        pythonExecutableURL = try Self.resolvePythonExecutable(
+            environment: inheritedEnvironment
+        )
+        environment = Self.fixtureEnvironment(from: inheritedEnvironment)
     }
 
     func run(
@@ -79,8 +86,9 @@ final class FixtureProcessRunner {
         let output = LockedDataBuffer()
         let errors = LockedDataBuffer()
 
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.executableURL = pythonExecutableURL
         process.arguments = [fixtureURL.path, mode] + arguments
+        process.environment = environment
         process.standardOutput = outputPipe
         process.standardError = errorPipe
         process.standardInput = inputPipe
@@ -238,6 +246,53 @@ final class FixtureProcessRunner {
     private func stopReading(_ outputPipe: Pipe, _ errorPipe: Pipe) {
         outputPipe.fileHandleForReading.readabilityHandler = nil
         errorPipe.fileHandleForReading.readabilityHandler = nil
+    }
+
+    private static func resolvePythonExecutable(
+        environment: [String: String]
+    ) throws -> URL {
+        if let configuredPath = environment["PANE_FIXTURE_PYTHON"],
+           !configuredPath.isEmpty {
+            guard FileManager.default.isExecutableFile(atPath: configuredPath) else {
+                throw FixtureExecutionError(
+                    stage: .startup,
+                    mode: "fixture",
+                    diagnostic: "PANE_FIXTURE_PYTHON is not executable: \(configuredPath)"
+                )
+            }
+            return URL(fileURLWithPath: configuredPath)
+        }
+
+        let fallbackPaths = [
+            "/opt/homebrew/bin/python3",
+            "/usr/local/bin/python3",
+            "/usr/bin/python3",
+        ]
+        guard let path = fallbackPaths.first(where: {
+            FileManager.default.isExecutableFile(atPath: $0)
+        }) else {
+            throw FixtureExecutionError(
+                stage: .startup,
+                mode: "fixture",
+                diagnostic: "No executable Python 3 interpreter was found"
+            )
+        }
+        return URL(fileURLWithPath: path)
+    }
+
+    private static func fixtureEnvironment(
+        from inheritedEnvironment: [String: String]
+    ) -> [String: String] {
+        var environment = inheritedEnvironment
+        [
+            "DEVELOPER_DIR",
+            "SDKROOT",
+            "TOOLCHAINS",
+            "DYLD_FRAMEWORK_PATH",
+            "DYLD_LIBRARY_PATH",
+            "DYLD_FALLBACK_FRAMEWORK_PATH",
+        ].forEach { environment.removeValue(forKey: $0) }
+        return environment
     }
 }
 

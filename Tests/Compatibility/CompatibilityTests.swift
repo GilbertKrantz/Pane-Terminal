@@ -160,7 +160,7 @@ final class TerminalCompatibilityTests: XCTestCase {
     }
 
     private func makeRunner() throws -> FixtureProcessRunner {
-        FixtureProcessRunner(
+        try FixtureProcessRunner(
             fixtureURL: try FixtureLocator.paneFixture(
                 testCase: TerminalCompatibilityTests.self
             )
@@ -821,20 +821,25 @@ final class PaneConnectedCompatibilityTests: XCTestCase {
             "--interactive",
         ].joined(separator: " ")
         harness.session.submit(command: command)
-        try await harness.waitUntil("resize fixture direct input") {
+        try await harness.waitUntil("resize fixture readiness") {
             harness.session.inputRequirement == .direct
+                && harness.terminalContains("PANE_FIXTURE_READY")
         }
 
         harness.terminalView.setFrameSize(
             NSSize(width: 1_040, height: 560)
         )
-        harness.terminalView.terminal.resize(cols: 120, rows: 40)
+        let columns = harness.terminalView.terminal.cols == 120 ? 121 : 120
+        let rows = harness.terminalView.terminal.rows == 40 ? 41 : 40
+        harness.terminalView.terminal.resize(cols: columns, rows: rows)
         harness.session.sizeChanged(
             source: harness.terminalView,
             newCols: harness.terminalView.terminal.cols,
             newRows: harness.terminalView.terminal.rows
         )
-        try await Task.sleep(for: .milliseconds(100))
+        try await harness.waitUntil("resize fixture observation") {
+            harness.terminalContains("PANE_FIXTURE_OBSERVED resize=")
+        }
         let exit = Array("EXIT\n".utf8)
         harness.session.send(source: harness.terminalView, data: exit[...])
         let block = try await harness.waitForCompletedCommand(command)
@@ -970,6 +975,13 @@ private final class PaneSessionHarness {
             return result != nil
         }
         return try XCTUnwrap(result)
+    }
+
+    func terminalContains(_ marker: String) -> Bool {
+        String(
+            decoding: terminalView.terminal.getBufferAsData(kind: .active),
+            as: UTF8.self
+        ).contains(marker)
     }
 }
 

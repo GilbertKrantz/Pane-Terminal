@@ -48,6 +48,18 @@ jobs:
           swift --version
           Scripts/P2/check-integrity.sh
 
+      - name: Configure fixture Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Export fixture Python path
+        run: |
+          fixture_python="$(python3 -c 'import sys; print(sys.executable)')"
+          test -x "$fixture_python"
+          printf 'PANE_FIXTURE_PYTHON=%s\n' "$fixture_python" >> "$GITHUB_ENV"
+          "$fixture_python" --version
+
       - name: Cache SwiftPM and Xcode dependencies
         uses: actions/cache@v5
         with:
