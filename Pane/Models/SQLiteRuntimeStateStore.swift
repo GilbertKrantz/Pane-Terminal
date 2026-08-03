@@ -1,5 +1,60 @@
 import Foundation
 import SQLite3
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
+
+private final class SQLiteInitializationLock {
+    private let fileDescriptor: Int32
+    private var isLocked = true
+
+    init(databaseURL: URL) throws {
+        let lockURL = URL(fileURLWithPath: databaseURL.path + ".migration.lock")
+        let descriptor = lockURL.path.withCString { path in
+#if canImport(Darwin)
+            Darwin.open(path, O_CREAT | O_RDWR, mode_t(0o600))
+#else
+            Glibc.open(path, O_CREAT | O_RDWR, mode_t(0o600))
+#endif
+        }
+        guard descriptor >= 0 else {
+            throw RuntimeStateStoreError.databaseFailure(
+                operation: "open migration lock",
+                code: Int32(errno)
+            )
+        }
+        guard flock(descriptor, LOCK_EX) == 0 else {
+            let code = Int32(errno)
+#if canImport(Darwin)
+            Darwin.close(descriptor)
+#else
+            Glibc.close(descriptor)
+#endif
+            throw RuntimeStateStoreError.databaseFailure(
+                operation: "acquire migration lock",
+                code: code
+            )
+        }
+        fileDescriptor = descriptor
+    }
+
+    func unlock() {
+        guard isLocked else { return }
+        isLocked = false
+        _ = flock(fileDescriptor, LOCK_UN)
+#if canImport(Darwin)
+        Darwin.close(fileDescriptor)
+#else
+        Glibc.close(fileDescriptor)
+#endif
+    }
+
+    deinit {
+        unlock()
+    }
+}
 
 struct RuntimeStateRetentionPolicy: Sendable, Equatable {
     var maximumAge: TimeInterval
@@ -112,6 +167,8 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
             at: databaseURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
+        let initializationLock = try SQLiteInitializationLock(databaseURL: databaseURL)
+        defer { initializationLock.unlock() }
 
         var handle: OpaquePointer?
         guard sqlite3_open_v2(

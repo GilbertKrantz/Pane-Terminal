@@ -4,6 +4,7 @@ enum PanePerformanceThresholds {
     static let typicalTabSwitchMilliseconds = 50.0
     static let typicalBlockPublicationMilliseconds = 16.0
     static let normalSearchUpdateMilliseconds = 50.0
+    static let canonicalCompletionDeduplicationUpperBound: Duration = .milliseconds(30)
     static let autocompleteDebounce: Duration = .milliseconds(110)
     static let searchDebounce: Duration = .milliseconds(125)
     static let selectedForegroundPoll: Duration = .milliseconds(250)

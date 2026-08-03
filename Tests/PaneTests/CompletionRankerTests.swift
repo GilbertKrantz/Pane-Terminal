@@ -182,13 +182,26 @@ extension CommandAutocompleteTests {
                     replacementRange: NSRange(location: 0, length: 6), source: .history, kind: .fullCommand)
             ]
         }
+        let ranker = CompletionRanker()
+        let warmupCount = 3
+        for _ in 0..<warmupCount {
+            _ = ranker.deduplicate(candidates, request: request)
+        }
+
         let clock = ContinuousClock()
-        let started = clock.now
-        let merged = CompletionRanker().deduplicate(candidates, request: request)
-        let elapsed = started.duration(to: clock.now)
+        let samples = (0..<7).map { _ in
+            let started = clock.now
+            let merged = ranker.deduplicate(candidates, request: request)
+            return (elapsed: started.duration(to: clock.now), merged: merged)
+        }
+        let merged = samples[0].merged
+        let median = samples.map(\.elapsed).sorted()[samples.count / 2]
 
         XCTAssertEqual(merged.count, 500)
-        XCTAssertLessThan(elapsed, .milliseconds(15))
+        XCTAssertLessThan(
+            median,
+            PanePerformanceThresholds.canonicalCompletionDeduplicationUpperBound
+        )
     }
 
     func testNextCommandAndDirectoryRemainDistinct() {

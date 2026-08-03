@@ -78,6 +78,15 @@ private final class ProcessTerminationState: @unchecked Sendable {
     }
 }
 
+private enum GitProcessTiming {
+    static let normalTimeout: Duration = .milliseconds(750)
+    static let terminationGrace: Duration = .milliseconds(50)
+    static let killWait: Duration = .milliseconds(250)
+    static let reapWait: Duration = .milliseconds(250)
+    static let drainWait: Duration = .milliseconds(250)
+    static let forcedDrainGrace: Duration = .milliseconds(50)
+}
+
 enum ProjectKind: String, Sendable { case git, node, swift, xcode, python, rust, go, make, just, mixed }
 enum ProjectLanguage: String, Hashable, Sendable { case swift, javaScript, python, rust, go }
 
@@ -417,7 +426,7 @@ struct ProjectContextProvider: Sendable {
         process.environment = environment
         func finishDraining() async {
             let clock = ContinuousClock()
-            let deadline = clock.now.advanced(by: .milliseconds(250))
+            let deadline = clock.now.advanced(by: GitProcessTiming.drainWait)
             while !drainState.isFinished,
                   clock.now < deadline {
                 try? await Task.sleep(for: .milliseconds(5))
@@ -427,7 +436,7 @@ struct ProjectContextProvider: Sendable {
             // its background reader after the bounded process lifetime.
             if !drainState.isFinished {
                 try? readHandle.close()
-                let forcedDeadline = clock.now.advanced(by: .milliseconds(50))
+                let forcedDeadline = clock.now.advanced(by: GitProcessTiming.forcedDrainGrace)
                 while !drainState.isFinished,
                       clock.now < forcedDeadline {
                     try? await Task.sleep(for: .milliseconds(5))
@@ -449,20 +458,20 @@ struct ProjectContextProvider: Sendable {
         try? writeHandle.close()
 
         let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: .milliseconds(250))
+        let deadline = clock.now.advanced(by: GitProcessTiming.normalTimeout)
         while process.isRunning, clock.now < deadline, !Task.isCancelled {
             try? await Task.sleep(for: .milliseconds(10))
         }
         if process.isRunning {
             process.terminate()
-            let terminationDeadline = clock.now.advanced(by: .milliseconds(50))
+            let terminationDeadline = clock.now.advanced(by: GitProcessTiming.terminationGrace)
             while process.isRunning, clock.now < terminationDeadline {
                 try? await Task.sleep(for: .milliseconds(5))
             }
         }
         if process.isRunning {
             _ = kill(process.processIdentifier, SIGKILL)
-            let killDeadline = clock.now.advanced(by: .milliseconds(250))
+            let killDeadline = clock.now.advanced(by: GitProcessTiming.killWait)
             while process.isRunning, clock.now < killDeadline {
                 try? await Task.sleep(for: .milliseconds(5))
             }
@@ -471,7 +480,7 @@ struct ProjectContextProvider: Sendable {
         // reaping callback can arrive later. Retain the Process and wait for
         // that callback before returning so repeated cancellation cannot leave
         // a short-lived zombie owned by the app.
-        let reapDeadline = clock.now.advanced(by: .milliseconds(250))
+        let reapDeadline = clock.now.advanced(by: GitProcessTiming.reapWait)
         while !terminationState.isTerminated,
               clock.now < reapDeadline {
             try? await Task.sleep(for: .milliseconds(5))
