@@ -29,9 +29,6 @@
 		100000000000000000000014 /* ShellIntegration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000018 /* ShellIntegration.swift */; };
 		100000000000000000000015 /* BlocksView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000019 /* BlocksView.swift */; };
 		100000000000000000000016 /* CommandBlockView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001A /* CommandBlockView.swift */; };
-		10000000000000000000002F /* CommandClickableTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002F /* CommandClickableTextView.swift */; };
-		100000000000000000000030 /* CommandClickableTextViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000030 /* CommandClickableTextViewTests.swift */; };
-		100000000000000000000031 /* BlocksViewScrollTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000031 /* BlocksViewScrollTests.swift */; };
 		100000000000000000000017 /* BlockOutputSanitizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001B /* BlockOutputSanitizerTests.swift */; };
 		100000000000000000000018 /* BlockStreamParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001C /* BlockStreamParserTests.swift */; };
 		100000000000000000000019 /* CommandBlockTimelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001D /* CommandBlockTimelineTests.swift */; };
@@ -39,6 +36,23 @@
 		10000000000000000000001B /* AlternateScreenTranscriptFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001F /* AlternateScreenTranscriptFilterTests.swift */; };
 		10000000000000000000001D /* CommandAutocomplete.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000021 /* CommandAutocomplete.swift */; };
 		10000000000000000000001E /* CommandAutocompleteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000022 /* CommandAutocompleteTests.swift */; };
+		10000000000000000000001F /* WarmZshCompletionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000023 /* WarmZshCompletionClient.swift */; };
+		100000000000000000000024 /* TerminalSecurityState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000024 /* TerminalSecurityState.swift */; };
+		100000000000000000000025 /* SensitiveDataSanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000025 /* SensitiveDataSanitizer.swift */; };
+		100000000000000000000026 /* RuntimeState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000026 /* RuntimeState.swift */; };
+		100000000000000000000027 /* PredictionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000027 /* PredictionTypes.swift */; };
+		100000000000000000000028 /* InMemoryRuntimeStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000028 /* InMemoryRuntimeStateStore.swift */; };
+		100000000000000000000029 /* SensitiveDataSanitizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000029 /* SensitiveDataSanitizerTests.swift */; };
+		10000000000000000000002A /* RuntimeStateStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002A /* RuntimeStateStoreTests.swift */; };
+		10000000000000000000002B /* SQLiteRuntimeStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002B /* SQLiteRuntimeStateStore.swift */; };
+		10000000000000000000002C /* RuntimeStateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002C /* RuntimeStateController.swift */; };
+		10000000000000000000002D /* RuntimeStateSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002D /* RuntimeStateSettings.swift */; };
+		10000000000000000000002E /* RuntimeStateSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002E /* RuntimeStateSettingsView.swift */; };
+		10000000000000000000002F /* CommandClickableTextView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002F /* CommandClickableTextView.swift */; };
+		100000000000000000000030 /* CommandClickableTextViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000030 /* CommandClickableTextViewTests.swift */; };
+		100000000000000000000031 /* BlocksViewScrollTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000031 /* BlocksViewScrollTests.swift */; };
+		100000000000000000000032 /* TerminalReplaySanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000032 /* TerminalReplaySanitizer.swift */; };
+		100000000000000000000033 /* TerminalReplaySanitizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000033 /* TerminalReplaySanitizerTests.swift */; };
 		100000000000000000000034 /* AutocompleteRequestGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000034 /* AutocompleteRequestGateTests.swift */; };
 		A10000000000000000000001 /* CompletionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000001 /* CompletionService.swift */; };
 		A10000000000000000000002 /* LocalAutocompleteProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A200000000000000000000002 /* LocalAutocompleteProvider.swift */; };
@@ -62,26 +76,6 @@
 		B10000000000000000000007 /* BlockLifecycleControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000000000000007 /* BlockLifecycleControllerTests.swift */; };
 		B10000000000000000000008 /* TerminalSession+Autocomplete.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000000000000008 /* TerminalSession+Autocomplete.swift */; };
 		B10000000000000000000009 /* TerminalSession+Lifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = B200000000000000000000009 /* TerminalSession+Lifecycle.swift */; };
-		E10000000000000000000001 /* TerminalSessionHardeningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E200000000000000000000001 /* TerminalSessionHardeningTests.swift */; };
-		10000000000000000000001F /* WarmZshCompletionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000023 /* WarmZshCompletionClient.swift */; };
-		100000000000000000000024 /* TerminalSecurityState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000024 /* TerminalSecurityState.swift */; };
-		100000000000000000000032 /* TerminalReplaySanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000032 /* TerminalReplaySanitizer.swift */; };
-		100000000000000000000033 /* TerminalReplaySanitizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000033 /* TerminalReplaySanitizerTests.swift */; };
-		100000000000000000000025 /* SensitiveDataSanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000025 /* SensitiveDataSanitizer.swift */; };
-		100000000000000000000026 /* RuntimeState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000026 /* RuntimeState.swift */; };
-		100000000000000000000027 /* PredictionTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000027 /* PredictionTypes.swift */; };
-		100000000000000000000028 /* InMemoryRuntimeStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000028 /* InMemoryRuntimeStateStore.swift */; };
-		100000000000000000000029 /* SensitiveDataSanitizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000029 /* SensitiveDataSanitizerTests.swift */; };
-		10000000000000000000002A /* RuntimeStateStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002A /* RuntimeStateStoreTests.swift */; };
-		10000000000000000000002B /* SQLiteRuntimeStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002B /* SQLiteRuntimeStateStore.swift */; };
-		10000000000000000000002C /* RuntimeStateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002C /* RuntimeStateController.swift */; };
-		10000000000000000000002D /* RuntimeStateSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002D /* RuntimeStateSettings.swift */; };
-		10000000000000000000002E /* RuntimeStateSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000002E /* RuntimeStateSettingsView.swift */; };
-		C6E13DE4300FD1A2004ECCBE /* AppIcons.icon in Resources */ = {isa = PBXBuildFile; fileRef = C6E13DE3300FD1A2004ECCBE /* AppIcons.icon */; };
-		C6E13DE5300FD1A2004ECCBE /* AppIcons.icon in Resources */ = {isa = PBXBuildFile; fileRef = C6E13DE3300FD1A2004ECCBE /* AppIcons.icon */; };
-		F10000000000000000000001 /* TerminalWorkspaceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000001 /* TerminalWorkspaceController.swift */; };
-		F10000000000000000000002 /* TerminalWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000002 /* TerminalWorkspaceView.swift */; };
-		F10000000000000000000003 /* TerminalWorkspaceControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000003 /* TerminalWorkspaceControllerTests.swift */; };
 		C10000000000000000000001 /* CompatibilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001 /* CompatibilityTests.swift */; };
 		C10000000000000000000002 /* CompatibilityModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000002 /* CompatibilityModels.swift */; };
 		C10000000000000000000003 /* FixtureLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000003 /* FixtureLocator.swift */; };
@@ -97,6 +91,8 @@
 		C1000000000000000000000D /* PanePerformanceThresholds.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000E /* PanePerformanceThresholds.swift */; };
 		C1000000000000000000000F /* WorkspaceStressRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2000000000000000000000F /* WorkspaceStressRunner.swift */; };
 		C10000000000000000000010 /* WorkspaceStressRunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000010 /* WorkspaceStressRunnerTests.swift */; };
+		C6E13DE4300FD1A2004ECCBE /* AppIcons.icon in Resources */ = {isa = PBXBuildFile; fileRef = C6E13DE3300FD1A2004ECCBE /* AppIcons.icon */; };
+		C6E13DE5300FD1A2004ECCBE /* AppIcons.icon in Resources */ = {isa = PBXBuildFile; fileRef = C6E13DE3300FD1A2004ECCBE /* AppIcons.icon */; };
 		D10000000000000000000001 /* BoundedOutputCompactor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000001 /* BoundedOutputCompactor.swift */; };
 		D10000000000000000000002 /* BlockSearchIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000002 /* BlockSearchIndex.swift */; };
 		D10000000000000000000003 /* WorkspaceSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000003 /* WorkspaceSnapshotStore.swift */; };
@@ -105,6 +101,10 @@
 		D10000000000000000000006 /* LargeOutputHardeningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000006 /* LargeOutputHardeningTests.swift */; };
 		D10000000000000000000007 /* WorkspaceSnapshotStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000007 /* WorkspaceSnapshotStoreTests.swift */; };
 		D10000000000000000000008 /* ResourceLifecycleHardeningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000008 /* ResourceLifecycleHardeningTests.swift */; };
+		E10000000000000000000001 /* TerminalSessionHardeningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E200000000000000000000001 /* TerminalSessionHardeningTests.swift */; };
+		F10000000000000000000001 /* TerminalWorkspaceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000001 /* TerminalWorkspaceController.swift */; };
+		F10000000000000000000002 /* TerminalWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000002 /* TerminalWorkspaceView.swift */; };
+		F10000000000000000000003 /* TerminalWorkspaceControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000003 /* TerminalWorkspaceControllerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -151,6 +151,23 @@
 		20000000000000000000001F /* AlternateScreenTranscriptFilterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlternateScreenTranscriptFilterTests.swift; sourceTree = "<group>"; };
 		200000000000000000000021 /* CommandAutocomplete.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandAutocomplete.swift; sourceTree = "<group>"; };
 		200000000000000000000022 /* CommandAutocompleteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandAutocompleteTests.swift; sourceTree = "<group>"; };
+		200000000000000000000023 /* WarmZshCompletionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WarmZshCompletionClient.swift; sourceTree = "<group>"; };
+		200000000000000000000024 /* TerminalSecurityState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSecurityState.swift; sourceTree = "<group>"; };
+		200000000000000000000025 /* SensitiveDataSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensitiveDataSanitizer.swift; sourceTree = "<group>"; };
+		200000000000000000000026 /* RuntimeState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeState.swift; sourceTree = "<group>"; };
+		200000000000000000000027 /* PredictionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PredictionTypes.swift; sourceTree = "<group>"; };
+		200000000000000000000028 /* InMemoryRuntimeStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InMemoryRuntimeStateStore.swift; sourceTree = "<group>"; };
+		200000000000000000000029 /* SensitiveDataSanitizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensitiveDataSanitizerTests.swift; sourceTree = "<group>"; };
+		20000000000000000000002A /* RuntimeStateStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeStateStoreTests.swift; sourceTree = "<group>"; };
+		20000000000000000000002B /* SQLiteRuntimeStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SQLiteRuntimeStateStore.swift; sourceTree = "<group>"; };
+		20000000000000000000002C /* RuntimeStateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeStateController.swift; sourceTree = "<group>"; };
+		20000000000000000000002D /* RuntimeStateSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeStateSettings.swift; sourceTree = "<group>"; };
+		20000000000000000000002E /* RuntimeStateSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeStateSettingsView.swift; sourceTree = "<group>"; };
+		20000000000000000000002F /* CommandClickableTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandClickableTextView.swift; sourceTree = "<group>"; };
+		200000000000000000000030 /* CommandClickableTextViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandClickableTextViewTests.swift; sourceTree = "<group>"; };
+		200000000000000000000031 /* BlocksViewScrollTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlocksViewScrollTests.swift; sourceTree = "<group>"; };
+		200000000000000000000032 /* TerminalReplaySanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalReplaySanitizer.swift; sourceTree = "<group>"; };
+		200000000000000000000033 /* TerminalReplaySanitizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalReplaySanitizerTests.swift; sourceTree = "<group>"; };
 		200000000000000000000034 /* AutocompleteRequestGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutocompleteRequestGateTests.swift; sourceTree = "<group>"; };
 		A200000000000000000000001 /* CompletionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionService.swift; sourceTree = "<group>"; };
 		A200000000000000000000002 /* LocalAutocompleteProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalAutocompleteProvider.swift; sourceTree = "<group>"; };
@@ -174,28 +191,6 @@
 		B200000000000000000000007 /* BlockLifecycleControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockLifecycleControllerTests.swift; sourceTree = "<group>"; };
 		B200000000000000000000008 /* TerminalSession+Autocomplete.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TerminalSession+Autocomplete.swift"; sourceTree = "<group>"; };
 		B200000000000000000000009 /* TerminalSession+Lifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TerminalSession+Lifecycle.swift"; sourceTree = "<group>"; };
-		E200000000000000000000001 /* TerminalSessionHardeningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessionHardeningTests.swift; sourceTree = "<group>"; };
-		200000000000000000000023 /* WarmZshCompletionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WarmZshCompletionClient.swift; sourceTree = "<group>"; };
-		200000000000000000000024 /* TerminalSecurityState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSecurityState.swift; sourceTree = "<group>"; };
-		200000000000000000000025 /* SensitiveDataSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensitiveDataSanitizer.swift; sourceTree = "<group>"; };
-		200000000000000000000026 /* RuntimeState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeState.swift; sourceTree = "<group>"; };
-		200000000000000000000027 /* PredictionTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PredictionTypes.swift; sourceTree = "<group>"; };
-		200000000000000000000028 /* InMemoryRuntimeStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InMemoryRuntimeStateStore.swift; sourceTree = "<group>"; };
-		200000000000000000000029 /* SensitiveDataSanitizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SensitiveDataSanitizerTests.swift; sourceTree = "<group>"; };
-		20000000000000000000002A /* RuntimeStateStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeStateStoreTests.swift; sourceTree = "<group>"; };
-		20000000000000000000002B /* SQLiteRuntimeStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SQLiteRuntimeStateStore.swift; sourceTree = "<group>"; };
-		20000000000000000000002C /* RuntimeStateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeStateController.swift; sourceTree = "<group>"; };
-		20000000000000000000002D /* RuntimeStateSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeStateSettings.swift; sourceTree = "<group>"; };
-		20000000000000000000002E /* RuntimeStateSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimeStateSettingsView.swift; sourceTree = "<group>"; };
-		20000000000000000000002F /* CommandClickableTextView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandClickableTextView.swift; sourceTree = "<group>"; };
-		200000000000000000000030 /* CommandClickableTextViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandClickableTextViewTests.swift; sourceTree = "<group>"; };
-		200000000000000000000031 /* BlocksViewScrollTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlocksViewScrollTests.swift; sourceTree = "<group>"; };
-		200000000000000000000032 /* TerminalReplaySanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalReplaySanitizer.swift; sourceTree = "<group>"; };
-		200000000000000000000033 /* TerminalReplaySanitizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalReplaySanitizerTests.swift; sourceTree = "<group>"; };
-		C6E13DE3300FD1A2004ECCBE /* AppIcons.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcons.icon; sourceTree = "<group>"; };
-		F200000000000000000000001 /* TerminalWorkspaceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceController.swift; sourceTree = "<group>"; };
-		F200000000000000000000002 /* TerminalWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceView.swift; sourceTree = "<group>"; };
-		F200000000000000000000003 /* TerminalWorkspaceControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceControllerTests.swift; sourceTree = "<group>"; };
 		C20000000000000000000001 /* CompatibilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompatibilityTests.swift; sourceTree = "<group>"; };
 		C20000000000000000000002 /* CompatibilityModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompatibilityModels.swift; sourceTree = "<group>"; };
 		C20000000000000000000003 /* FixtureLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureLocator.swift; sourceTree = "<group>"; };
@@ -212,6 +207,7 @@
 		C2000000000000000000000E /* PanePerformanceThresholds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanePerformanceThresholds.swift; sourceTree = "<group>"; };
 		C2000000000000000000000F /* WorkspaceStressRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceStressRunner.swift; sourceTree = "<group>"; };
 		C20000000000000000000010 /* WorkspaceStressRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceStressRunnerTests.swift; sourceTree = "<group>"; };
+		C6E13DE3300FD1A2004ECCBE /* AppIcons.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcons.icon; sourceTree = "<group>"; };
 		D20000000000000000000001 /* BoundedOutputCompactor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoundedOutputCompactor.swift; sourceTree = "<group>"; };
 		D20000000000000000000002 /* BlockSearchIndex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockSearchIndex.swift; sourceTree = "<group>"; };
 		D20000000000000000000003 /* WorkspaceSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSnapshotStore.swift; sourceTree = "<group>"; };
@@ -220,6 +216,10 @@
 		D20000000000000000000006 /* LargeOutputHardeningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LargeOutputHardeningTests.swift; sourceTree = "<group>"; };
 		D20000000000000000000007 /* WorkspaceSnapshotStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceSnapshotStoreTests.swift; sourceTree = "<group>"; };
 		D20000000000000000000008 /* ResourceLifecycleHardeningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResourceLifecycleHardeningTests.swift; sourceTree = "<group>"; };
+		E200000000000000000000001 /* TerminalSessionHardeningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSessionHardeningTests.swift; sourceTree = "<group>"; };
+		F200000000000000000000001 /* TerminalWorkspaceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceController.swift; sourceTree = "<group>"; };
+		F200000000000000000000002 /* TerminalWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceView.swift; sourceTree = "<group>"; };
+		F200000000000000000000003 /* TerminalWorkspaceControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceControllerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -273,21 +273,6 @@
 				20000000000000000000000B /* Info.plist */,
 			);
 			path = Pane;
-			sourceTree = "<group>";
-		};
-		A400000000000000000000001 /* Autocomplete */ = {
-			isa = PBXGroup;
-			children = (
-				A200000000000000000000001 /* CompletionService.swift */,
-				A200000000000000000000002 /* LocalAutocompleteProvider.swift */,
-				A200000000000000000000003 /* ExecutableIndex.swift */,
-				A200000000000000000000004 /* CompletionRanker.swift */,
-				A200000000000000000000005 /* ProjectContextProvider.swift */,
-				A200000000000000000000006 /* BehavioralCompletion.swift */,
-				A200000000000000000000007 /* CompletionPipeline.swift */,
-				A200000000000000000000008 /* CompletionSourceMapping.swift */,
-			);
-			path = Autocomplete;
 			sourceTree = "<group>";
 		};
 		400000000000000000000003 /* App */ = {
@@ -408,6 +393,31 @@
 			path = PaneTests;
 			sourceTree = "<group>";
 		};
+		400000000000000000000009 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000010 /* Pane.app */,
+				200000000000000000000011 /* PaneTests.xctest */,
+				C20000000000000000000007 /* PaneCompatibilityTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A400000000000000000000001 /* Autocomplete */ = {
+			isa = PBXGroup;
+			children = (
+				A200000000000000000000001 /* CompletionService.swift */,
+				A200000000000000000000002 /* LocalAutocompleteProvider.swift */,
+				A200000000000000000000003 /* ExecutableIndex.swift */,
+				A200000000000000000000004 /* CompletionRanker.swift */,
+				A200000000000000000000005 /* ProjectContextProvider.swift */,
+				A200000000000000000000006 /* BehavioralCompletion.swift */,
+				A200000000000000000000007 /* CompletionPipeline.swift */,
+				A200000000000000000000008 /* CompletionSourceMapping.swift */,
+			);
+			path = Autocomplete;
+			sourceTree = "<group>";
+		};
 		C40000000000000000000001 /* Compatibility */ = {
 			isa = PBXGroup;
 			children = (
@@ -456,16 +466,6 @@
 				D20000000000000000000005 /* PanePerformanceSignposts.swift */,
 			);
 			path = Performance;
-			sourceTree = "<group>";
-		};
-		400000000000000000000009 /* Products */ = {
-			isa = PBXGroup;
-			children = (
-				200000000000000000000010 /* Pane.app */,
-				200000000000000000000011 /* PaneTests.xctest */,
-				C20000000000000000000007 /* PaneCompatibilityTests.xctest */,
-			);
-			name = Products;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */

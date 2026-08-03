@@ -82,8 +82,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     static weak var sharedWorkspace: TerminalWorkspaceController?
     static var sharedRuntimeStatePersistenceCoordinator: RuntimeStatePersistenceCoordinator?
     private var terminalControlKeyMonitor: Any?
-    private var windowIconObserver: NSObjectProtocol?
-    private var applicationIcon: NSImage?
     private var isFinalizingTermination = false
     private var hasRepliedToTermination = false
 
@@ -107,39 +105,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             // Consume the event before NSTextView, SwiftUI Commands, or a
             // Cocoa key binding can reinterpret the terminal control byte.
             return nil
-        }
-
-        // Xcode and direct debug launches do not always refresh the icon that
-        // Launch Services associates with the running process. Use the same
-        // compiled icon that ships in the bundle so Dock, App Expose, and
-        // window previews never fall back to the generic application tile.
-        guard
-            let iconURL = Bundle.main.url(forResource: "AppIcons", withExtension: "icns"),
-            let icon = NSImage(contentsOf: iconURL)
-        else { return }
-
-        icon.isTemplate = false
-        applicationIcon = icon
-        NSApplication.shared.applicationIconImage = icon
-        applyIcon(to: NSApplication.shared.windows)
-
-        // SwiftUI can create the scene window after application launch. Apply
-        // the same compiled icon whenever a Pane window becomes main so Dock
-        // miniatures, App Expose, and window previews never use AppKit's
-        // generic application placeholder.
-        windowIconObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didBecomeMainNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            assert(Thread.isMainThread)
-            MainActor.assumeIsolated {
-                guard let window = notification.object as? NSWindow else { return }
-                self?.applyIcon(to: [window])
-            }
-        }
-        DispatchQueue.main.async { [weak self] in
-            self?.applyIcon(to: NSApplication.shared.windows)
         }
     }
 
@@ -174,19 +139,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             NSEvent.removeMonitor(terminalControlKeyMonitor)
             self.terminalControlKeyMonitor = nil
         }
-        if let windowIconObserver {
-            NotificationCenter.default.removeObserver(windowIconObserver)
-            self.windowIconObserver = nil
-        }
         if !isFinalizingTermination {
             Self.sharedWorkspace?.terminateAllForApplicationExit()
-        }
-    }
-
-    private func applyIcon(to windows: [NSWindow]) {
-        guard let applicationIcon else { return }
-        for window in windows where window.miniwindowImage !== applicationIcon {
-            window.miniwindowImage = applicationIcon
         }
     }
 }
