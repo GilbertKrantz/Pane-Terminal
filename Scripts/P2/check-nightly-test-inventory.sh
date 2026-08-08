@@ -30,7 +30,7 @@ required_patterns=(
 )
 
 for pattern in "${required_patterns[@]}"; do
-  if ! rg -q "$pattern" "$test_list"; then
+  if ! grep -Fq -- "$pattern" "$test_list"; then
     printf 'error: required nightly test hook is missing: %s\n' "$pattern" >&2
     exit 1
   fi
@@ -38,10 +38,10 @@ done
 
 real_stress=false
 hundred_cycles=false
-if rg -q 'testRealPTYBaselineWhenExplicitlyEnabled' "$test_list"; then
+if grep -Fq -- 'testRealPTYBaselineWhenExplicitlyEnabled' "$test_list"; then
   real_stress=true
 fi
-if rg -q 'testHundredCreateCloseCyclesWhenNightlyEnabled' "$test_list"; then
+if grep -Fq -- 'testHundredCreateCloseCyclesWhenNightlyEnabled' "$test_list"; then
   hundred_cycles=true
 fi
 
