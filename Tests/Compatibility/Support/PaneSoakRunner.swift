@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import SwiftUI
 @preconcurrency import SwiftTerm
 @testable import Pane
 
@@ -27,6 +28,7 @@ struct PaneSoakConfiguration: Sendable {
     let startupTimeout: TimeInterval
     let actionTimeout: TimeInterval
     let cleanupTimeout: TimeInterval
+    let mountedUI: Bool
 
     init(
         durationSeconds: TimeInterval,
@@ -35,7 +37,8 @@ struct PaneSoakConfiguration: Sendable {
         diagnosticsDirectory: URL,
         startupTimeout: TimeInterval = 5,
         actionTimeout: TimeInterval = 5,
-        cleanupTimeout: TimeInterval = 2
+        cleanupTimeout: TimeInterval = 2,
+        mountedUI: Bool = ProcessInfo.processInfo.environment["PANE_SOAK_MOUNTED_UI"] == "1"
     ) {
         self.durationSeconds = durationSeconds
         self.intervalSeconds = intervalSeconds
@@ -44,6 +47,7 @@ struct PaneSoakConfiguration: Sendable {
         self.startupTimeout = startupTimeout
         self.actionTimeout = actionTimeout
         self.cleanupTimeout = cleanupTimeout
+        self.mountedUI = mountedUI
     }
 }
 
@@ -150,6 +154,9 @@ final class PaneSoakRunner {
         var currentStage = PaneSoakFailure.Stage.startup
         var sampleCount = 0
         var performedActions: Set<String> = []
+        var mountedWindow: NSWindow?
+        var transitionCount = 0
+        var maximumConsecutiveUnhealthySamples = 0
 
         do {
             await workspace.restoreWorkspace()
@@ -181,6 +188,21 @@ final class PaneSoakRunner {
             if let idle = idleHarnesses.first {
                 workspace.selectTab(id: idle.id)
             }
+            if configuration.mountedUI {
+                let hostingView = NSHostingView(
+                    rootView: TerminalWorkspaceView(workspace: workspace)
+                )
+                hostingView.frame = NSRect(x: 0, y: 0, width: 960, height: 640)
+                let window = NSWindow(
+                    contentRect: hostingView.bounds,
+                    styleMask: [.titled, .resizable],
+                    backing: .buffered,
+                    defer: false
+                )
+                window.contentView = hostingView
+                window.makeKeyAndOrderFront(nil)
+                mountedWindow = window
+            }
 
             currentStage = .backgroundProducers
             try await startBackgroundProducers(backgroundHarnesses)
@@ -203,6 +225,35 @@ final class PaneSoakRunner {
                     stage: &currentStage
                 )
                 performedActions.formUnion(actions)
+                transitionCount += actions.count
+
+                if let mountedWindow {
+                    mountedWindow.contentView?.layoutSubtreeIfNeeded()
+                    await Task.yield()
+                    guard let selected = workspace.selectedTab?.session else {
+                        throw PaneSoakFailure(stage: .sampling, diagnostic: "mounted UI has no selected session")
+                    }
+                    var consecutiveUnhealthy = 0
+                    for attempt in 0..<2 {
+                        let health = selected.terminalMountCoordinator.healthSnapshot()
+                        if health.expectedPlacement == nil || health.isHealthy { break }
+                        consecutiveUnhealthy += 1
+                        maximumConsecutiveUnhealthySamples = max(
+                            maximumConsecutiveUnhealthySamples,
+                            consecutiveUnhealthy
+                        )
+                        if attempt == 0 {
+                            try await Task.sleep(nanoseconds: 100_000_000)
+                            mountedWindow.contentView?.layoutSubtreeIfNeeded()
+                        }
+                    }
+                    if consecutiveUnhealthy >= 2 {
+                        throw PaneSoakFailure(
+                            stage: .sampling,
+                            diagnostic: "expected visible host remained unhealthy for two settled layout cycles"
+                        )
+                    }
+                }
 
                 currentStage = .sampling
                 let blockCount = workspace.tabs.reduce(into: 0) {
@@ -215,7 +266,10 @@ final class PaneSoakRunner {
                     sample: sample,
                     iteration: iteration,
                     selectedTabID: workspace.selectedTabID,
-                    actions: actions
+                    actions: actions,
+                    transitionCount: transitionCount,
+                    mountCounters: aggregateMountCounters(workspace.tabs),
+                    maximumConsecutiveUnhealthySamples: maximumConsecutiveUnhealthySamples
                 )
                 sampleCount += 1
                 iteration += 1
@@ -253,6 +307,8 @@ final class PaneSoakRunner {
             )
         }
 
+        mountedWindow?.orderOut(nil)
+        mountedWindow = nil
         let cleanupStartedAt = Date()
         await workspace.shutdown()
         let cleanupDuration = Date().timeIntervalSince(cleanupStartedAt)
@@ -295,6 +351,29 @@ final class PaneSoakRunner {
             )
         }
         return result
+    }
+
+    private func aggregateMountCounters(_ tabs: [TerminalTab]) -> [String: Int] {
+        tabs.reduce(into: [
+            "mountClaimCount": 0,
+            "mountReleaseCount": 0,
+            "staleUpdateRejectionCount": 0,
+            "validationFailureCount": 0,
+            "automaticRepairCount": 0,
+            "successfulRepairCount": 0,
+            "terminalIdentityChangeCount": 0,
+            "ptyGenerationChangeCount": 0,
+        ]) { totals, tab in
+            let mount = tab.session.terminalMountCoordinator
+            totals["mountClaimCount", default: 0] += mount.claimCount
+            totals["mountReleaseCount", default: 0] += mount.releaseCount
+            totals["staleUpdateRejectionCount", default: 0] += mount.staleUpdateRejectionCount
+            totals["validationFailureCount", default: 0] += mount.validationFailureCount
+            totals["automaticRepairCount", default: 0] += mount.automaticRepairCount
+            totals["successfulRepairCount", default: 0] += mount.successfulRepairCount
+            totals["terminalIdentityChangeCount", default: 0] += mount.terminalIdentityChangeCount
+            totals["ptyGenerationChangeCount", default: 0] += mount.ptyGenerationChangeCount
+        }
     }
 
     private func startBackgroundProducers(
@@ -689,7 +768,10 @@ private actor PaneSoakArtifactWriter {
         sample: PaneSoakSample,
         iteration: Int,
         selectedTabID: UUID?,
-        actions: [String]
+        actions: [String],
+        transitionCount: Int,
+        mountCounters: [String: Int],
+        maximumConsecutiveUnhealthySamples: Int
     ) throws {
         let encodedSample = try encoder.encode(sample)
         guard var object = try JSONSerialization.jsonObject(
@@ -703,6 +785,12 @@ private actor PaneSoakArtifactWriter {
         object["evidenceMode"] = PaneSoakConfiguration.evidenceMode
         object["automatedPaneBacked"] = true
         object["visualEvidence"] = false
+        object["mountedUI"] = ProcessInfo.processInfo.environment["PANE_SOAK_MOUNTED_UI"] == "1"
+        object["transitionCount"] = transitionCount
+        object["maximumConsecutiveUnhealthySamples"] = maximumConsecutiveUnhealthySamples
+        for (key, value) in mountCounters {
+            object[key] = value
+        }
         var line = try JSONSerialization.data(
             withJSONObject: object,
             options: [.sortedKeys, .withoutEscapingSlashes]
@@ -765,6 +853,7 @@ private actor PaneSoakArtifactWriter {
             "idleTabs": result.idleShellCount,
             "interactiveTabs": result.interactiveFixtureCount,
             "intervalSeconds": configuration.intervalSeconds,
+            "mountedUI": configuration.mountedUI,
             "sampleCount": result.sampleCount,
             "tabs": result.baseTabCount,
             "visualEvidence": false,

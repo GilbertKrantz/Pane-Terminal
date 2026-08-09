@@ -677,6 +677,86 @@ final class TerminalSessionIntegrationTests: XCTestCase {
     }
 
     @MainActor
+    func testForegroundingSuspendedAlternateScreenRestoresExpandedWorkspaceGeometry() async throws {
+        NSWindow.allowsAutomaticWindowTabbing = false
+        let session = makeTestSession()
+        let defaultsSuiteName = "PaneTests.AlternateScreenForeground.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuiteName))
+        defaults.set(true, forKey: "hasCompletedOnboarding")
+        let hostingView = NSHostingView(
+            rootView: ContentView(session: session)
+                .defaultAppStorage(defaults)
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            session.shutdown()
+            defaults.removePersistentDomain(forName: defaultsSuiteName)
+        }
+
+        try await waitUntil("shell and Blocks composer to mount", timeout: 5) {
+            hostingView.layoutSubtreeIfNeeded()
+            return session.isShellReadyForInput
+                && self.findTextView(in: hostingView) != nil
+        }
+
+        let command = #"/usr/bin/perl -MPOSIX=SIGSTOP -e '$|=1; sub normal { print "\e[?1049l"; system "stty echo icanon"; } $SIG{INT}=sub { normal(); exit 130; }; $SIG{TERM}=sub { normal(); exit 143; }; $SIG{TSTP}=sub { normal(); print "PANE_SUSPENDED\n"; kill SIGSTOP, $$; system "stty -echo -icanon"; select undef, undef, undef, 0.6; print "\e[?1049hPANE_RESUMED\n"; }; system "stty -echo -icanon"; print "\e[?1049hPANE_STARTED\n"; while (1) { select undef, undef, undef, 1; }'"#
+        session.submit(command: command)
+
+        try await waitUntil("initial alternate screen to expand", timeout: 8) {
+            hostingView.layoutSubtreeIfNeeded()
+            return session.isAlternateScreenActive
+                && session.activeTerminalPresentation == .expanded
+        }
+        let terminal = session.makeAuthoritativeTerminalView()
+        let terminalIdentity = ObjectIdentifier(terminal)
+        let ptyGeneration = session.debugProcessGeneration
+
+        terminal.send(data: [0x1A][...])
+        try await waitUntil("suspended job to return to the shell", timeout: 8) {
+            hostingView.layoutSubtreeIfNeeded()
+            return !session.isAlternateScreenActive
+                && !session.isCommandActive
+                && session.isShellReadyForInput
+        }
+
+        session.submit(command: "fg")
+        try await waitUntil("foregrounded job to mount compact direct input", timeout: 8) {
+            hostingView.layoutSubtreeIfNeeded()
+            return session.activeTerminalPresentation == .authoritativeInBlock
+                && terminal.window === window
+                && terminal.visibleRect.height < 200
+        }
+        try await waitUntil(
+            "foregrounded alternate screen to reclaim expanded geometry",
+            timeout: 8
+        ) {
+            hostingView.layoutSubtreeIfNeeded()
+            return session.isAlternateScreenActive
+                && session.activeTerminalPresentation == .expanded
+                && terminal.window === window
+                && terminal.visibleRect.height > hostingView.bounds.height * 0.65
+        }
+
+        XCTAssertEqual(ObjectIdentifier(session.makeAuthoritativeTerminalView()), terminalIdentity)
+        XCTAssertEqual(session.debugProcessGeneration, ptyGeneration)
+        XCTAssertGreaterThan(terminal.visibleRect.height, hostingView.bounds.height * 0.65)
+
+        session.sendInterrupt()
+        try await waitUntil("foregrounded fixture to exit", timeout: 8) {
+            !session.isAlternateScreenActive && !session.isCommandActive
+        }
+    }
+
+    @MainActor
     func testCharacterChoiceUsesCompactAuthoritativeBlockAndPreservesPrompt() async throws {
         NSWindow.allowsAutomaticWindowTabbing = false
         let session = makeTestSession()
@@ -1737,7 +1817,7 @@ extension TerminalSessionIntegrationTests {
     }
 
     @MainActor
-    func testMountReportsReparentingAndRepairsOnlyTerminalFocusIntent() async throws {
+    func testMountLeaseRejectsLateOutgoingUpdateAndRepairsOnlyTerminalFocusIntent() async throws {
         let session = makeTestSession()
         let host = session.makeAuthoritativeTerminalHostView()
         let firstMount = AuthoritativeTerminalMountView(
@@ -1767,12 +1847,13 @@ extension TerminalSessionIntegrationTests {
         try await waitUntil("shell readiness before terminal focus intent", timeout: 5) {
             session.isShellReadyForInput
         }
-        host.setViewportInsets(.embeddedDirect)
-        XCTAssertTrue(firstMount.mount(host))
-        XCTAssertFalse(firstMount.mount(host))
+        session.setMode(.terminal)
+        let firstLease = session.terminalMountCoordinator.issueLease(for: .fullTerminal)
+        let secondLease = session.terminalMountCoordinator.issueLease(for: .fullTerminal)
+        XCTAssertTrue(session.terminalMountCoordinator.present(lease: firstLease, in: firstMount))
+        XCTAssertFalse(session.terminalMountCoordinator.present(lease: firstLease, in: firstMount))
         firstMount.layoutSubtreeIfNeeded()
         host.layoutSubtreeIfNeeded()
-        session.authoritativeTerminalDidRemount()
         await drainMainQueue(turns: 2)
         let compactWindowSize = session.debugPTYWindowSize
         session.enterSecureInput()
@@ -1780,11 +1861,9 @@ extension TerminalSessionIntegrationTests {
         await drainMainQueue(turns: 2)
         XCTAssertTrue(window.firstResponder === host.terminalView)
 
-        host.setViewportInsets(.fullTerminal)
-        XCTAssertTrue(secondMount.mount(host))
+        XCTAssertTrue(session.terminalMountCoordinator.present(lease: secondLease, in: secondMount))
         secondMount.layoutSubtreeIfNeeded()
         host.layoutSubtreeIfNeeded()
-        session.authoritativeTerminalDidRemount()
         session.restoreAuthoritativeFocusAfterMount()
         await drainMainQueue(turns: 2)
         XCTAssertTrue(window.firstResponder === host.terminalView)
@@ -1794,24 +1873,86 @@ extension TerminalSessionIntegrationTests {
         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_row, compactWindowSize.ws_row)
         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_xpixel, compactWindowSize.ws_xpixel)
         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_ypixel, compactWindowSize.ws_ypixel)
+        let currentWindowSize = session.debugPTYWindowSize
+
+        XCTAssertFalse(session.terminalMountCoordinator.present(lease: firstLease, in: firstMount))
+        XCTAssertTrue(host.superview === secondMount)
+        XCTAssertNil(firstMount.subviews.first { $0 === host })
+        XCTAssertEqual(session.debugPTYWindowSize.ws_col, currentWindowSize.ws_col)
+        XCTAssertEqual(session.debugPTYWindowSize.ws_row, currentWindowSize.ws_row)
+
+        session.terminalMountCoordinator.release(lease: firstLease, from: firstMount)
+        XCTAssertTrue(session.terminalMountCoordinator.isCurrent(lease: secondLease, mount: secondMount))
+        let mismatchedLease = session.terminalMountCoordinator.issueLease(
+            for: .embeddedDirect(blockID: UUID())
+        )
+        XCTAssertFalse(
+            session.terminalMountCoordinator.present(
+                lease: mismatchedLease,
+                in: firstMount
+            )
+        )
+        XCTAssertTrue(host.superview === secondMount)
 
         session.requestFocus(.composer)
+        XCTAssertTrue(session.terminalMountCoordinator.isCurrent(lease: secondLease, mount: secondMount))
         XCTAssertTrue(window.makeFirstResponder(searchField))
-        XCTAssertTrue(firstMount.mount(host))
+        XCTAssertFalse(session.terminalMountCoordinator.present(lease: firstLease, in: firstMount))
         session.restoreAuthoritativeFocusAfterMount()
         await drainMainQueue(turns: 2)
         try await Task.sleep(nanoseconds: 300_000_000)
         XCTAssertTrue(window.firstResponder === searchField.currentEditor())
     }
 
+    func testTerminalMountRepairPolicyRateLimitsAndCapsAutomaticAttempts() {
+        let now = Date()
+        XCTAssertTrue(
+            TerminalMountRepairPolicy.allowsAutomaticRepair(
+                now: now,
+                lastAttempt: nil,
+                consecutiveFailures: 0
+            )
+        )
+        XCTAssertFalse(
+            TerminalMountRepairPolicy.allowsAutomaticRepair(
+                now: now,
+                lastAttempt: now.addingTimeInterval(-0.99),
+                consecutiveFailures: 1
+            )
+        )
+        XCTAssertTrue(
+            TerminalMountRepairPolicy.allowsAutomaticRepair(
+                now: now,
+                lastAttempt: now.addingTimeInterval(-1),
+                consecutiveFailures: 2
+            )
+        )
+        XCTAssertFalse(
+            TerminalMountRepairPolicy.allowsAutomaticRepair(
+                now: now,
+                lastAttempt: nil,
+                consecutiveFailures: 3
+            )
+        )
+        XCTAssertTrue(
+            TerminalMountRepairPolicy.requiresRecoveryOverlay(
+                consecutiveFailures: 3
+            )
+        )
+    }
+
     @MainActor
     func testTerminalRepresentableUpdatePreservesSearchFieldFocus() async throws {
         let session = TerminalSession()
+        session.ensureAuthoritativeTerminalIsRunning()
+        try await waitUntil("shell readiness before mounted representable update", timeout: 5) {
+            session.isShellReadyForInput
+        }
+        session.setMode(.terminal)
         let terminalHost = NSHostingView(
             rootView: TerminalViewRepresentable(
                 session: session,
-                presentation: .fullTerminal,
-                mountGeneration: session.focusGeneration
+                placement: .fullTerminal
             )
         )
         let searchField = NSSearchField(frame: NSRect(x: 12, y: 212, width: 280, height: 28))
@@ -1838,13 +1979,110 @@ extension TerminalSessionIntegrationTests {
         session.requestFocus(.none)
         terminalHost.rootView = TerminalViewRepresentable(
             session: session,
-            presentation: .fullTerminal,
-            mountGeneration: session.focusGeneration
+            placement: .fullTerminal
         )
         container.layoutSubtreeIfNeeded()
         await drainMainQueue(turns: 2)
 
         XCTAssertTrue(window.firstResponder === searchField.currentEditor())
+    }
+
+    @MainActor
+    func testManualMountRepairPreservesTerminalAndPTYIdentity() async throws {
+        let session = makeTestSession()
+        session.ensureAuthoritativeTerminalIsRunning()
+        defer { session.shutdown() }
+        try await waitUntil("shell readiness before mount repair", timeout: 5) {
+            session.isShellReadyForInput
+        }
+        session.setMode(.terminal)
+
+        let mount = AuthoritativeTerminalMountView(
+            frame: NSRect(x: 0, y: 0, width: 640, height: 320)
+        )
+        let window = NSWindow(
+            contentRect: mount.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = mount
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+
+        let lease = session.terminalMountCoordinator.issueLease(for: .fullTerminal)
+        XCTAssertTrue(session.terminalMountCoordinator.present(lease: lease, in: mount))
+        mount.layoutSubtreeIfNeeded()
+        await drainMainQueue(turns: 2)
+        let terminal = session.makeAuthoritativeTerminalView()
+        let host = session.makeAuthoritativeTerminalHostView()
+        let ptyGeneration = session.debugProcessGeneration
+
+        host.removeFromSuperview()
+        XCTAssertNil(host.superview)
+        session.repairTerminalView()
+        mount.layoutSubtreeIfNeeded()
+        await drainMainQueue(turns: 2)
+
+        XCTAssertTrue(host.superview === mount)
+        XCTAssertTrue(session.makeAuthoritativeTerminalView() === terminal)
+        XCTAssertEqual(session.debugProcessGeneration, ptyGeneration)
+        XCTAssertTrue(session.ptyController.isRunning)
+    }
+
+    @MainActor
+    func testMountedRepresentableSurvivesTwoThousandDeterministicTransitions() async throws {
+        let session = makeTestSession()
+        session.ensureAuthoritativeTerminalIsRunning()
+        defer { session.shutdown() }
+        try await waitUntil("shell readiness before mounted transition stress", timeout: 5) {
+            session.isShellReadyForInput
+        }
+        session.setMode(.terminal)
+        let terminal = session.makeAuthoritativeTerminalView()
+        let host = session.makeAuthoritativeTerminalHostView()
+        let ptyGeneration = session.debugProcessGeneration
+        let hostingView = NSHostingView(
+            rootView: AnyView(
+                TerminalViewRepresentable(session: session, placement: .fullTerminal)
+                    .id(0)
+            )
+        )
+        hostingView.frame = NSRect(x: 0, y: 0, width: 800, height: 480)
+        let window = NSWindow(
+            contentRect: hostingView.bounds,
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+
+        for transition in 1...2_000 {
+            hostingView.rootView = AnyView(
+                TerminalViewRepresentable(session: session, placement: .fullTerminal)
+                    .id(transition)
+            )
+            if transition.isMultiple(of: 2) {
+                hostingView.frame.size = NSSize(width: 800, height: 480)
+            } else {
+                hostingView.frame.size = NSSize(width: 960, height: 600)
+            }
+            hostingView.layoutSubtreeIfNeeded()
+            XCTAssertTrue(session.makeAuthoritativeTerminalView() === terminal)
+            XCTAssertEqual(session.debugProcessGeneration, ptyGeneration)
+            XCTAssertNotNil(host.superview)
+        }
+        await drainMainQueue(turns: 3)
+        hostingView.layoutSubtreeIfNeeded()
+        let health = session.terminalMountCoordinator.healthSnapshot()
+        XCTAssertTrue(health.isHealthy)
+        XCTAssertTrue(host.window === window)
+        XCTAssertGreaterThan(terminal.bounds.width, 0)
+        XCTAssertGreaterThan(terminal.bounds.height, 0)
+        XCTAssertEqual(session.terminalMountCoordinator.terminalIdentityChangeCount, 0)
+        XCTAssertEqual(session.terminalMountCoordinator.ptyGenerationChangeCount, 0)
     }
 
     @MainActor

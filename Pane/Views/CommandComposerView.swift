@@ -790,7 +790,10 @@ private struct ActiveCommandSurface: View {
 
             if isRunning {
                 if session.shouldPresentCompactAuthoritativeTerminal {
-                    ActiveBlockAuthoritativeTerminalView(session: session)
+                    ActiveBlockAuthoritativeTerminalView(
+                        session: session,
+                        blockID: block.id
+                    )
                         .id("authoritative-in-block-\(block.id)")
                         .frame(height: compactTerminalHeight)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))

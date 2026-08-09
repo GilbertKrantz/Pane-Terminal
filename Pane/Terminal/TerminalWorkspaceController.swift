@@ -511,6 +511,7 @@ final class TerminalWorkspaceController: ObservableObject {
             guard let self, let tab, self.selectedTabID == focus.selectedTabID,
                   self.selectionGeneration == focus.generation else { return }
             tab.session.restoreExpectedFocus()
+            tab.session.terminalMountCoordinator.validateCurrentMountAfterTransition()
         }
         schedulePersistence()
     }

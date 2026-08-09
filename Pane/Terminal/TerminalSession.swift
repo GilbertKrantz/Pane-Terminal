@@ -111,6 +111,7 @@ final class TerminalSession: NSObject, ObservableObject {
     @Published private(set) var newShellBoundary: NewShellBoundary?
     @Published private(set) var restoredBlockIDs: Set<UUID> = []
     @Published var isRestartConfirmationPresented = false
+    @Published var terminalMountRecoveryRequired = false
     @Published var lastShellRestartAt: Date?
     @Published private(set) var focusTarget: PaneFocusTarget = .none
     private var focusBeforeSearch: PaneFocusTarget = .none
@@ -154,6 +155,7 @@ final class TerminalSession: NSObject, ObservableObject {
     )
     var terminalView: TerminalView?
     var authoritativeTerminalHostView: AuthoritativeTerminalHostView?
+    lazy var terminalMountCoordinator = TerminalMountCoordinator(session: self)
     private var suspendedCommandDraft: String?
     private var pendingRestoredMode: InputMode?
     private var manualSecureInputActive = false
@@ -388,6 +390,7 @@ final class TerminalSession: NSObject, ObservableObject {
             total += block.output.utf8.count
             total += block.terminalSnapshot?.bytes.count ?? 0
         }
+        let mount = terminalMountCoordinator.healthSnapshot()
         return TerminalSessionDiagnostics(
             tabID: tabID,
             sessionID: sessionID,
@@ -405,7 +408,33 @@ final class TerminalSession: NSObject, ObservableObject {
             completionGeneration: completionGeneration,
             contextRefreshStatus: "generation-\(composerContextGeneration)",
             blockCount: blockTimeline.blocks.count,
-            estimatedRetainedOutputBytes: retainedOutputBytes
+            estimatedRetainedOutputBytes: retainedOutputBytes,
+            terminalMount: TerminalMountDiagnostics(
+                expectedPlacement: String(describing: mount.expectedPlacement),
+                leaseID: mount.leaseID,
+                mountID: mount.mountID.map { String(describing: $0) },
+                hostParentID: mount.hostParentID.map { String(describing: $0) },
+                hasWindow: mount.hasWindow,
+                isUnderExpectedMount: mount.isUnderExpectedMount,
+                width: Double(mount.width),
+                height: Double(mount.height),
+                terminalColumns: mount.terminalColumns,
+                terminalRows: mount.terminalRows,
+                ptyRunning: mount.ptyRunning,
+                claimCount: terminalMountCoordinator.claimCount,
+                releaseCount: terminalMountCoordinator.releaseCount,
+                staleUpdateRejectionCount: terminalMountCoordinator.staleUpdateRejectionCount,
+                validationFailureCount: terminalMountCoordinator.validationFailureCount,
+                automaticRepairCount: terminalMountCoordinator.automaticRepairCount,
+                successfulRepairCount: terminalMountCoordinator.successfulRepairCount,
+                terminalIdentityChangeCount: terminalMountCoordinator.terminalIdentityChangeCount,
+                ptyGenerationChangeCount: terminalMountCoordinator.ptyGenerationChangeCount,
+                lastMountAt: terminalMountCoordinator.lastMountAt,
+                lastDetachAt: terminalMountCoordinator.lastDetachAt,
+                lastFailedValidationAt: terminalMountCoordinator.lastFailedValidationAt,
+                lastRepairAttemptAt: terminalMountCoordinator.lastRepairAttemptAt,
+                lastRepairResultAt: terminalMountCoordinator.lastRepairResultAt
+            )
         )
     }
 
@@ -965,6 +994,22 @@ final class TerminalSession: NSObject, ObservableObject {
             "Database health: \(databaseHealth)",
             "SwiftTerm: 1.14.0"
         ]
+        let mount = terminalMountCoordinator.healthSnapshot()
+        lines.append(contentsOf: [
+            "Expected terminal placement: \(String(describing: mount.expectedPlacement))",
+            "Mount lease: \(mount.leaseID?.uuidString ?? "none")",
+            "Mount ID: \(mount.mountID.map { String(describing: $0) } ?? "none")",
+            "Host parent ID: \(mount.hostParentID.map { String(describing: $0) } ?? "none")",
+            "Mount has window: \(mount.hasWindow)",
+            "Host under expected mount: \(mount.isUnderExpectedMount)",
+            "Terminal bounds: \(Int(mount.width))x\(Int(mount.height))",
+            "Terminal grid: \(mount.terminalColumns)x\(mount.terminalRows)",
+            "Mount claims/releases: \(terminalMountCoordinator.claimCount)/\(terminalMountCoordinator.releaseCount)",
+            "Stale mount updates rejected: \(terminalMountCoordinator.staleUpdateRejectionCount)",
+            "Mount validation failures: \(terminalMountCoordinator.validationFailureCount)",
+            "Automatic repairs: \(terminalMountCoordinator.automaticRepairCount)",
+            "Successful repairs: \(terminalMountCoordinator.successfulRepairCount)"
+        ])
         if includeSanitizedCommandContext, let block = selectedBlock {
             lines.append("Sanitized command: \(sensitiveDataSanitizer.sanitizeCommand(block.command).value)")
         }
@@ -2102,10 +2147,6 @@ final class TerminalSession: NSObject, ObservableObject {
         focusTarget = focusCoordinator.target
     }
 
-    func isCurrentTerminalMountGeneration(_ generation: UInt64) -> Bool {
-        generation == focusGeneration
-    }
-
     var shouldAuthoritativeTerminalOwnFocus: Bool {
         mode == .terminal || inputRequirement == .direct || inputRequirement == .secure
     }
@@ -2169,16 +2210,50 @@ final class TerminalSession: NSObject, ObservableObject {
         }
     }
 
-    /// Recomputes emulator and PTY geometry after the persistent terminal host
-    /// has acquired the bounds of its new presentation container.
-    func authoritativeTerminalDidRemount() {
-        DispatchQueue.main.async { [weak self] in
-            guard let self,
-                  let terminalView = self.terminalView,
-                  terminalView.window != nil else { return }
-            terminalView.layoutSubtreeIfNeeded()
+    /// Applies layout, emulator redraw, and PTY sizing only for the current
+    /// presentation lease. This preserves the terminal and PTY identities.
+    func applyAuthoritativeTerminalAttachmentGeometry(
+        lease: TerminalMountLease,
+        mount: AuthoritativeTerminalMountView,
+        redraw: Bool
+    ) {
+        guard terminalMountCoordinator.isCurrent(lease: lease, mount: mount),
+              expectedAuthoritativeTerminalPlacement == lease.placement,
+              let host = authoritativeTerminalHostView,
+              host.superview === mount,
+              let terminalView,
+              terminalView.window != nil else { return }
+        applyPaneTerminalPalette(to: terminalView)
+        mount.layoutSubtreeIfNeeded()
+        host.layoutSubtreeIfNeeded()
+        terminalView.layoutSubtreeIfNeeded()
+        guard terminalView.bounds.width > 0, terminalView.bounds.height > 0 else { return }
+        if redraw {
+            terminalView.isHidden = false
             terminalView.terminal.updateFullScreen()
-            self.updateWindowSize(from: terminalView)
+            terminalView.setNeedsDisplay(terminalView.bounds)
+            terminalView.layer?.setNeedsDisplay()
+        }
+        updateWindowSize(from: terminalView)
+    }
+
+    func repairTerminalView() {
+        terminalMountCoordinator.repairCurrentMount(manual: true)
+    }
+
+    var expectedAuthoritativeTerminalPlacement: AuthoritativeTerminalPlacement? {
+        guard visibilityState == .selected else { return nil }
+        switch activeTerminalPresentation {
+        case .fullTerminal:
+            return .fullTerminal
+        case .authoritativeInBlock:
+            guard let blockID = activeCommandBlock?.id else { return nil }
+            return .embeddedDirect(blockID: blockID)
+        case .expanded:
+            guard let blockID = activeCommandBlock?.id else { return nil }
+            return .expandedAlternateScreen(blockID: blockID)
+        case .hidden, .liveMirror:
+            return nil
         }
     }
 

@@ -96,8 +96,7 @@ struct ContentView: View {
             } else {
                 TerminalViewRepresentable(
                     session: session,
-                    presentation: .fullTerminal,
-                    mountGeneration: session.focusGeneration
+                    placement: .fullTerminal
                 )
             }
 
@@ -106,6 +105,11 @@ struct ContentView: View {
         .overlay {
             if !session.isShellReadyForInput {
                 ShellReadinessOverlay(session: session)
+            }
+        }
+        .overlay {
+            if session.terminalMountRecoveryRequired {
+                TerminalMountRecoveryOverlay(session: session)
             }
         }
     }
@@ -527,6 +531,9 @@ private struct TerminalActionsMenu: View {
                 session.requestRestartShell()
             }
             .disabled(session.isRestartInProgress || session.isShuttingDown)
+            actionButton("Repair Terminal View", systemImage: "wrench.and.screwdriver") {
+                session.repairTerminalView()
+            }
             actionButton("Copy Local Diagnostics", systemImage: "stethoscope") {
                 session.copyLocalDiagnostics()
             }
@@ -558,6 +565,46 @@ private struct TerminalActionsMenu: View {
             action()
             dismiss()
         }
+    }
+}
+
+private struct TerminalMountRecoveryOverlay: View {
+    @ObservedObject var session: TerminalSession
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "rectangle.badge.exclamationmark")
+                .font(.title2)
+            Text("Terminal view needs repair")
+                .font(.headline)
+            Text("The shell is still running. Repairing the view preserves its terminal state.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            HStack(spacing: 8) {
+                Button("Repair Terminal View") {
+                    session.repairTerminalView()
+                }
+                .buttonStyle(.borderedProminent)
+                Button("Copy Diagnostics") {
+                    session.copyLocalDiagnostics()
+                }
+                .buttonStyle(.bordered)
+                Button("Restart Shell", role: .destructive) {
+                    session.requestRestartShell()
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: 460)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(PaneTheme.separator, lineWidth: 0.5)
+        }
+        .shadow(radius: 12, y: 4)
+        .padding()
     }
 }
 

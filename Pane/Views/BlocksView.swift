@@ -313,8 +313,7 @@ struct AuthoritativeInputCommandView: View {
 
             TerminalViewRepresentable(
                 session: session,
-                presentation: .embeddedDirect,
-                mountGeneration: session.focusGeneration
+                placement: .expandedAlternateScreen(blockID: block.id)
             )
                 .id("authoritative-active-input")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

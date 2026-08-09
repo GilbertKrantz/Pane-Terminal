@@ -168,6 +168,13 @@ switch, temporary create/close, autocomplete request, resize, and a
 `PaneSoakSample`-shaped JSONL record. The expected topology is eight tabs: four
 background producers, two interactive fixtures, and two idle shells.
 
+Set `PANE_SOAK_MOUNTED_UI=1` for blank-screen reliability evidence. The
+Pane-backed runner then hosts the real `TerminalWorkspaceView` in an
+`NSWindow`, validates the selected session after settled layout, and fails if
+an expected terminal remains unhealthy for two layout cycles. Its JSONL rows
+include transition, mount claim/release, stale-update, validation, repair,
+terminal-identity, PTY-generation, and maximum-unhealthy-sample counters.
+
 For release evidence, set `PANE_SOAK_DRIVER` to the executable app-hosted driver
 and require it:
 

@@ -31,6 +31,34 @@ struct TerminalSessionDiagnostics: Codable, Equatable, Sendable {
     let contextRefreshStatus: String
     let blockCount: Int
     let estimatedRetainedOutputBytes: Int
+    let terminalMount: TerminalMountDiagnostics
+}
+
+struct TerminalMountDiagnostics: Codable, Equatable, Sendable {
+    let expectedPlacement: String
+    let leaseID: UUID?
+    let mountID: String?
+    let hostParentID: String?
+    let hasWindow: Bool
+    let isUnderExpectedMount: Bool
+    let width: Double
+    let height: Double
+    let terminalColumns: Int
+    let terminalRows: Int
+    let ptyRunning: Bool
+    let claimCount: Int
+    let releaseCount: Int
+    let staleUpdateRejectionCount: Int
+    let validationFailureCount: Int
+    let automaticRepairCount: Int
+    let successfulRepairCount: Int
+    let terminalIdentityChangeCount: Int
+    let ptyGenerationChangeCount: Int
+    let lastMountAt: Date?
+    let lastDetachAt: Date?
+    let lastFailedValidationAt: Date?
+    let lastRepairAttemptAt: Date?
+    let lastRepairResultAt: Date?
 }
 
 struct PaneWorkspaceDiagnostics: Codable, Equatable, Sendable {
