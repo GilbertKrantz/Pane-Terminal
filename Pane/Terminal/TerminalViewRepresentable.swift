@@ -2,7 +2,9 @@ import AppKit
 import SwiftUI
 @preconcurrency import SwiftTerm
 
-func applyPaneTerminalPalette(to terminalView: TerminalView) {
+@discardableResult
+func applyPaneTerminalPalette(to terminalView: TerminalView) -> Bool {
+    var changed = false
     let background = PaneTheme.terminalBackground(
         for: terminalView.effectiveAppearance
     )
@@ -11,17 +13,74 @@ func applyPaneTerminalPalette(to terminalView: TerminalView) {
     )
     if !terminalView.nativeBackgroundColor.isEqual(background) {
         terminalView.nativeBackgroundColor = background
+        changed = true
     }
     if !terminalView.nativeForegroundColor.isEqual(foreground) {
         terminalView.nativeForegroundColor = foreground
+        changed = true
     }
     if !terminalView.caretColor.isEqual(NSColor.controlAccentColor) {
         terminalView.caretColor = .controlAccentColor
+        changed = true
     }
     if terminalView.layer?.backgroundColor != background.cgColor {
         terminalView.layer?.backgroundColor = background.cgColor
+        changed = true
+    }
+    return changed
+}
+
+func paneTerminalAppearanceSignature(for terminalView: TerminalView) -> String {
+    let appearance = terminalView.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua])
+        ?? terminalView.effectiveAppearance.name
+    func signature(_ color: NSColor) -> String {
+        guard let rgb = color.usingColorSpace(.deviceRGB) else {
+            return color.description
+        }
+        return String(format: "%.4f:%.4f:%.4f:%.4f", rgb.redComponent,
+                      rgb.greenComponent, rgb.blueComponent, rgb.alphaComponent)
+    }
+    return [
+        appearance.rawValue,
+        signature(PaneTheme.terminalBackground(for: terminalView.effectiveAppearance)),
+        signature(PaneTheme.terminalForeground(for: terminalView.effectiveAppearance)),
+        signature(.controlAccentColor)
+    ].joined(separator: "|")
+}
+
+#if DEBUG
+@MainActor
+enum AuthoritativeTerminalRenderInstrumentation {
+    private(set) static var updateAttempts = 0
+    private(set) static var hostReparents = 0
+    private(set) static var postMountCallbacks = 0
+    private(set) static var fullScreenInvalidations = 0
+    private(set) static var ptyResizeAttempts = 0
+    private(set) static var ptyResizeAccepted = 0
+    private(set) static var focusRepairAttempts = 0
+    private(set) static var focusResponderChanges = 0
+
+    static func recordUpdateAttempt() { updateAttempts += 1 }
+    static func recordHostReparent() { hostReparents += 1 }
+    static func recordPostMountCallback() { postMountCallbacks += 1 }
+    static func recordFullScreenInvalidation() { fullScreenInvalidations += 1 }
+    static func recordPTYResizeAttempt() { ptyResizeAttempts += 1 }
+    static func recordPTYResizeAccepted() { ptyResizeAccepted += 1 }
+    static func recordFocusRepairAttempt() { focusRepairAttempts += 1 }
+    static func recordFocusResponderChange() { focusResponderChanges += 1 }
+
+    static func reset() {
+        updateAttempts = 0
+        hostReparents = 0
+        postMountCallbacks = 0
+        fullScreenInvalidations = 0
+        ptyResizeAttempts = 0
+        ptyResizeAccepted = 0
+        focusRepairAttempts = 0
+        focusResponderChanges = 0
     }
 }
+#endif
 
 private func applyFrozenBlockTerminalPalette(to terminalView: TerminalView) {
     let foreground = PaneTheme.terminalForeground(
@@ -159,14 +218,16 @@ final class AuthoritativeTerminalHostView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func setViewportInsets(_ insets: TerminalViewportInsets) {
-        guard viewportInsets != insets else { return }
+    @discardableResult
+    func setViewportInsets(_ insets: TerminalViewportInsets) -> Bool {
+        guard viewportInsets != insets else { return false }
         viewportInsets = insets
         leadingConstraint.constant = insets.leading
         trailingConstraint.constant = -insets.trailing
         topConstraint.constant = insets.top
         bottomConstraint.constant = -insets.bottom
         needsLayout = true
+        return true
     }
 
 }
@@ -180,14 +241,27 @@ final class AuthoritativeTerminalMountView: NSView {
     private var isWindowMountCallbackScheduled = false
     private var hasPendingPostMountLayoutCallback = false
     private var isPostMountLayoutCallbackScheduled = false
+    private var postMountLayoutGeneration: UInt64 = 0
+    private var pendingPostMountLayoutGeneration: UInt64 = 0
+    private var lastRequestedMountGeneration: UInt64?
+    private var lastObservedLayoutSize: CGSize?
+    private(set) var windowAttachmentGeneration: UInt64 = 0
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        windowAttachmentGeneration &+= 1
+        if window == nil {
+            hasPendingWindowMountCallback = true
+        }
         scheduleWindowMountCallbackIfNeeded()
     }
 
     override func layout() {
         super.layout()
+        if lastObservedLayoutSize != bounds.size {
+            lastObservedLayoutSize = bounds.size
+            enqueuePostMountLayoutCallback()
+        }
         schedulePostMountLayoutCallbackIfNeeded()
     }
 
@@ -208,7 +282,10 @@ final class AuthoritativeTerminalMountView: NSView {
         mountedHostView = hostView
         mountedLeaseID = lease.id
         hasPendingWindowMountCallback = true
-        hasPendingPostMountLayoutCallback = true
+        requestPostMountLayoutCallback(generation: lease.sequence)
+#if DEBUG
+        AuthoritativeTerminalRenderInstrumentation.recordHostReparent()
+#endif
         scheduleWindowMountCallbackIfNeeded()
         return true
     }
@@ -217,9 +294,25 @@ final class AuthoritativeTerminalMountView: NSView {
         guard mountedLeaseID == leaseID else { return }
         mountedLeaseID = nil
         onMountedIntoWindow = nil
+        hasPendingWindowMountCallback = false
+        hasPendingPostMountLayoutCallback = false
+        lastRequestedMountGeneration = nil
+        lastObservedLayoutSize = nil
+        postMountLayoutGeneration &+= 1
     }
 
-    func requestPostMountLayoutCallback() {
+    func requestPostMountLayoutCallback(generation: UInt64) {
+        guard lastRequestedMountGeneration != generation else { return }
+        lastRequestedMountGeneration = generation
+        enqueuePostMountLayoutCallback()
+    }
+
+    private func enqueuePostMountLayoutCallback() {
+        guard mountedLeaseID != nil else { return }
+        if !hasPendingPostMountLayoutCallback {
+            postMountLayoutGeneration &+= 1
+            pendingPostMountLayoutGeneration = postMountLayoutGeneration
+        }
         hasPendingPostMountLayoutCallback = true
         needsLayout = true
     }
@@ -245,15 +338,23 @@ final class AuthoritativeTerminalMountView: NSView {
         guard window != nil,
               hasPendingPostMountLayoutCallback,
               !isPostMountLayoutCallbackScheduled else { return }
+        let generation = pendingPostMountLayoutGeneration
         isPostMountLayoutCallbackScheduled = true
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.isPostMountLayoutCallbackScheduled = false
             guard self.window != nil,
                   self.hasPendingPostMountLayoutCallback,
+                  self.pendingPostMountLayoutGeneration == generation,
                   let hostView = self.mountedHostView,
-                  hostView.superview === self else { return }
+                  hostView.superview === self else {
+                self.schedulePostMountLayoutCallbackIfNeeded()
+                return
+            }
             self.hasPendingPostMountLayoutCallback = false
+#if DEBUG
+            AuthoritativeTerminalRenderInstrumentation.recordPostMountCallback()
+#endif
             self.onMountedIntoWindow?()
         }
     }
@@ -324,16 +425,22 @@ final class TerminalMountCoordinator {
         currentMount = mount
         if isNewClaim { claimCount += 1 }
         let host = session.makeAuthoritativeTerminalHostView()
-        host.setViewportInsets(lease.placement.viewportInsets)
+        let didChangeInsets = host.setViewportInsets(lease.placement.viewportInsets)
         let didReparent = mount.mount(host, authorizedBy: lease)
-        lastMountAt = Date()
-        configureCallbacks(for: lease, mount: mount)
+        let isMountTransition = isNewClaim || didReparent || didChangeInsets
+        if isNewClaim || didReparent {
+            lastMountAt = Date()
+            configureCallbacks(for: lease, mount: mount)
+        }
         session.applyAuthoritativeTerminalAttachmentGeometry(
             lease: lease,
             mount: mount,
-            redraw: true
+            transitionRequiresRedraw: isMountTransition
         )
-        scheduleSettledValidation(for: lease, mount: mount)
+        if isMountTransition {
+            mount.requestPostMountLayoutCallback(generation: lease.sequence)
+            scheduleSettledValidation(for: lease, mount: mount)
+        }
         return didReparent
     }
 
@@ -352,6 +459,14 @@ final class TerminalMountCoordinator {
 
     func isCurrent(lease: TerminalMountLease, mount: AuthoritativeTerminalMountView) -> Bool {
         currentLease == lease && currentMount === mount
+    }
+
+    var isTerminalMountedAsExpected: Bool {
+        guard let session, let currentLease, let currentMount,
+              session.expectedAuthoritativeTerminalPlacement == currentLease.placement,
+              let host = session.authoritativeTerminalHostView else { return false }
+        return host.superview === currentMount
+            && host.terminalView.window != nil
     }
 
     func healthSnapshot() -> TerminalMountHealthSnapshot {
@@ -402,12 +517,11 @@ final class TerminalMountCoordinator {
             self.session?.applyAuthoritativeTerminalAttachmentGeometry(
                 lease: lease,
                 mount: mount,
-                redraw: true
+                transitionRequiresRedraw: true
             )
             self.scheduleSettledValidation(for: lease, mount: mount)
             self.session?.restoreAuthoritativeFocusAfterMount()
         }
-        mount.requestPostMountLayoutCallback()
     }
 
     private func scheduleSettledValidation(
@@ -491,7 +605,7 @@ final class TerminalMountCoordinator {
         session.applyAuthoritativeTerminalAttachmentGeometry(
             lease: lease,
             mount: mount,
-            redraw: true
+            transitionRequiresRedraw: true
         )
         if ObjectIdentifier(session.makeAuthoritativeTerminalView()) != terminalIdentity {
             terminalIdentityChangeCount += 1
@@ -621,6 +735,10 @@ final class PaneTerminalView: TerminalView {
     override func bufferActivated(source: Terminal) {
         super.bufferActivated(source: source)
 
+        let isAlternate = source.isCurrentBufferAlternate
+        guard isAlternate != lastQueuedAlternateScreenState else { return }
+        lastQueuedAlternateScreenState = isAlternate
+
         // SwiftTerm owns the normal/alternate buffers.  Invalidate the whole
         // backing surface before exposing the newly-active one so AppKit never
         // composites cells from the previous buffer while the throttled
@@ -628,10 +746,10 @@ final class PaneTerminalView: TerminalView {
         source.updateFullScreen()
         setNeedsDisplay(bounds)
         layer?.setNeedsDisplay()
+#if DEBUG
+        AuthoritativeTerminalRenderInstrumentation.recordFullScreenInvalidation()
+#endif
 
-        let isAlternate = source.isCurrentBufferAlternate
-        guard isAlternate != lastQueuedAlternateScreenState else { return }
-        lastQueuedAlternateScreenState = isAlternate
         alternateScreenNotificationGeneration += 1
         let generation = alternateScreenNotificationGeneration
 
@@ -644,6 +762,28 @@ final class PaneTerminalView: TerminalView {
             self.onAlternateScreenChanged?(self.terminal.isCurrentBufferAlternate)
         }
     }
+}
+
+struct AuthoritativeTerminalRenderState: Equatable {
+    let hostID: ObjectIdentifier
+    let mountID: ObjectIdentifier
+    let placement: AuthoritativeTerminalPlacement
+    let viewportInsets: TerminalViewportInsets
+    let mountGeneration: UInt64
+    let appearanceSignature: String
+    let windowID: ObjectIdentifier?
+}
+
+struct AuthoritativeTerminalGeometrySignature: Equatable {
+    let hostID: ObjectIdentifier
+    let mountID: ObjectIdentifier
+    let leaseID: UUID
+    let placement: AuthoritativeTerminalPlacement
+    let viewportInsets: TerminalViewportInsets
+    let windowID: ObjectIdentifier
+    let windowAttachmentGeneration: UInt64
+    let mountSize: CGSize
+    let appearanceSignature: String
 }
 
 struct TerminalViewRepresentable: NSViewRepresentable {
@@ -662,15 +802,23 @@ struct TerminalViewRepresentable: NSViewRepresentable {
             lease: context.coordinator.lease,
             in: mountView
         )
+        context.coordinator.recordAppliedState(for: mountView, session: session)
         return mountView
     }
 
     func updateNSView(_ mountView: AuthoritativeTerminalMountView, context: Context) {
+#if DEBUG
+        AuthoritativeTerminalRenderInstrumentation.recordUpdateAttempt()
+#endif
         context.coordinator.updatePlacement(placement, session: session)
+        guard context.coordinator.requiresUpdate(for: mountView, session: session) else {
+            return
+        }
         _ = session.terminalMountCoordinator.present(
             lease: context.coordinator.lease,
             in: mountView
         )
+        context.coordinator.recordAppliedState(for: mountView, session: session)
     }
 
     static func dismantleNSView(
@@ -689,6 +837,7 @@ struct TerminalViewRepresentable: NSViewRepresentable {
         private(set) var lease: TerminalMountLease
         weak var session: TerminalSession?
         weak var mountView: AuthoritativeTerminalMountView?
+        private var lastAppliedState: AuthoritativeTerminalRenderState?
 
         init(lease: TerminalMountLease) {
             self.lease = lease
@@ -700,6 +849,38 @@ struct TerminalViewRepresentable: NSViewRepresentable {
         ) {
             guard lease.placement != placement else { return }
             lease = session.terminalMountCoordinator.issueLease(for: placement)
+        }
+
+        func requiresUpdate(
+            for mountView: AuthoritativeTerminalMountView,
+            session: TerminalSession
+        ) -> Bool {
+            lastAppliedState != renderState(for: mountView, session: session)
+        }
+
+        func recordAppliedState(
+            for mountView: AuthoritativeTerminalMountView,
+            session: TerminalSession
+        ) {
+            lastAppliedState = renderState(for: mountView, session: session)
+        }
+
+        private func renderState(
+            for mountView: AuthoritativeTerminalMountView,
+            session: TerminalSession
+        ) -> AuthoritativeTerminalRenderState {
+            let host = session.makeAuthoritativeTerminalHostView()
+            return AuthoritativeTerminalRenderState(
+                hostID: ObjectIdentifier(host),
+                mountID: ObjectIdentifier(mountView),
+                placement: lease.placement,
+                viewportInsets: lease.placement.viewportInsets,
+                mountGeneration: lease.sequence,
+                appearanceSignature: paneTerminalAppearanceSignature(
+                    for: host.terminalView
+                ),
+                windowID: mountView.window.map(ObjectIdentifier.init)
+            )
         }
     }
 }

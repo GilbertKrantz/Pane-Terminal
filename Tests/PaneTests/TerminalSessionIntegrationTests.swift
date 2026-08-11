@@ -566,6 +566,14 @@ final class TerminalSessionIntegrationTests: XCTestCase {
 
         XCTAssertTrue(session.inputRequirement == .direct)
         XCTAssertFalse(session.isSecureInputActive)
+        await drainMainQueue(turns: 3)
+        AuthoritativeTerminalRenderInstrumentation.reset()
+        try await Task.sleep(for: .seconds(10))
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.hostReparents, 0)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 0)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 0)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAccepted, 0)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.focusResponderChanges, 0)
         session.sendInterrupt()
     }
 
@@ -1860,6 +1868,12 @@ extension TerminalSessionIntegrationTests {
         session.restoreAuthoritativeFocusAfterMount()
         await drainMainQueue(turns: 2)
         XCTAssertTrue(window.firstResponder === host.terminalView)
+        AuthoritativeTerminalRenderInstrumentation.reset()
+        session.restoreAuthoritativeFocusAfterMount()
+        session.restoreAuthoritativeFocusAfterMount()
+        await drainMainQueue(turns: 2)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.focusRepairAttempts, 0)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.focusResponderChanges, 0)
 
         XCTAssertTrue(session.terminalMountCoordinator.present(lease: secondLease, in: secondMount))
         secondMount.layoutSubtreeIfNeeded()
@@ -1974,17 +1988,105 @@ extension TerminalSessionIntegrationTests {
         }
 
         container.layoutSubtreeIfNeeded()
+        await drainMainQueue(turns: 3)
         XCTAssertTrue(window.makeFirstResponder(searchField))
 
         session.requestFocus(.none)
-        terminalHost.rootView = TerminalViewRepresentable(
-            session: session,
-            placement: .fullTerminal
-        )
-        container.layoutSubtreeIfNeeded()
+        AuthoritativeTerminalRenderInstrumentation.reset()
+        session.commandDraft = "unrelated publication"
         await drainMainQueue(turns: 2)
 
+        XCTAssertGreaterThan(
+            AuthoritativeTerminalRenderInstrumentation.updateAttempts,
+            0
+        )
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.hostReparents, 0)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 0)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 0)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAttempts, 0)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.focusRepairAttempts, 0)
         XCTAssertTrue(window.firstResponder === searchField.currentEditor())
+    }
+
+    @MainActor
+    func testPostMountRequestsCoalesceAndMountGenerationRedrawsOnce() async throws {
+        let session = makeTestSession()
+        session.ensureAuthoritativeTerminalIsRunning()
+        defer { session.shutdown() }
+        try await waitUntil("shell readiness before render coalescing", timeout: 5) {
+            session.isShellReadyForInput
+        }
+        session.setMode(.terminal)
+
+        let mount = AuthoritativeTerminalMountView(
+            frame: NSRect(x: 0, y: 0, width: 640, height: 320)
+        )
+        let window = NSWindow(
+            contentRect: mount.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = mount
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+
+        let firstLease = session.terminalMountCoordinator.issueLease(for: .fullTerminal)
+        XCTAssertTrue(session.terminalMountCoordinator.present(lease: firstLease, in: mount))
+        mount.layoutSubtreeIfNeeded()
+        await drainMainQueue(turns: 3)
+
+        AuthoritativeTerminalRenderInstrumentation.reset()
+        window.setContentSize(NSSize(width: 800, height: 400))
+        mount.layoutSubtreeIfNeeded()
+        await drainMainQueue(turns: 3)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 1)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 1)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAccepted, 1)
+
+        AuthoritativeTerminalRenderInstrumentation.reset()
+        mount.requestPostMountLayoutCallback(generation: 10_000)
+        mount.requestPostMountLayoutCallback(generation: 10_000)
+        mount.requestPostMountLayoutCallback(generation: 10_000)
+        mount.layoutSubtreeIfNeeded()
+        await drainMainQueue(turns: 3)
+
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 1)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 0)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAttempts, 0)
+
+        mount.requestPostMountLayoutCallback(generation: 10_000)
+        mount.layoutSubtreeIfNeeded()
+        await drainMainQueue(turns: 2)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 1)
+
+        AuthoritativeTerminalRenderInstrumentation.reset()
+        let nextLease = session.terminalMountCoordinator.issueLease(for: .fullTerminal)
+        XCTAssertFalse(session.terminalMountCoordinator.present(lease: nextLease, in: mount))
+        mount.layoutSubtreeIfNeeded()
+        await drainMainQueue(turns: 3)
+
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.hostReparents, 0)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 1)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAccepted, 0)
+    }
+
+    @MainActor
+    func testRepeatedBufferActivationInvalidatesOncePerActualTransition() async {
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 640, height: 320)
+        )
+        AuthoritativeTerminalRenderInstrumentation.reset()
+
+        terminalView.feed(text: "\u{001B}[?1049h")
+        terminalView.feed(text: "\u{001B}[?1049h")
+        await drainMainQueue(turns: 2)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 1)
+
+        terminalView.feed(text: "\u{001B}[?1049l")
+        terminalView.feed(text: "\u{001B}[?1049l")
+        await drainMainQueue(turns: 2)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 2)
     }
 
     @MainActor

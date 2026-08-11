@@ -192,6 +192,8 @@ final class TerminalSession: NSObject, ObservableObject {
     private var lastForegroundInspectionAt: Date?
     private var lastForegroundSnapshot: ForegroundProcessSnapshot?
     private(set) var focusGeneration: UInt64 = 0
+    private var pendingAuthoritativeFocusRepairGeneration: UInt64?
+    private var lastAuthoritativeGeometrySignature: AuthoritativeTerminalGeometrySignature?
     var restartTask: Task<Void, Never>?
     var shutdownTask: Task<SessionShutdownResult, Never>?
     var completedShutdownResult: SessionShutdownResult?
@@ -652,14 +654,6 @@ final class TerminalSession: NSObject, ObservableObject {
 
     func historyNext() {
         commandDraft = history.next(currentDraft: commandDraft)
-    }
-
-    func authoritativeTerminalDidLayout() {
-        guard let terminalView else { return }
-        updateWindowSize(from: terminalView)
-        terminalView.terminal.updateFullScreen()
-        terminalView.setNeedsDisplay(terminalView.bounds)
-        if shouldAuthoritativeTerminalOwnFocus { focusAuthoritativeTerminal() }
     }
 
     func autocompleteEdit(
@@ -2181,8 +2175,17 @@ final class TerminalSession: NSObject, ObservableObject {
     func restoreAuthoritativeFocusAfterMount() {
         guard visibilityState == .selected,
               focusTarget == .authoritativeTerminal,
-              shouldAuthoritativeTerminalOwnFocus else { return }
+              shouldAuthoritativeTerminalOwnFocus,
+              terminalMountCoordinator.isTerminalMountedAsExpected,
+              let terminalView,
+              let window = terminalView.window,
+              window.firstResponder !== terminalView else { return }
         let generation = focusGeneration
+        guard pendingAuthoritativeFocusRepairGeneration != generation else { return }
+        pendingAuthoritativeFocusRepairGeneration = generation
+#if DEBUG
+        AuthoritativeTerminalRenderInstrumentation.recordFocusRepairAttempt()
+#endif
         DispatchQueue.main.async { [weak self] in
             self?.repairAuthoritativeFocus(generation: generation)
         }
@@ -2195,6 +2198,9 @@ final class TerminalSession: NSObject, ObservableObject {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             self?.repairAuthoritativeFocus(generation: generation)
+            if self?.pendingAuthoritativeFocusRepairGeneration == generation {
+                self?.pendingAuthoritativeFocusRepairGeneration = nil
+            }
         }
     }
 
@@ -2207,34 +2213,58 @@ final class TerminalSession: NSObject, ObservableObject {
               let window = terminalView.window else { return }
         if window.firstResponder !== terminalView {
             window.makeFirstResponder(terminalView)
+#if DEBUG
+            AuthoritativeTerminalRenderInstrumentation.recordFocusResponderChange()
+#endif
         }
     }
 
-    /// Applies layout, emulator redraw, and PTY sizing only for the current
-    /// presentation lease. This preserves the terminal and PTY identities.
+    /// Applies geometry and repaint work once for a real mount, presentation,
+    /// appearance, or drawable-window transition. Normal terminal output uses
+    /// SwiftTerm's own damage path and never enters this method.
     func applyAuthoritativeTerminalAttachmentGeometry(
         lease: TerminalMountLease,
         mount: AuthoritativeTerminalMountView,
-        redraw: Bool
+        transitionRequiresRedraw: Bool
     ) {
         guard terminalMountCoordinator.isCurrent(lease: lease, mount: mount),
               expectedAuthoritativeTerminalPlacement == lease.placement,
               let host = authoritativeTerminalHostView,
               host.superview === mount,
               let terminalView,
-              terminalView.window != nil else { return }
-        applyPaneTerminalPalette(to: terminalView)
+              let window = terminalView.window else {
+            lastAuthoritativeGeometrySignature = nil
+            return
+        }
+        let signature = AuthoritativeTerminalGeometrySignature(
+            hostID: ObjectIdentifier(host),
+            mountID: ObjectIdentifier(mount),
+            leaseID: lease.id,
+            placement: lease.placement,
+            viewportInsets: host.viewportInsets,
+            windowID: ObjectIdentifier(window),
+            windowAttachmentGeneration: mount.windowAttachmentGeneration,
+            mountSize: mount.bounds.size,
+            appearanceSignature: paneTerminalAppearanceSignature(for: terminalView)
+        )
+        guard lastAuthoritativeGeometrySignature != signature else { return }
+
+        let paletteChanged = applyPaneTerminalPalette(to: terminalView)
         mount.layoutSubtreeIfNeeded()
         host.layoutSubtreeIfNeeded()
         terminalView.layoutSubtreeIfNeeded()
         guard terminalView.bounds.width > 0, terminalView.bounds.height > 0 else { return }
-        if redraw {
+        updateWindowSize(from: terminalView)
+        lastAuthoritativeGeometrySignature = signature
+        if transitionRequiresRedraw || paletteChanged {
             terminalView.isHidden = false
             terminalView.terminal.updateFullScreen()
             terminalView.setNeedsDisplay(terminalView.bounds)
             terminalView.layer?.setNeedsDisplay()
+#if DEBUG
+            AuthoritativeTerminalRenderInstrumentation.recordFullScreenInvalidation()
+#endif
         }
-        updateWindowSize(from: terminalView)
     }
 
     func repairTerminalView() {

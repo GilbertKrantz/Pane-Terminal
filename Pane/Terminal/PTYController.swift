@@ -226,8 +226,14 @@ final class PTYController {
 
     @discardableResult
     func resize(to newSize: winsize) -> Bool {
+#if DEBUG
+        AuthoritativeTerminalRenderInstrumentation.recordPTYResizeAttempt()
+#endif
         guard !Self.equalWindowSizes(windowSize, newSize) else { return false }
         windowSize = newSize
+#if DEBUG
+        AuthoritativeTerminalRenderInstrumentation.recordPTYResizeAccepted()
+#endif
 
         guard let process,
               process.running,
