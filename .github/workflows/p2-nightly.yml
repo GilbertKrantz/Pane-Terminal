@@ -41,11 +41,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Verify toolchain and repository integrity
+      - name: Select toolchain and verify repository integrity
         run: |
-          test -d "$DEVELOPER_DIR"
-          xcodebuild -version
-          swift --version
+          Scripts/P2/select-ci-toolchain.sh
           Scripts/P2/check-integrity.sh
 
       - name: Configure fixture Python

@@ -42,11 +42,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Verify pinned Xcode
+      - name: Select and verify pinned Xcode
         run: |
-          test -d "$DEVELOPER_DIR"
-          xcodebuild -version
-          swift --version
+          Scripts/P2/select-ci-toolchain.sh
 
       - name: Configure fixture Python
         uses: actions/setup-python@v6
@@ -112,10 +110,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Verify pinned Xcode
+      - name: Select and verify pinned Xcode
         run: |
-          test -d "$DEVELOPER_DIR"
-          xcodebuild -version
+          Scripts/P2/select-ci-toolchain.sh
 
       - name: Configure fixture Python
         uses: actions/setup-python@v6
