@@ -79,14 +79,75 @@ final class CommandAutocompleteTests: XCTestCase {
     }
 
     func initializeGitRepository(at directory: URL) throws {
+        try GitTestSupport.initializeRepository(at: directory)
+    }
+}
+
+enum GitTestSupport {
+    static func initializeRepository(
+        at directory: URL,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let result = try runGit(["init", "--quiet", directory.path])
+        XCTAssertEqual(
+            result.status,
+            0,
+            result.diagnostics(workingDirectory: directory),
+            file: file,
+            line: line
+        )
+    }
+
+    private static func runGit(_ arguments: [String]) throws -> GitCommandResult {
         let process = Process()
+        let standardOutput = Pipe()
+        let standardError = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["init", "--quiet", directory.path]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        process.arguments = arguments
+        process.standardOutput = standardOutput
+        process.standardError = standardError
         try process.run()
         process.waitUntilExit()
-        XCTAssertEqual(process.terminationStatus, 0)
+        return GitCommandResult(
+            status: process.terminationStatus,
+            standardOutput: String(
+                data: standardOutput.fileHandleForReading.readDataToEndOfFile(),
+                encoding: .utf8
+            ) ?? "<non-UTF-8>",
+            standardError: String(
+                data: standardError.fileHandleForReading.readDataToEndOfFile(),
+                encoding: .utf8
+            ) ?? "<non-UTF-8>",
+            arguments: arguments
+        )
+    }
+
+    private struct GitCommandResult {
+        let status: Int32
+        let standardOutput: String
+        let standardError: String
+        let arguments: [String]
+
+        func diagnostics(workingDirectory: URL) -> String {
+            let environment = ProcessInfo.processInfo.environment
+            let gitVersionResult = try? GitTestSupport.runGit(["--version"])
+            let gitVersion = gitVersionResult?.standardOutput
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? "<unavailable>"
+            return """
+            Git repository initialization failed.
+            executable: /usr/bin/git
+            arguments: \(arguments.joined(separator: " "))
+            status: \(status)
+            repository: \(workingDirectory.path)
+            temporaryDirectory: \(FileManager.default.temporaryDirectory.path)
+            TMPDIR: \(environment["TMPDIR"] ?? "<unset>")
+            PWD: \(environment["PWD"] ?? "<unset>")
+            gitVersion: \(gitVersion)
+            stdout: \(standardOutput.isEmpty ? "<empty>" : standardOutput)
+            stderr: \(standardError.isEmpty ? "<empty>" : standardError)
+            """
+        }
     }
 }
 

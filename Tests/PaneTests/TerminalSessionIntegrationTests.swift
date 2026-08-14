@@ -1483,6 +1483,7 @@ final class TerminalSessionIntegrationTests: XCTestCase {
         XCTAssertEqual(TerminalSession.normalizedExitCode(fromWaitStatus: 0), 0)
         XCTAssertEqual(TerminalSession.normalizedExitCode(fromWaitStatus: 7 << 8), 7)
         XCTAssertEqual(TerminalSession.normalizedExitCode(fromWaitStatus: SIGTERM), 143)
+        XCTAssertEqual(TerminalSession.normalizedExitCode(fromWaitStatus: SIGKILL), 137)
         XCTAssertNil(TerminalSession.normalizedExitCode(fromWaitStatus: nil))
     }
 

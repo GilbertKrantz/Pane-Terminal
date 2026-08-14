@@ -88,7 +88,60 @@ private final class PTYProcessDelegateBridge: LocalProcessDelegate {
     }
 
     func processTerminated(_ source: LocalProcess, exitCode: Int32?) {
-        terminationHandler(exitCode, generation)
+        // SwiftTerm obtains this value with a nonblocking waitpid call. On
+        // newer macOS runners that call can occasionally report the initial
+        // zero value before the kernel has made the final wait status
+        // available. Retry only that ambiguous case, preserving normal zero
+        // exits and every nonzero status exactly as supplied.
+        guard exitCode == 0, source.shellPid > 0 else {
+            terminationHandler(exitCode, generation)
+            return
+        }
+        let processID = source.shellPid
+        var waitStatus: Int32 = 0
+        let initialWait = Darwin.waitpid(processID, &waitStatus, WNOHANG)
+        if initialWait == processID {
+            terminationHandler(waitStatus, generation)
+            return
+        }
+        guard initialWait == 0 || (initialWait == -1 && errno == EINTR) else {
+            terminationHandler(exitCode, generation)
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async { [terminationHandler, generation] in
+            let resolvedStatus = Self.recoverWaitStatus(
+                reportedStatus: exitCode,
+                processID: processID
+            )
+            DispatchQueue.main.async {
+                terminationHandler(resolvedStatus, generation)
+            }
+        }
+    }
+
+    private static func recoverWaitStatus(
+        reportedStatus: Int32?,
+        processID: pid_t
+    ) -> Int32? {
+        guard reportedStatus == 0, processID > 0 else { return reportedStatus }
+
+        for attempt in 0..<5 {
+            var waitStatus: Int32 = 0
+            let result = Darwin.waitpid(processID, &waitStatus, WNOHANG)
+            if result == processID {
+                return waitStatus
+            }
+            if result == -1, errno == ECHILD {
+                return reportedStatus
+            }
+            if result == -1, errno != EINTR {
+                return reportedStatus
+            }
+            if attempt < 4 {
+                usleep(5_000)
+            }
+        }
+        return reportedStatus
     }
 
     func getWindowSize() -> winsize {

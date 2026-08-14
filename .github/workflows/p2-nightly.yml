@@ -119,6 +119,23 @@ jobs:
             clean build \
             2>&1 | tee .ci/p2-artifacts/clean-native-build.log
 
+      - name: Run native Git-context preflight
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Pane.xcodeproj \
+            -scheme Pane \
+            -destination 'platform=macOS' \
+            -configuration Debug \
+            -derivedDataPath .ci/DerivedData \
+            -clonedSourcePackagesDirPath .ci/SourcePackages \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO \
+            -only-testing:PaneTests/CommandAutocompleteTests/testGitContextStopsReadingWhenEmptyRemoteOutputReachesEOF \
+            -only-testing:PaneTests/ResourceLifecycleHardeningTests/testHundredGitContextRefreshesConvergeProcessesAndDescriptors \
+            test \
+            2>&1 | tee .ci/p2-artifacts/native-git-preflight.log
+
       - name: Run both native test targets
         run: |
           xcodebuild \
@@ -132,6 +149,24 @@ jobs:
             -parallel-testing-enabled NO \
             CODE_SIGNING_ALLOWED=NO \
             test
+
+      - name: Run native Git-context post-failure probe
+        if: failure()
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Pane.xcodeproj \
+            -scheme Pane \
+            -destination 'platform=macOS' \
+            -configuration Debug \
+            -derivedDataPath .ci/DerivedData \
+            -clonedSourcePackagesDirPath .ci/SourcePackages \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO \
+            -only-testing:PaneTests/CommandAutocompleteTests/testGitContextStopsReadingWhenEmptyRemoteOutputReachesEOF \
+            -only-testing:PaneTests/ResourceLifecycleHardeningTests/testHundredGitContextRefreshesConvergeProcessesAndDescriptors \
+            test \
+            2>&1 | tee .ci/p2-artifacts/native-git-post-failure.log
 
       - name: Capture sanitized runner metadata
         if: always()

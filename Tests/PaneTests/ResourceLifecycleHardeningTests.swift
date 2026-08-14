@@ -121,14 +121,7 @@ final class ResourceLifecycleHardeningTests: XCTestCase {
 
     private func initializeGitRepository(at root: URL) throws {
         try? FileManager.default.removeItem(at: root.appendingPathComponent(".git"))
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["init", "--quiet", root.path]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
-        XCTAssertEqual(process.terminationStatus, 0)
+        try GitTestSupport.initializeRepository(at: root)
     }
 
     private func slowGitProvider() -> ProjectContextProvider {
