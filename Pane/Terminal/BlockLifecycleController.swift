@@ -92,6 +92,10 @@ final class BlockLifecycleController {
         activeCapture.data
     }
 
+    var queuedBlocks: [CommandBlock] { timeline.queuedBlocks }
+
+    func firstQueuedBlock() -> CommandBlock? { queuedBlocks.first }
+
     @discardableResult
     func queue(
         command: String,
@@ -109,9 +113,12 @@ final class BlockLifecycleController {
 
     func markAwaitingStart(_ id: UUID?) {
         if let id {
-            guard timeline.block(id: id) != nil else { return }
+            guard timeline.activeBlockID == nil,
+                  timeline.queuedBlocks.first?.id == id else { return }
         }
+        guard awaitingStartID != id else { return }
         awaitingStartID = id
+        publishTimeline()
     }
 
     @discardableResult
@@ -197,7 +204,8 @@ final class BlockLifecycleController {
         exitCode: Int32?,
         renderedOutput: String?,
         columns: Int,
-        rows: Int
+        rows: Int,
+        preserveQueued: Bool = false
     ) -> UUID? {
         let blockID = activeOrAwaitingBlockID
         guard blockID != nil else {
@@ -207,15 +215,31 @@ final class BlockLifecycleController {
         }
 
         let output = finalizedOutput(renderedOutput: renderedOutput)
-        timeline.interruptUnfinished(
-            exitCode: exitCode,
-            activeOutput: output.text,
-            activeOutputKind: output.kind,
-            activeTerminalSnapshot: finalizedTerminalSnapshot(
-                columns: columns,
-                rows: rows
+        if preserveQueued {
+            if timeline.activeBlockID != nil {
+                timeline.interruptActive(
+                    exitCode: exitCode,
+                    output: output.text,
+                    outputKind: output.kind,
+                    terminalSnapshot: finalizedTerminalSnapshot(
+                        columns: columns,
+                        rows: rows
+                    )
+                )
+            } else if let awaitingStartID {
+                timeline.interruptQueued(id: awaitingStartID, exitCode: exitCode)
+            }
+        } else {
+            timeline.interruptUnfinished(
+                exitCode: exitCode,
+                activeOutput: output.text,
+                activeOutputKind: output.kind,
+                activeTerminalSnapshot: finalizedTerminalSnapshot(
+                    columns: columns,
+                    rows: rows
+                )
             )
-        )
+        }
         awaitingStartID = nil
         resetCapture()
         applyScrollbackPolicy(compactOversizedOutputs: false)
@@ -232,6 +256,30 @@ final class BlockLifecycleController {
         }
         timeline.remove(id: id)
         publishTimeline()
+    }
+
+    @discardableResult
+    func removeQueued(id: UUID) -> Bool {
+        guard id != awaitingStartID else { return false }
+        let removed = timeline.removeQueued(id: id)
+        if removed { publishTimeline() }
+        return removed
+    }
+
+    @discardableResult
+    func moveQueued(id: UUID, before destinationID: UUID) -> Bool {
+        guard id != awaitingStartID, destinationID != awaitingStartID else { return false }
+        let moved = timeline.moveQueued(id: id, before: destinationID)
+        if moved { publishTimeline() }
+        return moved
+    }
+
+    @discardableResult
+    func moveQueuedToFront(id: UUID) -> Bool {
+        guard id != awaitingStartID else { return false }
+        let moved = timeline.moveQueuedToFront(id: id)
+        if moved { publishTimeline() }
+        return moved
     }
 
     func clearFinalized() {

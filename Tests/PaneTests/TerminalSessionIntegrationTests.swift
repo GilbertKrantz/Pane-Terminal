@@ -157,6 +157,55 @@ final class TerminalSessionIntegrationTests: XCTestCase {
     }
 
     @MainActor
+    func testCommandReturnQueuesComposerDraftWhileCommandIsRunning() async throws {
+        NSWindow.allowsAutomaticWindowTabbing = false
+        let session = makeTestSession()
+        let hostingView = NSHostingView(rootView: ContentView(session: session))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.orderOut(nil)
+            session.shutdown()
+        }
+        try await waitUntil("queue shortcut composer mount", timeout: 5) {
+            hostingView.layoutSubtreeIfNeeded()
+            return session.isShellReadyForInput && self.findTextView(in: hostingView) != nil
+        }
+
+        let active = "sleep 30"
+        session.submit(command: active)
+        try await waitUntil("queue shortcut active command", timeout: 5) {
+            session.activeCommandBlock?.command == active
+        }
+        let textView = try XCTUnwrap(findTextView(in: hostingView))
+        session.commandDraft = "printf 'PANE_COMMAND_RETURN_QUEUE\\n'"
+        await Task.yield()
+        let event = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: .command,
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: "\r",
+            charactersIgnoringModifiers: "\r",
+            isARepeat: false,
+            keyCode: 36
+        ))
+
+        XCTAssertTrue(textView.performKeyEquivalent(with: event))
+        XCTAssertEqual(session.queuedBlocks.map(\.command), ["printf 'PANE_COMMAND_RETURN_QUEUE\\n'"])
+        XCTAssertTrue(session.commandDraft.isEmpty)
+        XCTAssertEqual(session.activeCommandBlock?.command, active)
+    }
+
+    @MainActor
     func testComposerControlCInterruptsForegroundCommand() async throws {
         NSWindow.allowsAutomaticWindowTabbing = false
         let session = makeTestSession()
@@ -1567,6 +1616,244 @@ final class TerminalSessionIntegrationTests: XCTestCase {
         }
 
         return output
+    }
+
+    @MainActor
+    func testQueuedCommandsWaitForActiveCommandAndAdvanceInFIFOOrder() async throws {
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+        try await waitUntil("queue fixture shell readiness", timeout: 5) {
+            session.isShellReadyForInput
+        }
+
+        let active = "sleep 0.3; printf 'PANE_QUEUE_ACTIVE\\n'"
+        let queued = [
+            "printf 'PANE_QUEUE_ONE\\n'",
+            "printf 'PANE_QUEUE_TWO\\n'",
+            "printf 'PANE_QUEUE_THREE\\n'",
+        ]
+        session.submit(command: active)
+        try await waitUntil("queue fixture active command", timeout: 5) {
+            session.activeCommandBlock?.command == active
+        }
+        queued.forEach { session.queue(command: $0) }
+
+        XCTAssertEqual(session.queuedBlocks.map(\.command), queued)
+        XCTAssertEqual(
+            session.blocks.filter { queued.contains($0.command) }.map(\.state),
+            Array(repeating: .queued, count: queued.count)
+        )
+
+        try await waitUntil("FIFO queue completion", timeout: 8) {
+            queued.allSatisfy { command in
+                session.blocks.contains { block in
+                    guard block.command == command else { return false }
+                    if case .completed(exitCode: 0) = block.state { return true }
+                    return false
+                }
+            }
+        }
+        XCTAssertEqual(
+            session.blocks.filter { queued.contains($0.command) }.map(\.command),
+            queued
+        )
+        XCTAssertTrue(session.queuedBlocks.isEmpty)
+        XCTAssertFalse(session.isCommandActive)
+    }
+
+    @MainActor
+    func testQueueSendFailureRetainsCommandAndReportsDiagnostic() async throws {
+        let session = TerminalSession(
+            shellConfiguration: testShellConfiguration,
+            commandSenderOverride: { _ in false }
+        )
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+        try await waitUntil("send-failure shell readiness", timeout: 5) {
+            session.isShellReadyForInput
+        }
+
+        let command = "printf 'PANE_QUEUE_RETAINED\\n'"
+        session.queue(command: command)
+
+        XCTAssertEqual(session.queuedBlocks.map(\.command), [command])
+        XCTAssertNil(session.blockLifecycleController.awaitingStartID)
+        XCTAssertTrue(session.runtimeStateDiagnostic?.contains("remains in Up next") == true)
+    }
+
+    @MainActor
+    func testQueueDispatcherIsIdempotentWhileFirstCommandAwaitsStart() async throws {
+        var sentCommands: [[UInt8]] = []
+        let session = TerminalSession(
+            shellConfiguration: testShellConfiguration,
+            commandSenderOverride: { bytes in
+                sentCommands.append(bytes)
+                return true
+            }
+        )
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+        try await waitUntil("idempotence shell readiness", timeout: 5) {
+            session.isShellReadyForInput
+        }
+
+        let first = "printf first"
+        let second = "printf second"
+        session.queue(command: first)
+        session.queue(command: second)
+
+        XCTAssertEqual(sentCommands, [CommandSerializer.serializeCommand(first)])
+        XCTAssertEqual(session.activeCommandBlock?.command, first)
+        XCTAssertEqual(session.queuedBlocks.map(\.command), [second])
+    }
+
+    @MainActor
+    func testQueuedCommandNeverBecomesInputToCurrentInteractiveCommand() async throws {
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+        try await waitUntil("interactive queue shell readiness", timeout: 5) {
+            session.isShellReadyForInput
+        }
+
+        let active = #"/bin/sh -c 'printf "PANE_QUEUE_INPUT_READY\n"; IFS= read -r pane_reply; printf "PANE_QUEUE_INPUT_DONE:%s\n" "$pane_reply"'"#
+        let queued = "printf 'PANE_QUEUE_INPUT_AFTER\\n'"
+        session.submit(command: active)
+        try await waitUntil("interactive command to await input", timeout: 5) {
+            session.activeCommandBlock?.command == active
+                && session.inputRequirement == .lineOriented
+        }
+        session.queue(command: queued)
+        try await Task.sleep(nanoseconds: 150_000_000)
+
+        XCTAssertEqual(session.activeCommandBlock?.command, active)
+        XCTAssertEqual(session.queuedBlocks.map(\.command), [queued])
+
+        session.commandDraft = "human-input"
+        session.submitDraft()
+        try await waitUntil("interactive queue completion", timeout: 8) {
+            session.blocks.contains { block in
+                guard block.command == queued else { return false }
+                if case .completed(exitCode: 0) = block.state { return true }
+                return false
+            }
+        }
+        let activeBlock = try XCTUnwrap(session.blocks.first { $0.command == active })
+        XCTAssertTrue(activeBlock.output.contains("PANE_QUEUE_INPUT_DONE:human-input"))
+    }
+
+    @MainActor
+    func testQueuedCommandCanBeReorderedRemovedAndEditedIntoComposer() {
+        let session = TerminalSession(shellConfiguration: testShellConfiguration)
+        let first = "printf first"
+        let second = "printf second"
+        session.queue(command: first)
+        session.queue(command: second)
+        let firstID = session.queuedBlocks[0].id
+        let secondID = session.queuedBlocks[1].id
+
+        session.moveQueuedBlock(id: secondID, before: firstID)
+        XCTAssertEqual(session.queuedBlocks.map(\.command), [second, first])
+        session.removeQueuedBlock(id: firstID)
+        XCTAssertEqual(session.queuedBlocks.map(\.command), [second])
+        session.editBlock(id: secondID)
+
+        XCTAssertTrue(session.queuedBlocks.isEmpty)
+        XCTAssertEqual(session.commandDraft, second)
+    }
+
+    @MainActor
+    func testSecureInputRejectsQueueCreation() async throws {
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+        try await waitUntil("secure queue shell readiness", timeout: 5) {
+            session.isShellReadyForInput
+        }
+
+        session.enterSecureInput()
+        session.commandDraft = "never-store-this-secret"
+        session.queueDraft()
+
+        XCTAssertTrue(session.blocks.isEmpty)
+        XCTAssertTrue(session.queuedBlocks.isEmpty)
+        XCTAssertEqual(session.commandDraft, "never-store-this-secret")
+    }
+
+    @MainActor
+    func testShellRestartPreservesAndResumesQueuedCommand() async throws {
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        defer { session.shutdown() }
+        try await waitUntil("restart queue shell readiness", timeout: 5) {
+            session.isShellReadyForInput
+        }
+
+        let active = "printf 'PANE_QUEUE_BEFORE_RESTART\\n'; sleep 30"
+        let queued = "printf 'PANE_QUEUE_AFTER_RESTART\\n'"
+        session.submit(command: active)
+        try await waitUntil("restart queue active command", timeout: 5) {
+            session.activeCommandBlock?.command == active
+        }
+        session.queue(command: queued)
+        session.restartShell()
+
+        try await waitUntil("queued command after shell restart", timeout: 10) {
+            session.blocks.contains { block in
+                guard block.command == queued else { return false }
+                if case .completed(exitCode: 0) = block.state { return true }
+                return false
+            }
+        }
+        XCTAssertTrue(session.blocks.contains { block in
+            guard block.command == active else { return false }
+            if case .interrupted = block.state { return true }
+            return false
+        })
+    }
+
+    @MainActor
+    func testShutdownNeverDispatchesQueuedCommand() async throws {
+        let markerURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pane-queue-shutdown-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: markerURL) }
+        let session = makeTestSession()
+        let terminalView = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 800, height: 400)
+        )
+        session.attach(terminalView: terminalView)
+        try await waitUntil("shutdown queue shell readiness", timeout: 5) {
+            session.isShellReadyForInput
+        }
+
+        let active = "sleep 30"
+        session.submit(command: active)
+        try await waitUntil("shutdown queue active command", timeout: 5) {
+            session.activeCommandBlock?.command == active
+        }
+        session.queue(command: "printf queued > \(markerURL.path)")
+        _ = await session.shutdownAndWait()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: markerURL.path))
     }
 
     @MainActor

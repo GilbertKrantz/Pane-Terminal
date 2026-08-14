@@ -253,6 +253,10 @@ struct CommandBlockTimeline: Equatable, Sendable {
         retainedOutputBytes
     }
 
+    var queuedBlocks: [CommandBlock] {
+        queuedBlockIDs.compactMap { block(id: $0) }
+    }
+
     @discardableResult
     mutating func enqueue(
         command: String,
@@ -376,6 +380,13 @@ struct CommandBlockTimeline: Equatable, Sendable {
             seen.insert(block.id).inserted
         }
         blocks.insert(contentsOf: uniqueBlocks, at: 0)
+        queuedBlockIDs.insert(
+            contentsOf: uniqueBlocks.compactMap { block in
+                if case .queued = block.state { return block.id }
+                return nil
+            },
+            at: 0
+        )
         retainedOutputBytes += uniqueBlocks.reduce(into: 0) { count, block in
             count += Self.retainedByteCount(of: block)
         }
@@ -399,6 +410,39 @@ struct CommandBlockTimeline: Equatable, Sendable {
         queuedBlockIDs.removeAll { $0 == id }
         blocks[index].completedAt = date
         blocks[index].state = .interrupted(exitCode: exitCode)
+    }
+
+    @discardableResult
+    mutating func removeQueued(id: UUID) -> Bool {
+        guard id != activeBlockID,
+              let index = index(of: id),
+              case .queued = blocks[index].state else { return false }
+        blocks.remove(at: index)
+        queuedBlockIDs.removeAll { $0 == id }
+        return true
+    }
+
+    @discardableResult
+    mutating func moveQueued(id: UUID, before destinationID: UUID) -> Bool {
+        guard id != destinationID,
+              queuedBlockIDs.contains(id),
+              let destinationIndex = queuedBlockIDs.firstIndex(of: destinationID) else {
+            return false
+        }
+        queuedBlockIDs.removeAll { $0 == id }
+        let adjustedDestination = queuedBlockIDs.firstIndex(of: destinationID) ?? destinationIndex
+        queuedBlockIDs.insert(id, at: adjustedDestination)
+        reorderQueuedBlocksToMatchQueue()
+        return true
+    }
+
+    @discardableResult
+    mutating func moveQueuedToFront(id: UUID) -> Bool {
+        guard queuedBlockIDs.contains(id) else { return false }
+        queuedBlockIDs.removeAll { $0 == id }
+        queuedBlockIDs.insert(id, at: 0)
+        reorderQueuedBlocksToMatchQueue()
+        return true
     }
 
     mutating func remove(id: UUID) {
@@ -520,6 +564,24 @@ struct CommandBlockTimeline: Equatable, Sendable {
 
     private func index(of id: UUID) -> Int? {
         blocks.firstIndex { $0.id == id }
+    }
+
+    private mutating func reorderQueuedBlocksToMatchQueue() {
+        var queuedByID = Dictionary(uniqueKeysWithValues: blocks.compactMap { block in
+            if case .queued = block.state { return (block.id, block) }
+            return nil
+        })
+        var orderedQueued = queuedBlockIDs.compactMap { queuedByID.removeValue(forKey: $0) }
+        var result: [CommandBlock] = []
+        result.reserveCapacity(blocks.count)
+        for block in blocks {
+            if case .queued = block.state {
+                if !orderedQueued.isEmpty { result.append(orderedQueued.removeFirst()) }
+            } else {
+                result.append(block)
+            }
+        }
+        blocks = result
     }
 
     private static func retainedByteCount(of block: CommandBlock) -> Int {

@@ -60,7 +60,36 @@ final class BlockLifecycleControllerTests: XCTestCase {
     }
 
     @MainActor
-    func testRestartInterruptsRunningAndQueuedBlocksAndRetainsSanitizedReplay() throws {
+    func testQueuedCommandsSupportFIFORemovalAndReordering() {
+        let controller = BlockLifecycleController()
+        let first = controller.queue(command: "one", workingDirectory: "/tmp", isRerunnable: true)
+        let second = controller.queue(command: "two", workingDirectory: "/tmp", isRerunnable: true)
+        let third = controller.queue(command: "three", workingDirectory: "/tmp", isRerunnable: true)
+
+        XCTAssertEqual(controller.queuedBlocks.map(\.id), [first, second, third])
+        XCTAssertEqual(controller.firstQueuedBlock()?.id, first)
+        XCTAssertTrue(controller.moveQueued(id: third, before: first))
+        XCTAssertEqual(controller.queuedBlocks.map(\.id), [third, first, second])
+        XCTAssertTrue(controller.removeQueued(id: first))
+        XCTAssertEqual(controller.queuedBlocks.map(\.id), [third, second])
+    }
+
+    @MainActor
+    func testQueueAPIsRejectAwaitingAndRunningBlocks() {
+        let controller = BlockLifecycleController()
+        let first = controller.queue(command: "one", workingDirectory: "/tmp", isRerunnable: true)
+        let second = controller.queue(command: "two", workingDirectory: "/tmp", isRerunnable: true)
+        controller.markAwaitingStart(first)
+
+        XCTAssertFalse(controller.removeQueued(id: first))
+        XCTAssertFalse(controller.moveQueued(id: first, before: second))
+        XCTAssertEqual(controller.commandStarted(), first)
+        XCTAssertFalse(controller.removeQueued(id: first))
+        XCTAssertEqual(controller.firstQueuedBlock()?.id, second)
+    }
+
+    @MainActor
+    func testRestartInterruptsRunningBlockButPreservesQueuedBlocks() throws {
         let controller = BlockLifecycleController()
         let runningID = controller.queue(
             command: "interactive",
@@ -82,7 +111,8 @@ final class BlockLifecycleControllerTests: XCTestCase {
                 exitCode: nil,
                 renderedOutput: nil,
                 columns: 100,
-                rows: 30
+                rows: 30,
+                preserveQueued: true
             ),
             runningID
         )
@@ -90,10 +120,11 @@ final class BlockLifecycleControllerTests: XCTestCase {
         let running = try XCTUnwrap(controller.timeline.block(id: runningID))
         let queued = try XCTUnwrap(controller.timeline.block(id: queuedID))
         XCTAssertEqual(running.state, .interrupted(exitCode: nil))
-        XCTAssertEqual(queued.state, .interrupted(exitCode: nil))
+        XCTAssertEqual(queued.state, .queued)
         XCTAssertNotNil(running.terminalSnapshot)
         XCTAssertNil(queued.terminalSnapshot)
         XCTAssertNil(controller.activeOrAwaitingBlockID)
+        XCTAssertEqual(controller.firstQueuedBlock()?.id, queuedID)
         controller.assertInvariants()
     }
 }

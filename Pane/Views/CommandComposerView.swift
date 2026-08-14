@@ -405,6 +405,7 @@ struct CommandComposerView: View {
             focusGeneration: session.focusGeneration,
             shouldRouteTerminalControlKeys: session.isCommandActive,
             onSubmit: { submitDraft() },
+            onQueue: { queueDraft() },
             onInterrupt: { session.sendInterrupt() },
             onEndOfFile: { session.sendEndOfFile() },
             onHistoryPrevious: historyPreviousAction,
@@ -416,22 +417,31 @@ struct CommandComposerView: View {
     }
 
     private var submitButton: some View {
-        Button {
-            guard !session.isSecureInputActive else { return }
-            submitDraft()
-        } label: {
-            Image(systemName: presentedCommandBlock != nil ? "return" : "arrow.up")
-                .font(.system(size: 12, weight: .semibold))
-                .frame(
-                    width: PaneMetrics.composerSubmitButtonSize,
-                    height: PaneMetrics.composerSubmitButtonSize
-                )
+        HStack(spacing: 6) {
+            if session.hasActiveWork && !session.isSecureInputActive {
+                Button("⌘↵ Queue") { queueDraft() }
+                    .buttonStyle(.borderless)
+                    .font(.caption.weight(.semibold))
+                    .disabled(!canSubmit)
+                    .help("Queue command (Command-Return)")
+            }
+            Button {
+                guard !session.isSecureInputActive else { return }
+                submitDraft()
+            } label: {
+                Image(systemName: presentedCommandBlock != nil ? "return" : "arrow.up")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(
+                        width: PaneMetrics.composerSubmitButtonSize,
+                        height: PaneMetrics.composerSubmitButtonSize
+                    )
+            }
+            .buttonStyle(ComposerSubmitButtonStyle())
+            .disabled(session.isSecureInputActive || !canSubmit)
+            .keyboardShortcut(.return, modifiers: [])
+            .help(presentedCommandBlock != nil ? "Send input (Return)" : "Execute command (Return)")
+            .accessibilityLabel(presentedCommandBlock != nil ? "Send input" : "Execute command")
         }
-        .buttonStyle(ComposerSubmitButtonStyle())
-        .disabled(session.isSecureInputActive || !canSubmit)
-        .keyboardShortcut(.return, modifiers: [])
-        .help(presentedCommandBlock != nil ? "Send input (Return)" : "Execute command (Return)")
-        .accessibilityLabel(presentedCommandBlock != nil ? "Send input" : "Execute command")
     }
 
     private var historyPreviousAction: (() -> Void)? {
@@ -684,6 +694,12 @@ struct CommandComposerView: View {
     private func submitDraft() {
         invalidateAutocomplete()
         session.submitDraft()
+    }
+
+    @MainActor
+    private func queueDraft() {
+        invalidateAutocomplete()
+        session.queueDraft()
     }
 }
 
@@ -986,6 +1002,7 @@ private struct ComposerTextView: NSViewRepresentable {
     let focusGeneration: UInt64
     let shouldRouteTerminalControlKeys: Bool
     let onSubmit: () -> Void
+    let onQueue: () -> Void
     let onInterrupt: () -> Void
     let onEndOfFile: () -> Void
     let onHistoryPrevious: (() -> Void)?
@@ -1040,6 +1057,7 @@ private struct ComposerTextView: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.shouldRouteTerminalControlKeys = shouldRouteTerminalControlKeys
         textView.onSubmit = onSubmit
+        textView.onQueue = onQueue
         textView.onInterrupt = onInterrupt
         textView.onEndOfFile = onEndOfFile
         textView.onHistoryPrevious = onHistoryPrevious
@@ -1069,6 +1087,7 @@ private struct ComposerTextView: NSViewRepresentable {
         context.coordinator.parent = self
         textView.shouldRouteTerminalControlKeys = shouldRouteTerminalControlKeys
         textView.onSubmit = onSubmit
+        textView.onQueue = onQueue
         textView.onInterrupt = onInterrupt
         textView.onEndOfFile = onEndOfFile
         textView.onHistoryPrevious = onHistoryPrevious
@@ -1094,6 +1113,7 @@ private struct ComposerTextView: NSViewRepresentable {
             textView.delegate = nil
             textView.shouldRouteTerminalControlKeys = false
             textView.onSubmit = nil
+            textView.onQueue = nil
             textView.onInterrupt = nil
             textView.onEndOfFile = nil
             textView.onHistoryPrevious = nil
@@ -1319,6 +1339,7 @@ private final class ComposerScrollView: NSScrollView {
 private final class ComposerNSTextView: NSTextView {
     var shouldRouteTerminalControlKeys = false
     var onSubmit: (() -> Void)?
+    var onQueue: (() -> Void)?
     var onInterrupt: (() -> Void)?
     var onEndOfFile: (() -> Void)?
     var onHistoryPrevious: (() -> Void)?
@@ -1328,6 +1349,11 @@ private final class ComposerNSTextView: NSTextView {
     var onDismissAutocomplete: (() -> Bool)?
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if (event.keyCode == 36 || event.keyCode == 76),
+           event.modifierFlags.intersection([.command, .option, .control, .shift]) == .command {
+            onQueue?()
+            return true
+        }
         if handleTerminalControlKey(event) {
             return true
         }
@@ -1346,7 +1372,9 @@ private final class ComposerNSTextView: NSTextView {
 
         switch event.keyCode {
         case 36, 76:
-            if event.modifierFlags.contains(.shift) {
+            if event.modifierFlags.contains(.command) {
+                onQueue?()
+            } else if event.modifierFlags.contains(.shift) {
                 insertNewline(nil)
             } else if let edit = confirmedAutocompleteEdit() {
                 applyAutocompleteEdit(edit)

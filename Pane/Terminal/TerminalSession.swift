@@ -180,6 +180,7 @@ final class TerminalSession: NSObject, ObservableObject {
     private let runtimeSessionStartedAt = Date()
     private let sensitiveDataSanitizer = SensitiveDataSanitizer()
     private var restoredRuntimeEventKeys: Set<String> = []
+    private let commandSenderOverride: (([UInt8]) -> Bool)?
     private var isCommandHistoryEnabled: Bool
     var runtimeStateStartTask: Task<Void, Never>?
     var isRuntimeStatePrepared: Bool
@@ -205,6 +206,10 @@ final class TerminalSession: NSObject, ObservableObject {
 
     var blocks: [CommandBlock] {
         blockTimeline.blocks
+    }
+
+    var queuedBlocks: [CommandBlock] {
+        blockLifecycleController.queuedBlocks.filter { $0.id != blockLifecycleController.awaitingStartID }
     }
 
     var visibleBlocks: [CommandBlock] {
@@ -328,6 +333,7 @@ final class TerminalSession: NSObject, ObservableObject {
         runtimeStateController: RuntimeStateController? = nil,
         commandHistoryEnabled: Bool = true,
         ptyController: PTYController? = nil,
+        commandSenderOverride: (([UInt8]) -> Bool)? = nil,
         lifecycleFaultCheckpointHandler:
             (@MainActor @Sendable (PaneLifecycleFaultCheckpoint) -> Void)? = nil
     ) {
@@ -338,6 +344,7 @@ final class TerminalSession: NSObject, ObservableObject {
         self.isRuntimeStatePrepared = runtimeStateController == nil
         self.currentDirectory = shellConfiguration.workingDirectory
         self.ptyController = ptyController ?? PTYController()
+        self.commandSenderOverride = commandSenderOverride
         self.lifecycleFaultCheckpointHandler = lifecycleFaultCheckpointHandler
         super.init()
         PaneResourceCounters.increment(.session)
@@ -623,19 +630,22 @@ final class TerminalSession: NSObject, ObservableObject {
         guard !isShuttingDown,
               !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
+        let hadQueuedCommands = blockLifecycleController.firstQueuedBlock() != nil
         let blockID = blockLifecycleController.queue(
             command: command,
             workingDirectory: currentDirectory ?? shellConfiguration.workingDirectory,
             isRerunnable: sensitiveDataSanitizer.sanitizeCommand(command).redactionCount == 0
         )
 
-        if !isCommandActive, isShellIntegrationReady {
+        if !isCommandActive, isShellIntegrationReady, !hadQueuedCommands {
             guard send(bytes: CommandSerializer.serializeCommand(command)) else {
                 blockLifecycleController.remove(id: blockID)
                 return
             }
             _ = interactionController.handle(.commandSubmitted)
             blockLifecycleController.markAwaitingStart(blockID)
+        } else {
+            dispatchNextQueuedCommandIfNeeded()
         }
 
         selectedBlockID = blockID
@@ -646,6 +656,33 @@ final class TerminalSession: NSObject, ObservableObject {
             history.resetNavigation()
         }
         commandDraft = ""
+    }
+
+    /// Records a composer draft as future shell work. Unlike `submitDraft`,
+    /// this never routes text to the foreground process.
+    func queueDraft() {
+        queue(command: commandDraft)
+    }
+
+    func queue(command: String) {
+        guard !isShuttingDown,
+              !isSecureInputActive,
+              !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        let sanitizedCommand = sensitiveDataSanitizer.sanitizeCommand(command)
+        let blockID = blockLifecycleController.queue(
+            command: command,
+            workingDirectory: currentDirectory ?? shellConfiguration.workingDirectory,
+            isRerunnable: sanitizedCommand.redactionCount == 0
+        )
+        selectedBlockID = blockID
+        if isCommandHistoryEnabled, sanitizedCommand.redactionCount == 0 {
+            history.append(sanitizedCommand.value)
+        } else {
+            history.resetNavigation()
+        }
+        commandDraft = ""
+        dispatchNextQueuedCommandIfNeeded()
     }
 
     func historyPrevious() {
@@ -775,9 +812,13 @@ final class TerminalSession: NSObject, ObservableObject {
 
     func editBlock(id: UUID) {
         guard let block = blockTimeline.block(id: id), block.isRerunnable else { return }
+        if case .queued = block.state {
+            guard blockLifecycleController.removeQueued(id: id) else { return }
+        }
         commandDraft = block.command
         modeAttribution = .manual
         setMode(.blocks)
+        requestFocus(.composer)
     }
 
     func editSelectedBlock() {
@@ -930,6 +971,19 @@ final class TerminalSession: NSObject, ObservableObject {
         if selectedBlockID == id {
             selectedBlockID = blockTimeline.blocks.last?.id
         }
+    }
+
+    func removeQueuedBlock(id: UUID) {
+        guard blockLifecycleController.removeQueued(id: id) else { return }
+        if selectedBlockID == id { selectedBlockID = queuedBlocks.first?.id }
+    }
+
+    func moveQueuedBlock(id: UUID, before destinationID: UUID) {
+        _ = blockLifecycleController.moveQueued(id: id, before: destinationID)
+    }
+
+    func moveQueuedBlockToFront(id: UUID) {
+        _ = blockLifecycleController.moveQueuedToFront(id: id)
     }
 
     func clearBlocks() {
@@ -1223,7 +1277,8 @@ final class TerminalSession: NSObject, ObservableObject {
             exitCode: exitCode,
             renderedOutput: renderedOutput ?? renderedActiveBlockOutput(),
             columns: Int(windowSize.ws_col),
-            rows: Int(windowSize.ws_row)
+            rows: Int(windowSize.ws_row),
+            preserveQueued: reason == .shellRestart
         )
 
         defer {
@@ -1329,13 +1384,22 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     private func dispatchNextQueuedCommandIfNeeded() {
-        guard isShellIntegrationReady, !isCommandActive else { return }
-        guard let nextCommand = blockTimeline.blocks.first(where: { block in
-            if case .queued = block.state { return true }
-            return false
-        }) else { return }
+        guard isShellReadyForInput,
+              !isCommandActive,
+              !isAlternateScreenActive,
+              !isRestartInProgress,
+              !isShuttingDown,
+              !isSecureInputActive,
+              inputRequirement != .direct,
+              inputRequirement != .secure,
+              let nextCommand = blockLifecycleController.firstQueuedBlock() else { return }
 
-        guard send(bytes: CommandSerializer.serializeCommand(nextCommand.command)) else { return }
+        guard send(bytes: CommandSerializer.serializeCommand(nextCommand.command)) else {
+            if runtimeStateDiagnostic == nil {
+                runtimeStateDiagnostic = "Pane could not send the next queued command. It remains in Up next."
+            }
+            return
+        }
         _ = interactionController.handle(.commandSubmitted)
         blockLifecycleController.markAwaitingStart(nextCommand.id)
     }
@@ -2353,6 +2417,11 @@ final class TerminalSession: NSObject, ObservableObject {
             workingDirectory: currentDirectory ?? shellConfiguration.workingDirectory,
             isRerunnable: sanitized.redactionCount == 0
         )
+        // A command observed through shell integration has already started in
+        // the PTY. If older queued work was retained after a send failure,
+        // represent this authoritative direct-terminal command first without
+        // discarding or misattributing the older queue entries.
+        _ = blockLifecycleController.moveQueuedToFront(id: id)
         blockLifecycleController.markAwaitingStart(id)
         selectedBlockID = id
         if isCommandHistoryEnabled, sanitized.redactionCount == 0 {
@@ -2420,7 +2489,7 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     private func send(bytes: [UInt8]) -> Bool {
-        ptyController.write(bytes)
+        commandSenderOverride?(bytes) ?? ptyController.write(bytes)
     }
 
     private func acceptsUserTerminalInteraction(from source: TerminalView) -> Bool {

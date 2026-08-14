@@ -81,6 +81,10 @@ struct BlocksView: View {
                             commandBlockView(block)
                         }
 
+                        if !session.queuedBlocks.isEmpty {
+                            queuedCommands
+                        }
+
                         Color.clear
                             .frame(height: 8)
                             .id(TimelineAnchor.bottom)
@@ -153,6 +157,69 @@ struct BlocksView: View {
             session: session
         )
         .id(block.id)
+    }
+
+    private var queuedCommands: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Up next · \(session.queuedBlocks.count)")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
+            ForEach(Array(session.queuedBlocks.enumerated()), id: \.element.id) { index, block in
+                HStack(spacing: 10) {
+                    Text("\(index + 1)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20, alignment: .trailing)
+                    Text(block.command)
+                        .font(.system(.body, design: .monospaced))
+                        .lineLimit(2)
+                    Spacer(minLength: 8)
+                    Button {
+                        guard index > 0 else { return }
+                        session.moveQueuedBlock(id: block.id, before: session.queuedBlocks[index - 1].id)
+                    } label: { Image(systemName: "chevron.up") }
+                        .buttonStyle(.borderless)
+                        .disabled(index == 0)
+                        .help("Move earlier")
+                        .accessibilityLabel("Move queued command earlier")
+                    Button {
+                        guard index + 1 < session.queuedBlocks.count else { return }
+                        session.moveQueuedBlock(
+                            id: session.queuedBlocks[index + 1].id,
+                            before: block.id
+                        )
+                    } label: { Image(systemName: "chevron.down") }
+                        .buttonStyle(.borderless)
+                        .disabled(index + 1 == session.queuedBlocks.count)
+                        .help("Move later")
+                        .accessibilityLabel("Move queued command later")
+                    Button { session.editBlock(id: block.id) } label: {
+                        Image(systemName: "pencil")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Edit queued command")
+                    Button { session.removeQueuedBlock(id: block.id) } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Remove queued command")
+                }
+                .padding(.horizontal, PaneMetrics.blockInnerInset)
+                .frame(minHeight: 36)
+                .background(
+                    session.selectedBlockID == block.id
+                        ? PaneTheme.selectedBlockBackground.opacity(0.28)
+                        : PaneTheme.blockBackground,
+                    in: RoundedRectangle(cornerRadius: 8)
+                )
+                .contentShape(Rectangle())
+                .onTapGesture { session.selectBlock(block.id) }
+                .accessibilityLabel("Queued command \(index + 1), \(block.command)")
+                .id(block.id)
+            }
+        }
+        .padding(.top, 4)
     }
 }
 
