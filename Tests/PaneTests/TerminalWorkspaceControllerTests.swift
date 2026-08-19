@@ -124,6 +124,85 @@ final class TerminalWorkspaceControllerTests: XCTestCase {
         XCTAssertTrue(workspace.tabs[1].session === tab.session)
     }
 
+    func testTabDragDestinationMovesToTheLeftTab() {
+        let fixture = tabDragFixture()
+
+        XCTAssertEqual(
+            TabReorderTargetResolver.destinationIndex(
+                draggedTabID: fixture.ids[2],
+                orderedTabIDs: fixture.ids,
+                tabFrames: fixture.frames,
+                dropLocationX: 50
+            ),
+            0
+        )
+    }
+
+    func testTabDragDestinationMovesToTheRightTab() {
+        let fixture = tabDragFixture()
+
+        XCTAssertEqual(
+            TabReorderTargetResolver.destinationIndex(
+                draggedTabID: fixture.ids[0],
+                orderedTabIDs: fixture.ids,
+                tabFrames: fixture.frames,
+                dropLocationX: 270
+            ),
+            2
+        )
+    }
+
+    func testTabDragDestinationUsesTheMiddleTab() {
+        let fixture = tabDragFixture()
+
+        XCTAssertEqual(
+            TabReorderTargetResolver.destinationIndex(
+                draggedTabID: fixture.ids[0],
+                orderedTabIDs: fixture.ids,
+                tabFrames: fixture.frames,
+                dropLocationX: 160
+            ),
+            1
+        )
+    }
+
+    func testTabDragDestinationKeepsTheSameTabAtItsCenter() {
+        let fixture = tabDragFixture()
+
+        XCTAssertEqual(
+            TabReorderTargetResolver.destinationIndex(
+                draggedTabID: fixture.ids[1],
+                orderedTabIDs: fixture.ids,
+                tabFrames: fixture.frames,
+                dropLocationX: 160
+            ),
+            1
+        )
+    }
+
+    func testTabDragDestinationClampsToBoundaryTabs() {
+        let fixture = tabDragFixture()
+
+        XCTAssertEqual(
+            TabReorderTargetResolver.destinationIndex(
+                draggedTabID: fixture.ids[1],
+                orderedTabIDs: fixture.ids,
+                tabFrames: fixture.frames,
+                dropLocationX: -100
+            ),
+            0
+        )
+        XCTAssertEqual(
+            TabReorderTargetResolver.destinationIndex(
+                draggedTabID: fixture.ids[1],
+                orderedTabIDs: fixture.ids,
+                tabFrames: fixture.frames,
+                dropLocationX: 500
+            ),
+            2
+        )
+    }
+
     func testRapidSelectionLeavesExactlyOneSelectedSession() async {
         let workspace = makeWorkspace()
         await workspace.restoreWorkspace()
@@ -154,6 +233,18 @@ final class TerminalWorkspaceControllerTests: XCTestCase {
 
         XCTAssertEqual(background.visibilityState, .background)
         XCTAssertEqual(background.focusTarget, .none)
+    }
+
+    private func tabDragFixture() -> (ids: [UUID], frames: [UUID: CGRect]) {
+        let ids = [UUID(), UUID(), UUID()]
+        return (
+            ids,
+            [
+                ids[0]: CGRect(x: 0, y: 0, width: 100, height: 28),
+                ids[1]: CGRect(x: 110, y: 0, width: 100, height: 28),
+                ids[2]: CGRect(x: 220, y: 0, width: 100, height: 28)
+            ]
+        )
     }
 
     func testAutomaticTabPresentationPrefersDirectoryAndPreservesFullMetadata() {

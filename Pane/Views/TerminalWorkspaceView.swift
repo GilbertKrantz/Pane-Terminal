@@ -8,6 +8,8 @@ struct TerminalWorkspaceView: View {
     @State private var renameDraft = ""
     @State private var hoveredTabID: UUID?
     @State private var isNewTabHovered = false
+    @State private var tabFrames: [UUID: CGRect] = [:]
+    @State private var tabDragState: TabDragState?
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     var body: some View {
@@ -103,6 +105,11 @@ struct TerminalWorkspaceView: View {
         }
         .frame(height: PaneMetrics.tabStripHeight)
         .background(PaneTheme.tabStripBackground)
+        .coordinateSpace(name: TabStripCoordinateSpace.name)
+        .onPreferenceChange(TabFramePreferenceKey.self) { frames in
+            guard tabDragState == nil else { return }
+            tabFrames = frames
+        }
     }
 
     private func tabButton(_ tab: TerminalTab, index: Int) -> some View {
@@ -111,6 +118,7 @@ struct TerminalWorkspaceView: View {
             index: index,
             count: workspace.tabs.count
         )
+        let isDragged = tabDragState?.tabID == tab.id
         return HStack(spacing: 7) {
             tabActivityIndicator(presentation.activity)
             Text(presentation.title)
@@ -133,7 +141,7 @@ struct TerminalWorkspaceView: View {
         .background(
             presentation.isSelected
                 ? PaneTheme.selectedTabBackground(increasedContrast: colorSchemeContrast == .increased)
-                : (hoveredTabID == tab.id ? PaneTheme.hoveredTabBackground : .clear),
+                : (hoveredTabID == tab.id || isDragged ? PaneTheme.hoveredTabBackground : .clear),
             in: RoundedRectangle(cornerRadius: 6, style: .continuous)
         )
         .overlay {
@@ -145,17 +153,22 @@ struct TerminalWorkspaceView: View {
                     )
             }
         }
+        .background {
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: TabFramePreferenceKey.self,
+                    value: [
+                        tab.id: geometry.frame(in: .named(TabStripCoordinateSpace.name))
+                    ]
+                )
+            }
+        }
         .contentShape(Rectangle())
         .onTapGesture { workspace.selectTab(id: tab.id) }
         .onHover { hoveredTabID = $0 ? tab.id : nil }
-        .draggable(tab.id.uuidString)
-        .dropDestination(for: String.self) { items, _ in
-            guard let rawID = items.first,
-                  let draggedID = UUID(uuidString: rawID),
-                  draggedID != tab.id else { return false }
-            workspace.moveTab(id: draggedID, to: index)
-            return true
-        }
+        .simultaneousGesture(tabReorderGesture(for: tab.id))
+        .offset(x: isDragged ? tabDragState?.translationX ?? 0 : 0)
+        .zIndex(isDragged ? 1 : 0)
         .help(presentation.tooltip)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(presentation.accessibilityLabel)
@@ -179,6 +192,40 @@ struct TerminalWorkspaceView: View {
             }
             Divider()
             Button("Close Tab") { Task { await workspace.closeTab(id: tab.id, policy: .requestUserConfirmation) } }
+        }
+    }
+
+    private func tabReorderGesture(for tabID: UUID) -> some Gesture {
+        DragGesture(
+            minimumDistance: 4,
+            coordinateSpace: .named(TabStripCoordinateSpace.name)
+        )
+        .onChanged { value in
+            if tabDragState?.tabID != tabID {
+                tabDragState = TabDragState(
+                    tabID: tabID,
+                    orderedTabIDs: workspace.tabs.map(\.id),
+                    frames: tabFrames,
+                    translationX: value.translation.width
+                )
+            } else {
+                tabDragState?.translationX = value.translation.width
+            }
+        }
+        .onEnded { value in
+            let completedDrag = tabDragState
+            tabDragState = nil
+
+            guard let completedDrag,
+                  completedDrag.tabID == tabID,
+                  let destinationIndex = TabReorderTargetResolver.destinationIndex(
+                    draggedTabID: tabID,
+                    orderedTabIDs: completedDrag.orderedTabIDs,
+                    tabFrames: completedDrag.frames,
+                    dropLocationX: value.location.x
+                  ) else { return }
+
+            workspace.moveTab(id: tabID, to: destinationIndex)
         }
     }
 
@@ -249,5 +296,47 @@ struct TerminalWorkspaceView: View {
             get: { renamingTabID != nil },
             set: { if !$0 { renamingTabID = nil } }
         )
+    }
+}
+
+private enum TabStripCoordinateSpace {
+    static let name = "PaneTabStrip"
+}
+
+private struct TabFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, newValue in newValue })
+    }
+}
+
+private struct TabDragState {
+    let tabID: UUID
+    let orderedTabIDs: [UUID]
+    let frames: [UUID: CGRect]
+    var translationX: CGFloat
+}
+
+struct TabReorderTargetResolver {
+    static func destinationIndex(
+        draggedTabID: UUID,
+        orderedTabIDs: [UUID],
+        tabFrames: [UUID: CGRect],
+        dropLocationX: CGFloat
+    ) -> Int? {
+        guard let sourceIndex = orderedTabIDs.firstIndex(of: draggedTabID) else { return nil }
+
+        let candidates = orderedTabIDs.enumerated().compactMap { index, tabID -> (index: Int, distance: CGFloat)? in
+            guard let frame = tabFrames[tabID] else { return nil }
+            return (index, abs(frame.midX - dropLocationX))
+        }
+
+        return candidates.min { lhs, rhs in
+            if lhs.distance == rhs.distance {
+                return lhs.index < rhs.index
+            }
+            return lhs.distance < rhs.distance
+        }?.index ?? sourceIndex
     }
 }
