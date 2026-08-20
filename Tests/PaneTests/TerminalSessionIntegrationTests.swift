@@ -1966,7 +1966,10 @@ final class TerminalSessionIntegrationTests: XCTestCase {
 
     @MainActor
     private func findTextView(in view: NSView) -> NSTextView? {
-        if let textView = view as? NSTextView {
+        if let textView = view as? NSTextView,
+            !textView.isFieldEditor,
+            textView.isEditable
+        {
             return textView
         }
 
