@@ -564,6 +564,16 @@ actor SQLiteRuntimeStateStore: RuntimeStateStore {
         )
     }
 
+    func deleteSessions(preserving sessionIDs: Set<UUID>) async throws {
+        guard !sessionIDs.isEmpty else { return }
+        let placeholders = Array(repeating: "?", count: sessionIDs.count).joined(separator: ",")
+        try executeBound(
+            "DELETE FROM runtime_sessions WHERE id NOT IN (\(placeholders))",
+            operation: "delete previous sessions",
+            values: sessionIDs.map(\.uuidString)
+        )
+    }
+
     func deleteAllCommandEvents() async throws {
         try execute("DELETE FROM command_events")
     }

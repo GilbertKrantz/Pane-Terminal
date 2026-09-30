@@ -451,6 +451,7 @@ final class TerminalWorkspaceController: ObservableObject {
         // Starting is independent of mounting: background tabs must own a
         // live PTY and continue receiving output before they are first shown.
         session.ensureAuthoritativeTerminalIsRunning()
+        session.applyCompletionResultLimit(preferenceSnapshot.completions.resultLimit)
         session.applyAppearancePreferences(preferenceSnapshot.appearance)
         session.applyKeyboardPreferences(preferenceSnapshot.terminal)
         session.applyScrollbackPreference(preferenceSnapshot.terminal)
@@ -566,6 +567,9 @@ final class TerminalWorkspaceController: ObservableObject {
     /// never the mutable application preference owner.
     func applyPreferences(_ snapshot: PanePreferencesSnapshot, changedKeys: Set<PanePreferenceKey>) {
         preferenceSnapshot = snapshot
+        if changedKeys.contains(.completionResultLimit) {
+            tabs.forEach { $0.session.applyCompletionResultLimit(snapshot.completions.resultLimit) }
+        }
         if changedKeys.contains(.historyConfiguration) {
             applyRuntimeStateConfiguration(snapshot.history.runtimeConfiguration)
         }

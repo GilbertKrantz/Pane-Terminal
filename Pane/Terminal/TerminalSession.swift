@@ -176,7 +176,7 @@ final class TerminalSession: NSObject, ObservableObject {
     let completionService = CompletionService()
     let blockSearchIndex = BlockSearchIndex()
     let runtimeStateController: RuntimeStateController?
-    private let runtimeSessionID = UUID()
+    let runtimeSessionID = UUID()
     private let runtimeSessionStartedAt = Date()
     private let sensitiveDataSanitizer = SensitiveDataSanitizer()
     private var restoredRuntimeEventKeys: Set<String> = []
@@ -479,6 +479,12 @@ final class TerminalSession: NSObject, ObservableObject {
         terminalView.caretViewTracksFocus = visibilityState == .selected
         attach(terminalView: terminalView)
         return terminalView
+    }
+
+    @Published private(set) var completionResultLimit = CompletionPreferences.defaults.resultLimit
+
+    func applyCompletionResultLimit(_ limit: Int) {
+        completionResultLimit = [4, 8, 12].contains(limit) ? limit : 4
     }
 
     func applyAppearancePreferences(_ preferences: AppearancePreferences) {
@@ -963,10 +969,25 @@ final class TerminalSession: NSObject, ObservableObject {
         }
     }
 
+    @Published private(set) var blockRemovalNotice: String?
+    private var removedBlocks: [(index: Int, block: CommandBlock)] = []
+
+    func undoBlockRemoval() {
+        blockLifecycleController.restoreRemoved(removedBlocks)
+        selectedBlockID = removedBlocks.first?.block.id
+        dismissBlockRemovalNotice()
+    }
+
+    func dismissBlockRemovalNotice() {
+        removedBlocks.removeAll()
+        blockRemovalNotice = nil
+    }
+
     func removeBlock(id: UUID) {
-        if blockTimeline.activeBlockID == id {
-            clearActiveBlockCapture()
-        }
+        guard let index = blockTimeline.blocks.firstIndex(where: { $0.id == id }),
+              blockTimeline.blocks[index].isFinalized else { return }
+        removedBlocks = [(index, blockTimeline.blocks[index])]
+        blockRemovalNotice = "Block removed from timeline"
         blockLifecycleController.remove(id: id)
         if selectedBlockID == id {
             selectedBlockID = blockTimeline.blocks.last?.id
@@ -987,6 +1008,12 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     func clearBlocks() {
+        let entries = blockTimeline.blocks.enumerated().compactMap { index, block in
+            block.isFinalized ? (index: index, block: block) : nil
+        }
+        guard !entries.isEmpty else { return }
+        removedBlocks = entries
+        blockRemovalNotice = "\(entries.count) blocks removed from timeline"
         blockLifecycleController.clearFinalized()
         if let selectedBlockID,
            blockTimeline.block(id: selectedBlockID) == nil {
@@ -1684,13 +1711,9 @@ final class TerminalSession: NSObject, ObservableObject {
         }
     }
 
-    func clearCurrentSessionPredictionHistory() {
-        history = CommandHistory()
-        restoredRuntimeEventKeys.removeAll()
-        guard let runtimeStateController else { return }
-        Task { [weak self] in
-            self?.runtimeStateDiagnostic = await runtimeStateController.deleteCurrentSession()
-        }
+    func clearCurrentSessionPredictionHistory() async throws {
+        try checkDataRemovalResult(await runtimeStateController?.deleteCurrentSession())
+        applyHistoryRemoval(.currentSession)
     }
 
     func clearCurrentWorkspacePredictionHistory() {
@@ -1702,45 +1725,56 @@ final class TerminalSession: NSObject, ObservableObject {
         }
     }
 
-    func clearAllPredictionHistory() {
-        history = CommandHistory()
+    func clearAllPredictionHistory() async throws {
+        try checkDataRemovalResult(await runtimeStateController?.deleteAllState())
+        applyHistoryRemoval(.all)
+    }
+
+    func clearPreviousSessions(preserving sessionIDs: Set<UUID> = []) async throws {
+        try checkDataRemovalResult(await runtimeStateController?.deletePreviousSessions(preserving: sessionIDs))
+        applyHistoryRemoval(.previousSessions)
+    }
+
+    func clearExactCommandHistory() async throws {
+        try checkDataRemovalResult(await runtimeStateController?.deleteExactCommandHistory())
+        applyHistoryRemoval(.exactCommands)
+    }
+
+    func clearPersistedBlockOutput() async throws {
+        try checkDataRemovalResult(await runtimeStateController?.clearPersistedBlockOutput())
+        applyHistoryRemoval(.output)
+    }
+
+    private func checkDataRemovalResult(_ diagnostic: String?) throws {
+        guard runtimeStateController != nil else {
+            throw PaneLocalDataError.unavailable
+        }
+        runtimeStateDiagnostic = diagnostic
+        if let diagnostic { throw PaneLocalDataError.storage(diagnostic) }
+    }
+
+    enum HistoryRemoval { case currentSession, previousSessions, exactCommands, output, all }
+
+    func applyHistoryRemoval(_ removal: HistoryRemoval) {
+        // Permanent deletion must also discard the reversible timeline snapshot.
+        dismissBlockRemovalNotice()
+        switch removal {
+        case .output:
+            blockLifecycleController.clearFinalizedOutput()
+        case .previousSessions:
+            for id in restoredBlockIDs { blockLifecycleController.remove(id: id) }
+        case .currentSession:
+            history = CommandHistory()
+        case .exactCommands, .all:
+            history = CommandHistory()
+            blockLifecycleController.clearFinalized()
+        }
         restoredRuntimeEventKeys.removeAll()
-        guard let runtimeStateController else { return }
-        Task { [weak self] in
-            self?.runtimeStateDiagnostic = await runtimeStateController.deleteAllState()
-        }
-    }
-
-    func clearPreviousSessions() {
-        for id in restoredBlockIDs { blockLifecycleController.remove(id: id) }
-        restoredBlockIDs.removeAll()
-        sessionBoundaries.removeAll()
-        restoredSessionOrder.removeAll()
-        newShellBoundary = nil
-        guard let runtimeStateController else { return }
-        Task { [weak self] in
-            self?.runtimeStateDiagnostic = await runtimeStateController.deletePreviousSessions()
-        }
-    }
-
-    func clearExactCommandHistory() {
-        history = CommandHistory()
-        blockLifecycleController.clearFinalized()
-        restoredBlockIDs.removeAll()
-        sessionBoundaries.removeAll()
-        restoredSessionOrder.removeAll()
-        newShellBoundary = nil
-        guard let runtimeStateController else { return }
-        Task { [weak self] in
-            self?.runtimeStateDiagnostic = await runtimeStateController.deleteExactCommandHistory()
-        }
-    }
-
-    func clearPersistedBlockOutput() {
-        blockLifecycleController.clearFinalizedOutput()
-        guard let runtimeStateController else { return }
-        Task { [weak self] in
-            self?.runtimeStateDiagnostic = await runtimeStateController.clearPersistedBlockOutput()
+        if removal == .previousSessions || removal == .exactCommands || removal == .all {
+            restoredBlockIDs.removeAll()
+            sessionBoundaries.removeAll()
+            restoredSessionOrder.removeAll()
+            newShellBoundary = nil
         }
     }
 

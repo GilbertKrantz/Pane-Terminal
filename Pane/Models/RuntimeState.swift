@@ -241,6 +241,7 @@ protocol RuntimeStateStore: Sendable {
     func deleteWorkspace(_ workspaceID: String) async throws
     func deleteAllState() async throws
     func deleteSessions(excluding sessionID: UUID) async throws
+    func deleteSessions(preserving sessionIDs: Set<UUID>) async throws
     func deleteAllCommandEvents() async throws
     func clearPersistedOutput() async throws
     func updateSessionLifecycle(_ sessionID: UUID, lifecycle: PersistedSessionLifecycle, lastActiveAt: Date) async throws
@@ -250,6 +251,13 @@ protocol RuntimeStateStore: Sendable {
 
 
 extension RuntimeStateStore {
+    func deleteSessions(preserving sessionIDs: Set<UUID>) async throws {
+        guard sessionIDs.count == 1, let id = sessionIDs.first else {
+            throw PaneLocalDataError.storage("This history store cannot safely preserve multiple open tabs.")
+        }
+        try await deleteSessions(excluding: id)
+    }
+
     func loadRecentContext(
         workspaceID: String?,
         repositoryID: String?,

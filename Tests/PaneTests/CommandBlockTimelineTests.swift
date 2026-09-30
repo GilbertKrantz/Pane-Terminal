@@ -3,6 +3,42 @@ import XCTest
 @testable import Pane
 
 final class CommandBlockTimelineTests: XCTestCase {
+    func testUndoRemovalPreservesNewRunningCommandAndOrder() throws {
+        var timeline = CommandBlockTimeline()
+        let first = timeline.enqueue(command: "first", workingDirectory: "/tmp")
+        _ = timeline.beginNext()
+        _ = timeline.finishActive(exitCode: 0, output: "one")
+        let second = timeline.enqueue(command: "second", workingDirectory: "/tmp")
+        _ = timeline.beginNext()
+        _ = timeline.finishActive(exitCode: 0, output: "two")
+        let removed = [(index: 0, block: try XCTUnwrap(timeline.block(id: first)))]
+        timeline.remove(id: first)
+        let running = timeline.enqueue(command: "running", workingDirectory: "/tmp")
+        _ = timeline.beginNext()
+        timeline.restoreRemoved(removed)
+        timeline.restoreRemoved(removed)
+        XCTAssertEqual(timeline.blocks.map(\.id), [first, second, running])
+        XCTAssertEqual(timeline.activeBlockID, running)
+        XCTAssertEqual(timeline.retainedOutputByteCount, 6)
+    }
+
+    func testUndoClearDoesNotRestoreRunningOrQueuedSnapshots() throws {
+        var timeline = CommandBlockTimeline()
+        let finished = timeline.enqueue(command: "finished", workingDirectory: "/tmp")
+        _ = timeline.beginNext()
+        _ = timeline.finishActive(exitCode: 0, output: "done")
+        let running = timeline.enqueue(command: "running", workingDirectory: "/tmp")
+        _ = timeline.beginNext()
+        let queued = timeline.enqueue(command: "queued", workingDirectory: "/tmp")
+        let snapshot = timeline.blocks.enumerated().map { (index: $0.offset, block: $0.element) }
+        timeline.clearFinalized()
+        _ = timeline.finishActive(exitCode: 0, output: "new output")
+        timeline.restoreRemoved(snapshot)
+        XCTAssertEqual(timeline.blocks.map(\.id), [finished, running, queued])
+        XCTAssertEqual(timeline.block(id: running)?.output, "new output")
+        XCTAssertEqual(timeline.queuedBlocks.map(\.id), [queued])
+    }
+
     func testQueuedCommandAcceptsContinuationAndCanBeInterrupted() throws {
         var timeline = CommandBlockTimeline()
         let id = timeline.enqueue(command: "if true; then", workingDirectory: "/tmp")

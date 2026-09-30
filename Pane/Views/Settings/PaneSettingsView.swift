@@ -128,7 +128,7 @@ private struct CompletionPreferencesPage: View {
         Picker("Maximum visible suggestions", selection: bind(\.completions.resultLimit, .completionResultLimit)) { Text("4").tag(4); Text("8").tag(8); Text("12").tag(12) }
         Toggle("Next-command suggestions", isOn: bind(\.completions.nextCommandSuggestionsEnabled, .nextCommandSuggestionsEnabled))
         Toggle("Local completion learning", isOn: bind(\.completions.localLearningEnabled, .localCompletionLearningEnabled))
-        Section("Sources") {
+        DisclosureGroup("Completion sources") {
             Toggle("Shell completions", isOn: source(\.shell))
             Toggle("Files and directories", isOn: source(\.filesAndDirectories))
             Toggle("Executables", isOn: source(\.executables))
@@ -149,6 +149,8 @@ private struct CompletionPreferencesPage: View {
 
 private struct HistoryPreferencesPage: View {
     @ObservedObject var preferences: PanePreferences; @ObservedObject var dataManager: PaneLocalDataManager
+    @State private var pendingOperation: PaneLocalDataManager.Operation?
+    @State private var targetTabID: UUID?
     var body: some View { Form {
         Section("Collection") { Toggle("Save command history", isOn: bind(\.history.commandHistoryEnabled)); Toggle("Prepare local prediction context", isOn: bind(\.history.predictionContextEnabled)); Toggle("Save sanitized output excerpts", isOn: bind(\.history.outputSummariesEnabled)); Toggle("Restore last working directory", isOn: bind(\.history.filePathCollectionEnabled)); Toggle("Local completion learning", isOn: Binding(get:{preferences.snapshot.completions.localLearningEnabled},set:{preferences.update(\.completions.localLearningEnabled,to:$0,key:.localCompletionLearningEnabled)})) }
         Section("Restoration") { Toggle("Restore previous blocks", isOn: bind(\.history.visibleSessionRecoveryEnabled)); Toggle("Persist history across Pane launches", isOn: bind(\.history.persistenceEnabled)); Toggle("Restore across workspaces", isOn: bind(\.history.restoreAcrossWorkspacesEnabled)); Text("Cross-workspace restoration may show commands from unrelated local directories.").font(.caption).foregroundStyle(.secondary) }
@@ -158,8 +160,45 @@ private struct HistoryPreferencesPage: View {
             Picker("Stored output", selection: bind(\.history.maximumRestoredOutputBytes)) { Text("None").tag(0); Text("512 KB").tag(512 * 1_024); Text("2 MB").tag(2 * 1_024 * 1_024); Text("8 MB").tag(8 * 1_024 * 1_024) }
         }
         Section("Privacy") { Text("Commands and approved excerpts stay local. Raw terminal bytes, secure input, and environment-variable values are never persisted or uploaded.") }
-        Section("Manage data") { Button("Clear Current Session") { Task { try? await dataManager.clearCurrentSessionData(tabID:dataManager.workspace?.selectedTabID) } }.disabled(dataManager.workspace?.selectedTabID == nil); Button("Clear Previous Sessions", role:.destructive) { Task { try? await dataManager.clearPreviousSessions() } }; Button("Clear Exact Command History", role:.destructive) { Task { try? await dataManager.clearExactCommandHistory() } }; Button("Clear Persisted Block Output", role:.destructive) { Task { try? await dataManager.clearPersistedBlockOutput() } }; Button("Reveal Data Location") { dataManager.revealDataLocation() } }
-    }.formStyle(.grouped) }
+        Section("Data location") {
+            Button("Reveal Data Location") { dataManager.revealDataLocation() }
+        }
+        Section("Permanent deletion") {
+            Text("These actions cannot be undone. Collection settings above control what Pane saves next.")
+                .font(.caption).foregroundStyle(.secondary)
+            Menu("Delete saved data…") {
+                ForEach(PaneLocalDataManager.Operation.allCases) { operation in
+                    Button(operation.rawValue + "…", role: .destructive) {
+                        targetTabID = dataManager.workspace?.selectedTabID
+                        pendingOperation = operation
+                    }
+                }
+            }
+            .disabled(dataManager.isWorking || dataManager.workspace?.selectedTabID == nil)
+            if dataManager.isWorking { ProgressView("Clearing saved data…").controlSize(.small) }
+            if let message = dataManager.resultMessage {
+                Label(message, systemImage: dataManager.didFail ? "exclamationmark.triangle" : "checkmark.circle")
+                    .textSelection(.enabled)
+                    .accessibilityLabel(message)
+            }
+        }
+    }.formStyle(.grouped)
+        .confirmationDialog(
+            pendingOperation.map { $0.rawValue + "?" } ?? "Clear saved data?",
+            isPresented: Binding(get: { pendingOperation != nil }, set: { if !$0 { pendingOperation = nil } }),
+            titleVisibility: .visible
+        ) {
+            if let operation = pendingOperation {
+                Button(operation.rawValue, role: .destructive) {
+                    let tabID = targetTabID
+                    Task { await dataManager.perform(operation, tabID: tabID) }
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingOperation = nil }
+        } message: {
+            Text(pendingOperation?.detail ?? "")
+        }
+    }
     private func bind<T>(_ path: WritableKeyPath<PanePreferencesSnapshot,T>) -> Binding<T> { Binding(get:{preferences.snapshot[keyPath:path]},set:{preferences.update(path,to:$0,key:.historyConfiguration)}) }
 }
 

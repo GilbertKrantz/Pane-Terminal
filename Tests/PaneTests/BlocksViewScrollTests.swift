@@ -99,14 +99,119 @@ final class BlocksViewScrollTests: XCTestCase {
         let newestOutput = try XCTUnwrap(
             commandOutputView(containing: "bulk-marker-499", in: hostingView)
         )
+        let newestScroller = try XCTUnwrap(outputScrollView(containing: newestOutput, in: hostingView))
+        XCTAssertLessThanOrEqual(newestScroller.bounds.height, 24,
+                                 "Single-line output must not reserve a full-height blank viewport")
         let outputRectInTimeline = newestOutput.convert(
             newestOutput.bounds,
             to: timeline.contentView
         )
         XCTAssertTrue(
             outputRectInTimeline.intersects(timeline.contentView.bounds),
-            "The newest block must be visible after a bulk timeline mount"
+            "The newest block must be visible after a bulk timeline mount: output=\(outputRectInTimeline), viewport=\(timeline.contentView.bounds), document=\(documentView.bounds)"
         )
+    }
+
+    func testTimelineRemainsVisibleAfterRemountAndResize() async throws {
+        NSWindow.allowsAutomaticWindowTabbing = false
+        let session = makeTestSession()
+        for index in 0..<150 {
+            addCompletedBlock(
+                command: "printf remount-\(index)",
+                output: String(repeating: "wrapped output ", count: index.isMultiple(of: 3) ? 400 : 3)
+                    + "remount-marker-\(index)",
+                to: session
+            )
+        }
+        let otherSession = makeTestSession()
+        let hostingView = NSHostingView(rootView: ContentView(session: session).id("primary"))
+        let window = makeWindow(hostingView: hostingView)
+        defer {
+            window.orderOut(nil)
+            session.shutdown()
+            otherSession.shutdown()
+        }
+        try await waitUntil("shell startup") { session.isShellReadyForInput }
+
+        for iteration in 0..<6 {
+            // Replacing the root identity mirrors selecting another tab and returning.
+            hostingView.rootView = ContentView(session: otherSession).id("other")
+            hostingView.layoutSubtreeIfNeeded()
+            await drainMainQueue(turns: 2)
+            window.setContentSize(NSSize(width: iteration.isMultiple(of: 2) ? 460 : 1200,
+                                         height: iteration.isMultiple(of: 2) ? 800 : 320))
+            hostingView.rootView = ContentView(session: session).id("primary")
+            hostingView.layoutSubtreeIfNeeded()
+            try await Task.sleep(nanoseconds: 20_000_000)
+            await drainMainQueue(turns: 4)
+            hostingView.layoutSubtreeIfNeeded()
+            let earlyTimeline = try XCTUnwrap(timelineScrollView(in: hostingView))
+            let settledOrigin = earlyTimeline.contentView.bounds.origin
+            // Tab restoration must not schedule a second jump 50 ms later.
+            try await Task.sleep(nanoseconds: 130_000_000)
+            await drainMainQueue(turns: 4)
+            XCTAssertEqual(earlyTimeline.contentView.bounds.minY, settledOrigin.y, accuracy: 1,
+                           "Tab restoration moved again after its initial layout")
+            hostingView.layoutSubtreeIfNeeded()
+            let timeline = try XCTUnwrap(timelineScrollView(in: hostingView))
+            let newest = try XCTUnwrap(commandOutputView(containing: "remount-marker-149", in: hostingView))
+            XCTAssertTrue(newest.convert(newest.bounds, to: timeline.contentView)
+                .intersects(timeline.contentView.bounds), "Newest block missing on return \(iteration)")
+        }
+    }
+
+    func testVisibleTimelineTracksWindowResizeWithoutRemounting() async throws {
+        let session = makeTestSession()
+        for index in 0..<40 {
+            addCompletedBlock(command: "printf resize-\(index)",
+                              output: String(repeating: "wrapped text ", count: 20) + "resize-marker-\(index)",
+                              to: session)
+        }
+        let hostingView = NSHostingView(rootView: ContentView(session: session))
+        let window = makeWindow(hostingView: hostingView)
+        defer { window.orderOut(nil); session.shutdown() }
+        try await waitUntil("shell startup") { session.isShellReadyForInput }
+        for size in [NSSize(width: 450, height: 800), NSSize(width: 1200, height: 320),
+                     NSSize(width: 600, height: 500), NSSize(width: 800, height: 420)] {
+            window.setContentSize(size)
+            hostingView.layoutSubtreeIfNeeded()
+            try await Task.sleep(nanoseconds: 100_000_000)
+            hostingView.layoutSubtreeIfNeeded()
+            let timeline = try XCTUnwrap(timelineScrollView(in: hostingView))
+            let newest = try XCTUnwrap(commandOutputView(containing: "resize-marker-39", in: hostingView))
+            XCTAssertTrue(newest.convert(newest.bounds, to: timeline.contentView)
+                .intersects(timeline.contentView.bounds), "Newest output missing after resize to \(size)")
+        }
+    }
+
+    func testTimelineRemainsVisibleAfterCollapsingOutput() async throws {
+        NSWindow.allowsAutomaticWindowTabbing = false
+        let session = makeTestSession()
+        for index in 0..<150 {
+            addCompletedBlock(
+                command: "printf remount-\(index)",
+                output: String(repeating: "wrapped output ", count: 400)
+                    + "remount-marker-\(index)",
+                to: session
+            )
+        }
+        let hostingView = NSHostingView(rootView: ContentView(session: session))
+        let window = makeWindow(hostingView: hostingView)
+        defer {
+            window.orderOut(nil)
+            session.shutdown()
+        }
+        try await waitUntil("shell startup") { session.isShellReadyForInput }
+
+        try await Task.sleep(nanoseconds: 150_000_000)
+        for block in session.blocks { session.toggleBlockCollapsed(id: block.id) }
+        hostingView.layoutSubtreeIfNeeded()
+        try await Task.sleep(nanoseconds: 150_000_000)
+        await drainMainQueue(turns: 4)
+        hostingView.layoutSubtreeIfNeeded()
+        let timeline = try XCTUnwrap(scrollViews(in: hostingView).max { $0.bounds.width < $1.bounds.width })
+        let document = try XCTUnwrap(timeline.documentView)
+        XCTAssertLessThanOrEqual(timeline.documentVisibleRect.maxY, document.bounds.maxY + 2)
     }
 
     func testCompletedCommandPinsTimelineToItsTrueBottom() async throws {
@@ -288,7 +393,7 @@ final class BlocksViewScrollTests: XCTestCase {
         )
     }
 
-    private func makeWindow(hostingView: NSHostingView<ContentView>) -> NSWindow {
+    private func makeWindow<Content: View>(hostingView: NSHostingView<Content>) -> NSWindow {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 800, height: 420),
             styleMask: [.titled, .closable, .resizable],

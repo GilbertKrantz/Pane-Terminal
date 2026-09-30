@@ -59,6 +59,11 @@ enum AuthoritativeTerminalRenderInstrumentation {
     private(set) static var ptyResizeAccepted = 0
     private(set) static var focusRepairAttempts = 0
     private(set) static var focusResponderChanges = 0
+    private(set) static var metalEnableAttempts = 0
+    private(set) static var metalEnableSuccesses = 0
+    private(set) static var metalEnableFailures = 0
+    private(set) static var metalFallbacks = 0
+    private(set) static var metalBufferingModeChanges = 0
 
     static func recordUpdateAttempt() { updateAttempts += 1 }
     static func recordHostReparent() { hostReparents += 1 }
@@ -68,6 +73,11 @@ enum AuthoritativeTerminalRenderInstrumentation {
     static func recordPTYResizeAccepted() { ptyResizeAccepted += 1 }
     static func recordFocusRepairAttempt() { focusRepairAttempts += 1 }
     static func recordFocusResponderChange() { focusResponderChanges += 1 }
+    static func recordMetalEnableAttempt() { metalEnableAttempts += 1 }
+    static func recordMetalEnableSuccess() { metalEnableSuccesses += 1 }
+    static func recordMetalEnableFailure() { metalEnableFailures += 1 }
+    static func recordMetalFallback() { metalFallbacks += 1 }
+    static func recordMetalBufferingModeChange() { metalBufferingModeChanges += 1 }
 
     static func reset() {
         updateAttempts = 0
@@ -78,6 +88,11 @@ enum AuthoritativeTerminalRenderInstrumentation {
         ptyResizeAccepted = 0
         focusRepairAttempts = 0
         focusResponderChanges = 0
+        metalEnableAttempts = 0
+        metalEnableSuccesses = 0
+        metalEnableFailures = 0
+        metalFallbacks = 0
+        metalBufferingModeChanges = 0
     }
 }
 #endif
@@ -210,6 +225,7 @@ final class AuthoritativeTerminalHostView: NSView {
         guard window != nil else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self, self.window != nil else { return }
+            self.terminalView.configureMetalRendererIfNeeded()
             self.onMountedIntoWindow?()
         }
     }
@@ -638,9 +654,25 @@ final class TerminalMountCoordinator {
     }
 }
 
+enum PaneTerminalRendererStatus: Equatable {
+    case coreGraphics
+    case metal
+    case coreGraphicsFallback
+}
+
+enum PaneTerminalMetalBufferingPolicy: Equatable {
+    case perRowPersistent
+    case perFrameAggregated
+}
+
 final class PaneTerminalView: TerminalView {
     var onAlternateScreenChanged: ((Bool) -> Void)?
     var onTerminalResponse: ((ArraySlice<UInt8>) -> Void)?
+    var metalRendererActivation: ((PaneTerminalView) throws -> Void)?
+    private(set) var rendererStatus: PaneTerminalRendererStatus = .coreGraphics
+    private(set) var metalBufferingPolicy: PaneTerminalMetalBufferingPolicy = .perRowPersistent
+    private(set) var metalRendererFailureDescription: String?
+    private(set) var hasAttemptedMetalRendererActivation = false
     private var lastQueuedAlternateScreenState = false
     private var alternateScreenNotificationGeneration = 0
     private var userEncodedInputDepth = 0
@@ -662,6 +694,68 @@ final class PaneTerminalView: TerminalView {
 
     deinit {
         PaneResourceCounters.decrement(.terminalView)
+    }
+
+    override func viewDidMoveToWindow() {
+        let wasUsingMetalRenderer = isUsingMetalRenderer
+        super.viewDidMoveToWindow()
+        guard wasUsingMetalRenderer, !isUsingMetalRenderer else { return }
+        rendererStatus = .coreGraphicsFallback
+        metalRendererFailureDescription = "Metal renderer could not be rebound to the new window"
+#if DEBUG
+        AuthoritativeTerminalRenderInstrumentation.recordMetalFallback()
+#endif
+    }
+
+    func configureMetalRendererIfNeeded() {
+        guard window != nil, !hasAttemptedMetalRendererActivation else { return }
+        hasAttemptedMetalRendererActivation = true
+        updateMetalBufferingPolicy(isAlternate: terminal.isCurrentBufferAlternate)
+#if DEBUG
+        AuthoritativeTerminalRenderInstrumentation.recordMetalEnableAttempt()
+#endif
+        do {
+            if let metalRendererActivation {
+                try metalRendererActivation(self)
+            } else {
+                try setUseMetal(true)
+            }
+            guard isUsingMetalRenderer else {
+                throw PaneTerminalMetalActivationError.rendererDidNotActivate
+            }
+            rendererStatus = .metal
+            metalRendererFailureDescription = nil
+#if DEBUG
+            AuthoritativeTerminalRenderInstrumentation.recordMetalEnableSuccess()
+#endif
+        } catch {
+            rendererStatus = .coreGraphicsFallback
+            metalRendererFailureDescription = String(describing: error)
+#if DEBUG
+            AuthoritativeTerminalRenderInstrumentation.recordMetalEnableFailure()
+#endif
+            NSLog(
+                "Pane: Metal terminal renderer unavailable; using CoreGraphics: %@",
+                String(describing: error)
+            )
+        }
+    }
+
+    private func updateMetalBufferingPolicy(isAlternate: Bool) {
+        let nextPolicy: PaneTerminalMetalBufferingPolicy = isAlternate
+            ? .perFrameAggregated
+            : .perRowPersistent
+        guard metalBufferingPolicy != nextPolicy else { return }
+        metalBufferingPolicy = nextPolicy
+        switch nextPolicy {
+        case .perRowPersistent:
+            metalBufferingMode = .perRowPersistent
+        case .perFrameAggregated:
+            metalBufferingMode = .perFrameAggregated
+        }
+#if DEBUG
+        AuthoritativeTerminalRenderInstrumentation.recordMetalBufferingModeChange()
+#endif
     }
 
     override func send(source: Terminal, data: ArraySlice<UInt8>) {
@@ -736,6 +830,7 @@ final class PaneTerminalView: TerminalView {
         super.bufferActivated(source: source)
 
         let isAlternate = source.isCurrentBufferAlternate
+        updateMetalBufferingPolicy(isAlternate: isAlternate)
         guard isAlternate != lastQueuedAlternateScreenState else { return }
         lastQueuedAlternateScreenState = isAlternate
 
@@ -762,6 +857,10 @@ final class PaneTerminalView: TerminalView {
             self.onAlternateScreenChanged?(self.terminal.isCurrentBufferAlternate)
         }
     }
+}
+
+private enum PaneTerminalMetalActivationError: Error {
+    case rendererDidNotActivate
 }
 
 struct AuthoritativeTerminalRenderState: Equatable {

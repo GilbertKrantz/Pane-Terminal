@@ -282,6 +282,12 @@ final class BlockLifecycleController {
         return moved
     }
 
+    func restoreRemoved(_ entries: [(index: Int, block: CommandBlock)]) {
+        timeline.restoreRemoved(entries)
+        applyScrollbackPolicy()
+        publishTimeline()
+    }
+
     func clearFinalized() {
         timeline.clearFinalized()
         publishTimeline()

@@ -455,12 +455,12 @@ actor RuntimeStateController {
         }
     }
 
-    func deletePreviousSessions() async -> String? {
+    func deletePreviousSessions(preserving sessionIDs: Set<UUID> = []) async -> String? {
         guard let currentSession else { return nil }
         do {
-            try await ephemeralStore.deleteSessions(excluding: currentSession.id)
+            try await ephemeralStore.deleteSessions(preserving: sessionIDs.union([currentSession.id]))
             if let store = try await durableStateStoreIfPresentOrEnabled() {
-                try await store.deleteSessions(excluding: currentSession.id)
+                try await store.deleteSessions(preserving: sessionIDs.union([currentSession.id]))
             }
             return nil
         } catch {

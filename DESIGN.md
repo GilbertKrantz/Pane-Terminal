@@ -75,7 +75,7 @@ This persistent identity is part of the visual design, not only an implementatio
 
 Each block contains:
 
-1. A compact header with working directory, a permanently reserved 116-point contextual-action slot, and status/duration.
+1. A compact header with working directory, a permanently reserved 160-point contextual-action slot, and status/duration.
 2. The exact submitted command in a medium monospaced style.
 3. Sanitized plain-text output when present and expanded.
 
@@ -125,7 +125,7 @@ The idle execute action:
 
 Return executes an idle draft or sends one line to an active command. Shift-Return inserts a newline; bracketed-paste submission keeps a multiline draft inside one zsh line-editor buffer and one eventual block. If zsh is waiting for incomplete syntax before `preexec`, each Return appends a continuation line to that same queued command and history entry. Only while a foreground command is active or awaiting continuation, Control-C and Control-D are intercepted ahead of AppKit's key-equivalent and `NSTextView` paths and sent as `ETX` or `EOT`; idle composer keys keep native editor behavior. Control-C finalizes a cancelled continuation or status-130 command as interrupted while preserving any unsent draft. Unmodified Up and Down navigate session history only while idle.
 
-Idle autocomplete waits 110 ms after the current token changes and then presents at most 12 deduplicated results from zsh's own context-sensitive completion system. Tab and Shift-Tab move a separate keyboard highlight without editing the draft, Return accepts the highlighted result, Escape dismisses the current query, and clicking accepts a specific result.
+Idle autocomplete waits 110 ms after the current token changes and then presents four deduplicated results by default (configurable to eight or twelve) from zsh's own context-sensitive completion system. Tab and Shift-Tab move a separate keyboard highlight without editing the draft, Return accepts the highlighted result, Escape dismisses the current query, and clicking accepts a specific result.
 
 Each active shell generation owns a private Unix-domain socket. Pane sends completion requests over that socket rather than injecting bytes into the main PTY. A normal `zle -F` handler in the active warm zsh accepts the bounded request and forks a short-lived `zpty` worker from that process. The worker therefore inherits the authoritative shell's live working directory, parameters and environment, aliases, functions, options, and loaded completion definitions before running `compsys` and returning encoded candidates. It cannot mutate the visible ZLE buffer, command history, terminal buffers, or PTY transcript.
 
@@ -187,8 +187,16 @@ These constraints prevent feedback loops and keep high-frequency terminal frames
 
 ## Scope and current limits
 
-Pane intentionally excludes tabs, AI completion, synchronization, collaboration, remote-session management, settings, search, export, and share. Automatic mode selection uses a deliberately bounded set of foreground process names plus PTY termios and alternate-screen signals; it is not a general process classifier. Autocomplete is shell-semantic through zsh `compsys`, but remains bounded by a short timeout and size caps; its deterministic local prefix engine is a failure fallback rather than the primary source.
+Pane includes a single-window tab workspace, native settings, block search, and local completion suggestions. Generated AI completion, synchronization, collaboration, remote-session management, cloud export, and sharing are outside the current scope. Automatic mode selection uses a deliberately bounded set of foreground process names plus PTY termios and alternate-screen signals; it is not a general process classifier. Autocomplete is shell-semantic through zsh `compsys`, but remains bounded by a short timeout and size caps; its deterministic local prefix engine is a failure fallback rather than the primary source.
 
-The active mirror is read-only, and the Blocks editor sends complete lines rather than raw keystrokes. Active-only Control-C and Control-D are deliberate exceptions that route `ETX` and `EOT` directly from the composer; other control sequences, arrows, Escape, Tab, mouse events, terminal replies, password privacy, and character-at-a-time input belong in Terminal mode. Pane switches automatically for alternate-screen protocols 47, 1047, and 1049, recognized foreground programs, and raw PTY termios. Programs that expose none of those signals still require the manual mode control, which remains authoritative until foreground state changes. Commands typed directly in Terminal mode do not become blocks.
+The active mirror is read-only, and the Blocks editor sends complete lines rather than raw keystrokes. Active-only Control-C and Control-D are deliberate exceptions that route `ETX` and `EOT` directly from the composer; other control sequences, arrows, Escape, Tab, mouse events, terminal replies, password privacy, and character-at-a-time input belong in Terminal mode. Pane switches automatically for alternate-screen protocols 47, 1047, and 1049, recognized foreground programs, and raw PTY termios. Programs that expose none of those signals still require the manual mode control, which remains authoritative until foreground state changes. Commands typed directly in Terminal mode become blocks when shell lifecycle integration identifies them.
 
 Finalized blocks are plain-text snapshots rather than interactive ANSI terminal fragments. Cursor-addressed output and full-screen applications can differ in the mirror and belong in the authoritative Terminal mode. Visual behavior across macOS 14 and 15 fallbacks, macOS 26 Liquid Glass, accessibility appearances, and window sizes still requires a local human pass when automated control is unavailable without macOS Accessibility and Screen Recording permission.
+
+## Discoverability and history safety
+
+An empty, ready Blocks workspace explains where to type and when to switch to Terminal. The idle composer says “Type a command”; the contextual prompt disappears when a draft or command is present. Using Pane provides searchable in-app help from Terminal actions and the Help menu.
+
+Terminal actions use a native menu with input and diagnostics submenus. A selected, hovered, or keyboard-focused block reveals labeled Copy output, collapse/expand, and native overflow controls. Copy and rerun variants are grouped in the overflow menu.
+
+Deleting or clearing finalized blocks removes them only from the visible timeline. A bounded, latest-removal snapshot provides an Undo action and is discarded by permanent history operations. Running and queued entries are never restored or removed by this undo path. History & Privacy separates collection, restoration, storage, and permanent deletion. Permanent deletion requires confirmation, awaits storage results, and reports success or an actionable failure. Clearing previous sessions preserves every currently open tab.

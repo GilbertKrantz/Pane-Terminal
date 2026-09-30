@@ -465,6 +465,14 @@ struct CommandBlockTimeline: Equatable, Sendable {
 
     /// Clears only immutable timeline entries. Running and queued commands
     /// remain tracked so their PTY lifecycle markers cannot be orphaned.
+    mutating func restoreRemoved(_ entries: [(index: Int, block: CommandBlock)]) {
+        for entry in entries.sorted(by: { $0.index < $1.index }) {
+            guard entry.block.isFinalized, !blocks.contains(where: { $0.id == entry.block.id }) else { continue }
+            blocks.insert(entry.block, at: min(entry.index, blocks.count))
+            retainedOutputBytes += Self.retainedByteCount(of: entry.block)
+        }
+    }
+
     mutating func clearFinalized() {
         retainedOutputBytes -= blocks.reduce(into: 0) { count, block in
             if block.isFinalized {

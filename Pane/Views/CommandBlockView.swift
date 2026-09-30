@@ -7,6 +7,7 @@ struct CommandBlockView: View {
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @FocusState private var hasKeyboardFocus: Bool
     @State private var isHovered = false
 
     private var presentation: BlockPresentationModel {
@@ -29,7 +30,7 @@ struct CommandBlockView: View {
                 contextualToolbar
                     // The slot is always reserved so hovering a block never
                     // changes the command or status layout.
-                    .frame(width: 116, alignment: .trailing)
+                    .frame(width: 160, alignment: .trailing)
                     .opacity(contextualToolbarOpacity)
                     .allowsHitTesting(showsContextualToolbar)
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: contextualToolbarOpacity)
@@ -64,10 +65,23 @@ struct CommandBlockView: View {
                 .padding(.vertical, 6)
         }
         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .focusable()
+        .focused($hasKeyboardFocus)
+        .onChange(of: hasKeyboardFocus) { _, focused in
+            if focused { session.selectBlock(block.id) }
+        }
         .onTapGesture { session.selectBlock(block.id) }
         .onHover { isHovered = $0 }
         .contextMenu { overflowActions }
         .accessibilityElement(children: .contain)
+        .accessibilityActions {
+            Button("Copy output") { session.copyOutput(id: block.id) }
+            Button(block.isCollapsed ? "Expand output" : "Collapse output") { session.toggleBlockCollapsed(id: block.id) }
+            if block.isRerunnable {
+                Button("Edit in composer") { session.editBlock(id: block.id) }
+            }
+            Button("Delete block") { session.removeBlock(id: block.id) }
+        }
         .accessibilityLabel("Command block: \(block.command), \(presentation.status.accessibilityLabel)")
     }
 
@@ -83,16 +97,12 @@ struct CommandBlockView: View {
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
-            ScrollView(.vertical) {
-                CommandClickableTextView(
-                    text: block.output,
-                    font: .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular),
-                    textColor: .labelColor
-                )
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 2)
-            }
-            .frame(maxHeight: PaneMetrics.blockOutputMaxHeight)
+            CommandOutputScrollView(
+                text: block.output,
+                font: .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular),
+                textColor: .labelColor
+            )
+            .padding(.top, 2)
             .help("Command-click links to open them")
         }
     }
@@ -108,12 +118,11 @@ struct CommandBlockView: View {
     }
 
     private var showsContextualToolbar: Bool {
-        isSelected || isHovered
+        isSelected || isHovered || hasKeyboardFocus
     }
 
     private var contextualToolbarOpacity: Double {
-        if isHovered { return 1 }
-        if isSelected { return 0.5 }
+        if showsContextualToolbar { return 1 }
         return 0
     }
 
@@ -172,19 +181,12 @@ struct CommandBlockView: View {
             Button {
                 session.copyOutput(id: block.id)
             } label: {
-                ToolbarHoverSurface(systemName: "doc.on.doc")
+                Label("Copy", systemImage: "doc.on.doc").frame(minHeight: 28)
             }
             .buttonStyle(.plain)
             .help("Copy output")
-
-            Button {
-                session.rerunBlock(id: block.id)
-            } label: {
-                ToolbarHoverSurface(systemName: "arrow.clockwise")
-            }
-            .buttonStyle(.plain)
-            .disabled(!block.isRerunnable)
-            .help(block.isRerunnable ? "Edit and rerun" : "Rerun unavailable for sensitive or redacted commands")
+            .accessibilityLabel("Copy output")
+            .disabled(!hasVisibleOutput)
 
             Button {
                 session.toggleBlockCollapsed(id: block.id)
@@ -195,6 +197,9 @@ struct CommandBlockView: View {
             }
             .buttonStyle(.plain)
             .help(block.isCollapsed ? "Expand output" : "Collapse output")
+            .accessibilityLabel(block.isCollapsed ? "Expand output" : "Collapse output")
+            .accessibilityValue(block.isCollapsed ? "Collapsed" : "Expanded")
+            .disabled(!hasVisibleOutput)
 
             Menu {
                 overflowActions
@@ -204,6 +209,7 @@ struct CommandBlockView: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .help("More block actions")
+            .accessibilityLabel("More block actions")
         }
         .controlSize(.small)
         .padding(.horizontal, 3)
@@ -221,17 +227,20 @@ struct CommandBlockView: View {
 
     @ViewBuilder
     private var overflowActions: some View {
-        Button("Copy Command", systemImage: "text.badge.plus") {
-            session.copyCommand(id: block.id)
-        }
-        Button("Copy Output", systemImage: "doc.on.doc") {
-            session.copyOutput(id: block.id)
-        }
-        Button("Copy Command and Output", systemImage: "doc.on.clipboard") {
-            session.copyCommandAndOutput(id: block.id)
-        }
-        Button("Copy Working Directory", systemImage: "folder") {
-            session.copyWorkingDirectory(id: block.id)
+        Menu("Copy") {
+            Button("Copy Command", systemImage: "text.badge.plus") {
+                session.copyCommand(id: block.id)
+            }
+            Button("Copy Output", systemImage: "doc.on.doc") {
+                session.copyOutput(id: block.id)
+            }
+            Button("Copy Command and Output", systemImage: "doc.on.clipboard") {
+                session.copyCommandAndOutput(id: block.id)
+            }
+            Button("Copy Working Directory", systemImage: "folder") {
+                session.copyWorkingDirectory(id: block.id)
+            }
+
         }
 
         Divider()
@@ -240,14 +249,17 @@ struct CommandBlockView: View {
             session.editBlock(id: block.id)
         }
         .disabled(!block.isRerunnable)
-        Button("Run Again", systemImage: "arrow.clockwise") {
-            session.runAgainBlock(id: block.id)
+        Menu("Run") {
+            Button("Run Again", systemImage: "arrow.clockwise") {
+                session.runAgainBlock(id: block.id)
+            }
+            .disabled(!block.isRerunnable)
+            Button("Run in Original Directory", systemImage: "folder.badge.gearshape") {
+                session.runBlockInOriginalDirectory(id: block.id)
+            }
+            .disabled(!block.isRerunnable)
+
         }
-        .disabled(!block.isRerunnable)
-        Button("Run in Original Directory", systemImage: "folder.badge.gearshape") {
-            session.runBlockInOriginalDirectory(id: block.id)
-        }
-        .disabled(!block.isRerunnable)
 
         Divider()
 
@@ -265,7 +277,7 @@ private struct ToolbarHoverSurface: View {
     var body: some View {
         Image(systemName: systemName)
             .symbolVariant(isHovered ? .fill : .none)
-            .frame(width: 25, height: 22)
+            .frame(width: 28, height: 28)
             .contentShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
             .background {
                 RoundedRectangle(cornerRadius: 5, style: .continuous)

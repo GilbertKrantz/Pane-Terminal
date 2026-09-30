@@ -3,10 +3,9 @@ import AppKit
 
 struct ContentView: View {
     @ObservedObject var session: TerminalSession
-    @State private var isTerminalActionsPresented = false
+    @State private var isHelpPresented = false
     @State private var isOnboardingPresented = false
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var modeBinding: Binding<InputMode> {
         Binding(
@@ -50,9 +49,6 @@ struct ContentView: View {
                 .strokeBorder(PaneTheme.separator.opacity(0.55), lineWidth: 0.5)
                 .padding(1)
         }
-        .overlay(alignment: .topTrailing) {
-            terminalActionsOverlay
-        }
         .animation(nil, value: session.mode)
         .task {
             session.ensureAuthoritativeTerminalIsRunning()
@@ -61,6 +57,10 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .showPaneOnboarding)) { _ in
             isOnboardingPresented = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .showPaneHelp)) { _ in
+            isHelpPresented = true
+        }
+        .sheet(isPresented: $isHelpPresented) { PaneHelpView() }
         .sheet(isPresented: $isOnboardingPresented) {
             PaneOnboardingView(session: session) {
                 hasCompletedOnboarding = true
@@ -146,61 +146,41 @@ struct ContentView: View {
     }
 
     private var terminalActionsMenu: some View {
-        Button {
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.14)) {
-                isTerminalActionsPresented.toggle()
+        Menu {
+            Button("Find in Blocks", systemImage: "magnifyingglass") { session.presentBlockSearch() }
+            Button("Clear Blocks", systemImage: "rectangle.stack.badge.minus") { session.clearBlocks() }
+            Button("Undo Block Removal", systemImage: "arrow.uturn.backward") { session.undoBlockRemoval() }
+                .disabled(session.blockRemovalNotice == nil)
+            Menu("Input") {
+                Button("Direct Input", systemImage: "keyboard") { session.enterDirectInput() }
+                    .disabled(!session.isShellReadyForInput)
+                Button(session.isSecureInputActive ? "Exit Secure Input" : "Enter Secure Input") {
+                    if session.isSecureInputActive { session.exitSecureInput() }
+                    else { session.enterSecureInput() }
+                }
+                .disabled(!session.isShellReadyForInput && !session.isSecureInputActive)
             }
+            Divider()
+            Button("Send Interrupt", systemImage: "stop.circle") { session.sendInterrupt() }
+                .disabled(!session.isShellReadyForInput)
+            Menu("Shell and Diagnostics") {
+                Button("Clear Terminal", systemImage: "eraser") { session.clearTerminal() }
+                Button("Restart Shell…", systemImage: "arrow.clockwise") { session.requestRestartShell() }
+                    .disabled(session.isRestartInProgress || session.isShuttingDown)
+                Button("Repair Terminal View", systemImage: "wrench.and.screwdriver") { session.repairTerminalView() }
+                Button("Copy Local Diagnostics", systemImage: "stethoscope") { session.copyLocalDiagnostics() }
+            }
+            Divider()
+            Button("Using Pane", systemImage: "questionmark.circle") { isHelpPresented = true }
         } label: {
             Image(systemName: "ellipsis")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.primary)
                 .frame(width: 30, height: 30)
-                .background(
-                    isTerminalActionsPresented
-                        ? PaneTheme.selectedBlockBackground
-                        : PaneTheme.subtleControlFill,
-                    in: Circle()
-                )
-                .overlay {
-                    Circle().stroke(.primary.opacity(0.10), lineWidth: 0.5)
-                }
                 .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
         .help("Terminal actions")
         .accessibilityLabel("Terminal actions")
-        .accessibilityValue(isTerminalActionsPresented ? "Expanded" : "Collapsed")
-    }
-
-    @ViewBuilder
-    private var terminalActionsOverlay: some View {
-        if isTerminalActionsPresented {
-            ZStack(alignment: .topTrailing) {
-                Color.black.opacity(0.001)
-                    .contentShape(Rectangle())
-                    .onTapGesture { dismissTerminalActions() }
-
-                TerminalActionsMenu(session: session) {
-                    dismissTerminalActions()
-                }
-                .padding(.top, 8)
-                .padding(.trailing, 10)
-            }
-            .onExitCommand { dismissTerminalActions() }
-            .transition(terminalActionsTransition)
-        }
-    }
-
-    private var terminalActionsTransition: AnyTransition {
-        guard !reduceMotion else { return .opacity }
-        return .scale(scale: 0.96, anchor: .topTrailing)
-            .combined(with: .opacity)
-    }
-
-    private func dismissTerminalActions() {
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.12)) {
-            isTerminalActionsPresented = false
-        }
     }
 
     private var shellStatus: some View {
@@ -489,85 +469,6 @@ struct ModeSwitcherPresentation {
     }
 }
 
-private struct TerminalActionsMenu: View {
-    @ObservedObject var session: TerminalSession
-    let dismiss: () -> Void
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
-    var body: some View {
-        VStack(spacing: 1) {
-            actionButton("Clear Blocks", systemImage: "rectangle.stack.badge.minus") {
-                session.clearBlocks()
-            }
-            actionButton("Clear Terminal", systemImage: "eraser") {
-                session.clearTerminal()
-            }
-
-            Divider().padding(.vertical, 3)
-
-            actionButton("Direct Input", systemImage: "keyboard") {
-                session.enterDirectInput()
-            }
-            .disabled(!session.isShellReadyForInput)
-            actionButton(
-                session.isSecureInputActive ? "Exit Secure Input" : "Enter Secure Input",
-                systemImage: session.isSecureInputActive ? "lock.open" : "lock"
-            ) {
-                if session.isSecureInputActive {
-                    session.exitSecureInput()
-                } else {
-                    session.enterSecureInput()
-                }
-            }
-            .disabled(!session.isShellReadyForInput && !session.isSecureInputActive)
-
-            Divider().padding(.vertical, 3)
-
-            actionButton("Send Interrupt", systemImage: "stop.circle") {
-                session.sendInterrupt()
-            }
-            .disabled(!session.isShellReadyForInput)
-            actionButton("Restart Shell", systemImage: "arrow.clockwise") {
-                session.requestRestartShell()
-            }
-            .disabled(session.isRestartInProgress || session.isShuttingDown)
-            actionButton("Repair Terminal View", systemImage: "wrench.and.screwdriver") {
-                session.repairTerminalView()
-            }
-            actionButton("Copy Local Diagnostics", systemImage: "stethoscope") {
-                session.copyLocalDiagnostics()
-            }
-        }
-        .padding(5)
-        .frame(width: 188)
-        .background {
-            if reduceTransparency {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(PaneTheme.blockBackground)
-            } else {
-                MenuMaterialBackground()
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.75), lineWidth: 0.5)
-        }
-        .shadow(color: .black.opacity(0.32), radius: 14, y: 7)
-    }
-
-    private func actionButton(
-        _ title: String,
-        systemImage: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        TerminalActionButton(title: title, systemImage: systemImage) {
-            action()
-            dismiss()
-        }
-    }
-}
-
 private struct TerminalMountRecoveryOverlay: View {
     @ObservedObject var session: TerminalSession
 
@@ -616,12 +517,12 @@ private struct PaneOnboardingView: View {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Welcome to Pane").font(.largeTitle.bold())
-                Text("A local-first, block-native terminal optimized for zsh. No account or network access is required.")
+                Text("A local terminal that keeps your commands and output easy to revisit. No account or network access is required.")
                     .foregroundStyle(.secondary)
             }
             concept("1", "Blocks", "Run normal commands from the composer. Commands and allowed sanitized excerpts become searchable, collapsible local blocks.", "rectangle.stack")
-            concept("2", "Real terminal interaction", "Interactive programs use one authoritative SwiftTerm terminal and the same persistent PTY.", "terminal")
-            concept("3", "Escape hatch", "Use Direct Input or Full Terminal whenever automatic interaction detection is wrong.", "keyboard")
+            concept("2", "Real terminal interaction", "Use Terminal for interactive programs. Your commands, working directory, and shell session stay connected.", "terminal")
+            concept("3", "Escape hatch", "Switch to Terminal whenever a program needs direct keyboard input. Return to Blocks to compose your next command.", "keyboard")
 
             HStack {
                 Menu("Try a command") {
@@ -656,49 +557,42 @@ private struct PaneOnboardingView: View {
 }
 
 extension Notification.Name {
+    static let showPaneHelp = Notification.Name("Pane.showHelp")
     static let showPaneOnboarding = Notification.Name("Pane.showOnboarding")
 }
 
-private struct TerminalActionButton: View {
-    let title: String
-    let systemImage: String
-    let action: () -> Void
-    @State private var isHovered = false
 
+private struct PaneHelpView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    private let topics: [(String, String)] = [
+        ("Run a command", "In Blocks, type a command and press Return. Shift-Return adds a new line. Completed commands appear above the composer."),
+        ("Use an interactive program", "Switch to Terminal for editors, prompts, and direct keyboard input. Return to Blocks when you want the command composer. Both modes share your shell session."),
+        ("Complete a command", "Tab and Shift-Tab select suggestions; Return accepts the selected suggestion. Escape dismisses suggestions."),
+        ("Find and reuse commands", "Use Find in Blocks in Terminal actions to search history. Select a block to copy output, expand it, or open More block actions to edit and rerun."),
+        ("Remove blocks", "Clear Blocks and Delete Block hide completed entries from the timeline. Use Undo in the removal notice to restore the latest removal. Settings manages permanent history deletion."),
+        ("Stop or recover", "Use Send Interrupt to stop a command. Restart Shell starts a fresh shell. Repair Terminal View preserves your running shell."),
+        ("History and privacy", "Settings > History & Privacy controls local collection, restoration, and permanent deletion. New commands may be saved again while collection is enabled.")
+    ]
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 13))
-                    .frame(width: 18)
-
-                Text(title)
-
-                Spacer(minLength: 12)
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Using Pane").font(.title2.bold())
+            TextField("Search help", text: $query)
+                .textFieldStyle(.roundedBorder)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    ForEach(topics.filter { query.isEmpty || ($0.0 + $0.1).localizedCaseInsensitiveContains(query) }, id: \.0) { topic in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(topic.0).font(.headline)
+                            Text(topic.1).foregroundStyle(.secondary)
+                        }
+                    }
+                    if !query.isEmpty && !topics.contains(where: { ($0.0 + $0.1).localizedCaseInsensitiveContains(query) }) {
+                        Text("No matching help. Try “commands”, “Terminal”, or “history”.")
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
             }
-            .font(.system(size: 13))
-            .foregroundStyle(isHovered ? Color.white : Color.primary)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
-            .background(
-                isHovered ? Color.accentColor : .clear,
-                in: RoundedRectangle(cornerRadius: 5, style: .continuous)
-            )
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
+            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+        }.padding(24).frame(width: 520, height: 460)
     }
-}
-
-private struct MenuMaterialBackground: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.material = .menu
-        view.blendingMode = .withinWindow
-        view.state = .active
-        return view
-    }
-
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
 }

@@ -17,9 +17,14 @@ final class CommandClickableTextViewTests: XCTestCase {
 
         XCTAssertEqual(textView.intrinsicContentSize.height, 0)
 
+        let originalFrame = textView.frame
+        let originalContainerSize = textView.textContainer?.containerSize
         let narrowHeight = textView.height(fitting: 120)
         let wideHeight = textView.height(fitting: 720)
 
+        XCTAssertEqual(textView.frame, originalFrame, "Measurement must not resize the displayed text view")
+        XCTAssertEqual(textView.textContainer?.containerSize, originalContainerSize)
+        XCTAssertEqual(textView.height(fitting: 120), narrowHeight)
         XCTAssertGreaterThan(narrowHeight, wideHeight)
         XCTAssertGreaterThan(wideHeight, 0)
         XCTAssertLessThan(wideHeight, 40)

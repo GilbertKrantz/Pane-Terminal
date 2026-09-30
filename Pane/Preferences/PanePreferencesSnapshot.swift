@@ -58,7 +58,7 @@ struct CompletionPreferences: Codable, Equatable, Sendable {
     var sources: CompletionSources
     var nextCommandSuggestionsEnabled: Bool
     var localLearningEnabled: Bool
-    static let defaults = Self(enabled: true, resultLimit: 8, sources: .defaults,
+    static let defaults = Self(enabled: true, resultLimit: 4, sources: .defaults,
         nextCommandSuggestionsEnabled: true, localLearningEnabled: true)
 }
 
@@ -98,7 +98,7 @@ struct PanePreferencesSnapshot: Codable, Equatable, Sendable {
         var value = self
         value.schemaVersion = Self.currentSchemaVersion
         value.appearance.terminalFont.size = min(24, max(11, value.appearance.terminalFont.size))
-        if ![4, 8, 12].contains(value.completions.resultLimit) { value.completions.resultLimit = 8 }
+        if ![4, 8, 12].contains(value.completions.resultLimit) { value.completions.resultLimit = 4 }
         if ![5_000, 10_000, 50_000].contains(value.terminal.scrollbackLimit) { value.terminal.scrollbackLimit = 10_000 }
         value.history.maximumRestoredSessions = min(10, max(1, value.history.maximumRestoredSessions))
         value.history.maximumRestoredCommands = min(1_000, max(25, value.history.maximumRestoredCommands))

@@ -4,6 +4,77 @@ import SQLite3
 
 final class RuntimeStateStoreTests: XCTestCase {
     @MainActor
+    func testPermanentDeletionPropagatesStorageFailureAndKeepsVisibleBlocks() async throws {
+        let directory = temporaryDirectory(named: "DeletionFailure")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let blockedDirectory = directory.appendingPathComponent("not-a-directory")
+        try Data("file".utf8).write(to: blockedDirectory)
+        let controller = RuntimeStateController(
+            databaseURL: blockedDirectory.appendingPathComponent("runtime.sqlite"),
+            configuration: PanePreferencesSnapshot.defaults.history.runtimeConfiguration
+        )
+        let session = TerminalSession(runtimeStateController: controller)
+        let id = session.blockLifecycleController.queue(command: "echo retained", workingDirectory: "/tmp", isRerunnable: true)
+        _ = session.blockLifecycleController.commandStarted()
+        _ = session.blockLifecycleController.completeActive(exitCode: 0, renderedOutput: "retained", columns: 80, rows: 24)
+        do {
+            try await session.clearExactCommandHistory()
+            XCTFail("Storage failure must reach the caller")
+        } catch {
+            XCTAssertNotNil(session.runtimeStateDiagnostic)
+        }
+        XCTAssertNotNil(session.blockTimeline.block(id: id))
+    }
+
+    @MainActor
+    func testPermanentDeletionDiscardsUndoSnapshot() async throws {
+        var configuration = PanePreferencesSnapshot.defaults.history.runtimeConfiguration
+        configuration.persistenceEnabled = false
+        let controller = RuntimeStateController(databaseURL: URL(fileURLWithPath: "/tmp/pane-unused-\(UUID().uuidString).sqlite"), configuration: configuration)
+        let session = TerminalSession(runtimeStateController: controller)
+        let id = session.blockLifecycleController.queue(command: "echo private", workingDirectory: "/tmp", isRerunnable: true)
+        _ = session.blockLifecycleController.commandStarted()
+        _ = session.blockLifecycleController.completeActive(exitCode: 0, renderedOutput: "private", columns: 80, rows: 24)
+        session.removeBlock(id: id)
+        XCTAssertNotNil(session.blockRemovalNotice)
+        try await session.clearExactCommandHistory()
+        XCTAssertNil(session.blockRemovalNotice)
+        session.undoBlockRemoval()
+        XCTAssertNil(session.blockTimeline.block(id: id))
+    }
+
+    func testPreviousSessionDeletionPreservesEveryOpenTabInBothStores() async throws {
+        let directory = temporaryDirectory(named: "PreserveOpenTabs")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let stores: [any RuntimeStateStore] = [
+            InMemoryRuntimeStateStore(),
+            try SQLiteRuntimeStateStore(databaseURL: directory.appendingPathComponent("runtime.sqlite"))
+        ]
+        for store in stores {
+            let sessions = (0..<3).map { index in
+                RuntimeSession(id: UUID(), workspaceID: "workspace", repositoryID: nil,
+                               shell: "/bin/zsh", initialWorkingDirectory: "/tmp",
+                               startedAt: Date(), lastActiveAt: Date().addingTimeInterval(Double(index)))
+            }
+            for session in sessions { try await store.startSession(session) }
+            let openIDs = Set(sessions.prefix(2).map(\.id))
+            try await store.deleteSessions(preserving: openIDs)
+            let remaining = try await store.loadRecentContext(workspaceID: nil, repositoryID: nil, limit: 10)
+            XCTAssertEqual(Set(remaining.sessions.map(\.id)), openIDs)
+        }
+    }
+
+    @MainActor
+    func testDataManagementReportsUnavailableStorageInsteadOfSuccess() async {
+        let manager = PaneLocalDataManager(applicationSupportURL: URL(fileURLWithPath: "/tmp/Pane-test"))
+        await manager.perform(.exactCommands, tabID: nil)
+        XCTAssertTrue(manager.didFail)
+        XCTAssertFalse(manager.isWorking)
+        XCTAssertTrue(manager.resultMessage?.contains("unavailable") == true)
+    }
+
+    @MainActor
     func testRuntimeSettingsPersistOnlyPreferenceFlags() throws {
         let suiteName = "Pane.RuntimeStateSettingsTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

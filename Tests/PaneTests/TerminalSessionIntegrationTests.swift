@@ -1,5 +1,6 @@
 import AppKit
 import Darwin
+import MetalKit
 import SwiftUI
 import XCTest
 @preconcurrency import SwiftTerm
@@ -2113,6 +2114,99 @@ extension TerminalSessionIntegrationTests {
     }
 
     @MainActor
+    func testMountedAuthoritativeHostEnablesMetalOnceAndSurvivesWindowReparenting() async {
+        let terminal = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 640, height: 320)
+        )
+        let host = AuthoritativeTerminalHostView(terminalView: terminal)
+        host.frame = terminal.frame
+        let firstWindow = NSWindow(
+            contentRect: host.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let secondWindow = NSWindow(
+            contentRect: host.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        defer {
+            firstWindow.orderOut(nil)
+            secondWindow.orderOut(nil)
+        }
+
+        AuthoritativeTerminalRenderInstrumentation.reset()
+        firstWindow.contentView = host
+        firstWindow.makeKeyAndOrderFront(nil)
+        await drainMainQueue(turns: 3)
+
+        XCTAssertTrue(terminal.hasAttemptedMetalRendererActivation)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalEnableAttempts, 1)
+        if MTLCreateSystemDefaultDevice() == nil {
+            XCTAssertEqual(terminal.rendererStatus, .coreGraphicsFallback)
+            XCTAssertFalse(terminal.isUsingMetalRenderer)
+            XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalEnableFailures, 1)
+        } else {
+            XCTAssertEqual(terminal.rendererStatus, .metal)
+            XCTAssertTrue(terminal.isUsingMetalRenderer)
+            XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalEnableSuccesses, 1)
+        }
+
+        secondWindow.contentView = host
+        secondWindow.makeKeyAndOrderFront(nil)
+        await drainMainQueue(turns: 3)
+
+        XCTAssertTrue(host.terminalView === terminal)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalEnableAttempts, 1)
+        if MTLCreateSystemDefaultDevice() != nil {
+            XCTAssertEqual(terminal.rendererStatus, .metal)
+            XCTAssertTrue(terminal.isUsingMetalRenderer)
+            XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalFallbacks, 0)
+        }
+    }
+
+    @MainActor
+    func testMetalActivationFailureFallsBackWithoutRetrying() async {
+        let terminal = PaneTerminalView(
+            frame: NSRect(x: 0, y: 0, width: 640, height: 320)
+        )
+        var activationCalls = 0
+        terminal.metalRendererActivation = { _ in
+            activationCalls += 1
+            throw NSError(domain: "PaneTests.MetalActivation", code: 1)
+        }
+        terminal.configureMetalRendererIfNeeded()
+        XCTAssertFalse(terminal.hasAttemptedMetalRendererActivation)
+
+        let host = AuthoritativeTerminalHostView(terminalView: terminal)
+        host.frame = terminal.frame
+        let window = NSWindow(
+            contentRect: host.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        defer { window.orderOut(nil) }
+
+        AuthoritativeTerminalRenderInstrumentation.reset()
+        window.contentView = host
+        window.makeKeyAndOrderFront(nil)
+        await drainMainQueue(turns: 3)
+        terminal.configureMetalRendererIfNeeded()
+
+        XCTAssertEqual(activationCalls, 1)
+        XCTAssertTrue(terminal.hasAttemptedMetalRendererActivation)
+        XCTAssertEqual(terminal.rendererStatus, .coreGraphicsFallback)
+        XCTAssertNotNil(terminal.metalRendererFailureDescription)
+        XCTAssertFalse(terminal.isUsingMetalRenderer)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalEnableAttempts, 1)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalEnableSuccesses, 0)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalEnableFailures, 1)
+    }
+
+    @MainActor
     func testMountLeaseRejectsLateOutgoingUpdateAndRepairsOnlyTerminalFocusIntent() async throws {
         let session = makeTestSession()
         let host = session.makeAuthoritativeTerminalHostView()
@@ -2365,16 +2459,21 @@ extension TerminalSessionIntegrationTests {
             frame: NSRect(x: 0, y: 0, width: 640, height: 320)
         )
         AuthoritativeTerminalRenderInstrumentation.reset()
+        XCTAssertEqual(terminalView.metalBufferingPolicy, .perRowPersistent)
 
         terminalView.feed(text: "\u{001B}[?1049h")
         terminalView.feed(text: "\u{001B}[?1049h")
         await drainMainQueue(turns: 2)
         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 1)
+        XCTAssertEqual(terminalView.metalBufferingPolicy, .perFrameAggregated)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalBufferingModeChanges, 1)
 
         terminalView.feed(text: "\u{001B}[?1049l")
         terminalView.feed(text: "\u{001B}[?1049l")
         await drainMainQueue(turns: 2)
         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 2)
+        XCTAssertEqual(terminalView.metalBufferingPolicy, .perRowPersistent)
+        XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalBufferingModeChanges, 2)
     }
 
     @MainActor

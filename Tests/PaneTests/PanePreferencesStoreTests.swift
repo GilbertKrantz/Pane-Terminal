@@ -60,7 +60,7 @@ final class PanePreferencesStoreTests: XCTestCase {
         try store.save(snapshot)
         let loaded = try store.load()
         XCTAssertEqual(loaded.appearance.terminalFont.size, 24)
-        XCTAssertEqual(loaded.completions.resultLimit, 8)
+        XCTAssertEqual(loaded.completions.resultLimit, 4)
         XCTAssertEqual(loaded.terminal.scrollbackLimit, 10_000)
         XCTAssertEqual(loaded.history.maximumRestoredSessions, 10)
     }

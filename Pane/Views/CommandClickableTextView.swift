@@ -7,6 +7,10 @@ struct CommandClickableTextView: NSViewRepresentable {
     let textColor: NSColor
 
     func makeNSView(context: Context) -> CommandClickableNSTextView {
+        Self.makeTextView()
+    }
+
+    static func makeTextView() -> CommandClickableNSTextView {
         let textView = CommandClickableNSTextView()
         textView.isEditable = false
         textView.isSelectable = true
@@ -29,6 +33,13 @@ struct CommandClickableTextView: NSViewRepresentable {
     }
 
     func updateNSView(_ textView: CommandClickableNSTextView, context: Context) {
+        updateTextView(textView)
+    }
+
+    func updateTextView(_ textView: CommandClickableNSTextView) {
+        // Session status changes do not change finalized output. Avoid resetting
+        // TextKit and invalidating the lazy row's size on every session update.
+        guard textView.string != text || textView.font != font || textView.textColor != textColor else { return }
         textView.textStorage?.setAttributedString(attributedText)
         textView.textColor = textColor
         textView.font = font
@@ -82,15 +93,31 @@ final class CommandClickableNSTextView: NSTextView {
         return NSSize(width: NSView.noIntrinsicMetric, height: ceil(usedRect.height))
     }
 
-    func height(fitting width: CGFloat) -> CGFloat {
-        guard let textContainer, let layoutManager else { return 0 }
+    private let measurementStorage = NSTextStorage()
+    private let measurementLayout = NSLayoutManager()
+    private let measurementContainer = NSTextContainer(size: .zero)
+    private var measuredWidth: CGFloat?
+    private var measuredHeight: CGFloat = 0
 
-        if abs(frame.width - width) > 0.5 {
-            setFrameSize(NSSize(width: width, height: frame.height))
+    func height(fitting width: CGFloat) -> CGFloat {
+        guard width.isFinite, width > 0, let textStorage else { return 0 }
+        if measurementLayout.textStorage == nil {
+            measurementStorage.addLayoutManager(measurementLayout)
+            measurementLayout.addTextContainer(measurementContainer)
+            measurementContainer.lineFragmentPadding = 0
         }
-        textContainer.containerSize.height = CGFloat.greatestFiniteMagnitude
-        layoutManager.ensureLayout(for: textContainer)
-        return ceil(layoutManager.usedRect(for: textContainer).height)
+        let textChanged = !measurementStorage.isEqual(to: textStorage)
+        if textChanged { measurementStorage.setAttributedString(textStorage) }
+        if textChanged || measuredWidth != width {
+            // sizeThatFits is a measurement, not a layout pass. Resizing the
+            // displayed NSTextView here invalidates SwiftUI's current proposal
+            // and makes the enclosing lazy timeline's height oscillate.
+            measurementContainer.containerSize = NSSize(width: width, height: 10_000_000)
+            measurementLayout.ensureLayout(for: measurementContainer)
+            measuredWidth = width
+            measuredHeight = ceil(measurementLayout.usedRect(for: measurementContainer).height)
+        }
+        return measuredHeight
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -126,5 +153,49 @@ final class CommandClickableNSTextView: NSTextView {
                 self.addCursorRect(rect, cursor: .pointingHand)
             }
         }
+    }
+}
+
+/// The output viewport has an explicit text-derived height. A nested SwiftUI
+/// ScrollView with only maxHeight can claim the entire cap for a single line,
+/// leaving the timeline anchored to blank space as lazy row estimates change.
+struct CommandOutputScrollView: NSViewRepresentable {
+    let text: String
+    let font: NSFont
+    let textColor: NSColor
+
+    func makeNSView(context: Context) -> CommandOutputNSScrollView {
+        let scrollView = CommandOutputNSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.documentView = CommandClickableTextView.makeTextView()
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: CommandOutputNSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? CommandClickableNSTextView else { return }
+        CommandClickableTextView(text: text, font: font, textColor: textColor).updateTextView(textView)
+        scrollView.needsLayout = true
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: CommandOutputNSScrollView,
+                     context: Context) -> CGSize? {
+        guard let width = proposal.width, width.isFinite, width > 0,
+              let textView = nsView.documentView as? CommandClickableNSTextView else { return nil }
+        return CGSize(width: width, height: min(PaneMetrics.blockOutputMaxHeight,
+                                               textView.height(fitting: width)))
+    }
+}
+
+final class CommandOutputNSScrollView: NSScrollView {
+    override func layout() {
+        super.layout()
+        guard let textView = documentView as? CommandClickableNSTextView else { return }
+        let width = contentView.bounds.width
+        guard width > 0 else { return }
+        let height = max(contentView.bounds.height, textView.height(fitting: width))
+        let size = NSSize(width: width, height: height)
+        if textView.frame.size != size { textView.setFrameSize(size) }
     }
 }

@@ -55,6 +55,7 @@ struct PaneApp: App {
             TerminalCommands(workspace: workspace)
             FontSizeCommands(preferences: preferences)
             CommandGroup(after: .help) {
+                Button("Using Pane") { NotificationCenter.default.post(name: .showPaneHelp, object: nil) }
                 Button("Pane Onboarding") {
                     NotificationCenter.default.post(name: .showPaneOnboarding, object: nil)
                 }

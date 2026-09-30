@@ -4,9 +4,11 @@ struct BlocksView: View {
     @ObservedObject var session: TerminalSession
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var renderedFinalizedBlockCount = 0
+    @State private var viewportRestoreTask: Task<Void, Never>?
 
     private enum TimelineAnchor: Hashable {
         case bottom
+        case queue
     }
 
     private var finalizedBlocks: [CommandBlock] {
@@ -30,6 +32,17 @@ struct BlocksView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if let notice = session.blockRemovalNotice {
+                HStack {
+                    Text(notice)
+                    Spacer()
+                    Button("Undo") { session.undoBlockRemoval() }
+                    Button("Dismiss") { session.dismissBlockRemovalNotice() }
+                }
+                .font(.caption)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 8)
+            }
             if let restartedAt = session.lastShellRestartAt {
                 let restartDirectory = session.currentDirectory ?? "home directory"
                 Label(
@@ -62,7 +75,24 @@ struct BlocksView: View {
             }
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: PaneMetrics.blockVerticalSpacing) {
+                    // Keep document geometry exact across tab mounts and width
+                    // changes. Estimated lazy row heights can place the viewport
+                    // in an unmaterialized gap until a manual scroll occurs.
+                    VStack(spacing: PaneMetrics.blockVerticalSpacing) {
+                        if session.blockTimeline.blocks.isEmpty,
+                           session.commandDraft.isEmpty,
+                           session.isShellReadyForInput {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Type a command below").font(.headline)
+                                Text("Blocks keeps completed commands here. Switch to Terminal for interactive programs.")
+                                    .foregroundStyle(.primary.opacity(0.75))
+                                Button("Using Pane") {
+                                    NotificationCenter.default.post(name: .showPaneHelp, object: nil)
+                                }.buttonStyle(.link)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                        }
                         ForEach(session.restoredSessionOrder, id: \.self) { sessionID in
                             if let boundary = session.sessionBoundaries[sessionID] {
                                 SessionBoundaryView(boundary: boundary)
@@ -83,23 +113,36 @@ struct BlocksView: View {
 
                         if !session.queuedBlocks.isEmpty {
                             queuedCommands
+                                .padding(.bottom, timelineBottomInset)
+                                .id(TimelineAnchor.queue)
                         }
 
-                        Color.clear
-                            .frame(height: 8)
-                            .id(TimelineAnchor.bottom)
+                        if finalizedBlocks.isEmpty && session.queuedBlocks.isEmpty {
+                            Color.clear
+                                .frame(height: 8)
+                                .id(TimelineAnchor.bottom)
+                        }
                     }
                     .padding(.horizontal, PaneMetrics.blockOuterInset)
                     .padding(.top, 6)
                 }
                 .defaultScrollAnchor(.bottom)
                 .background(PaneTheme.contentSurface)
+                .onGeometryChange(for: CGSize.self) { geometry in
+                    geometry.size
+                } action: { _ in
+                    restoreTimelineViewport(using: proxy)
+                }
                 .onAppear {
                     let shouldRestoreAfterTerminal = session.consumeBlocksViewportRestoreRequest()
                     renderedFinalizedBlockCount = finalizedBlocks.count
                     if shouldRestoreAfterTerminal || !finalizedBlocks.isEmpty {
                         restoreTimelineViewport(using: proxy)
                     }
+                }
+                .onDisappear {
+                    viewportRestoreTask?.cancel()
+                    viewportRestoreTask = nil
                 }
                 .onChange(of: session.blockTimelineGeneration) { _, _ in
                     let currentCount = finalizedBlocks.count
@@ -112,6 +155,7 @@ struct BlocksView: View {
                 }
                 .onChange(of: session.selectedBlockID) { _, selectedID in
                     guard let selectedID else { return }
+                    viewportRestoreTask?.cancel()
                     withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
                         proxy.scrollTo(selectedID, anchor: .center)
                     }
@@ -125,20 +169,27 @@ struct BlocksView: View {
     }
 
     private func restoreTimelineViewport(using proxy: ScrollViewProxy) {
-        // BlocksView is removed while an expanded alternate-screen terminal is
-        // mounted. On re-entry, SwiftUI can briefly reuse the terminal-sized
-        // AppKit scroll geometry before the lazy timeline has laid itself out,
-        // leaving the visible rect below every block. Re-pin after the first
-        // two layout turns and once more after AppKit has committed its size.
-        DispatchQueue.main.async {
-            proxy.scrollTo(TimelineAnchor.bottom, anchor: .bottom)
-            DispatchQueue.main.async {
-                proxy.scrollTo(TimelineAnchor.bottom, anchor: .bottom)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    proxy.scrollTo(TimelineAnchor.bottom, anchor: .bottom)
-                }
+        // A single destination includes the trailing inset. Scrolling first to
+        // the command and later to a separate spacer visibly overshoots/snaps
+        // when tabs mount. Cancel pending work when this tab leaves the screen.
+        let target: AnyHashable = !session.queuedBlocks.isEmpty
+            ? AnyHashable(TimelineAnchor.queue)
+            : lastFinalizedBlockID.map { AnyHashable($0) }
+                ?? AnyHashable(TimelineAnchor.bottom)
+        viewportRestoreTask?.cancel()
+        viewportRestoreTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                proxy.scrollTo(target, anchor: .bottom)
             }
         }
+    }
+
+    private var timelineBottomInset: CGFloat {
+        PaneMetrics.blockVerticalSpacing + 8
     }
 
     private func restoredBlocks(for sessionID: UUID) -> [CommandBlock] {
@@ -156,6 +207,8 @@ struct BlocksView: View {
             isSelected: session.selectedBlockID == block.id,
             session: session
         )
+        .padding(.bottom, block.id == lastFinalizedBlockID && session.queuedBlocks.isEmpty
+            ? timelineBottomInset : 0)
         .id(block.id)
     }
 
@@ -368,7 +421,7 @@ struct AuthoritativeInputCommandView: View {
                 .buttonStyle(.borderless)
                 .help("Send Interrupt")
 
-                Button("Full Terminal") {
+                Button("Terminal") {
                     session.setMode(.terminal)
                 }
                 .controlSize(.small)

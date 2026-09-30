@@ -136,6 +136,13 @@ actor InMemoryRuntimeStateStore: RuntimeStateStore {
         features.removeAll { deleted.contains($0.sessionID) }
     }
 
+    func deleteSessions(preserving sessionIDs: Set<UUID>) async throws {
+        let deleted = Set(sessions.keys).subtracting(sessionIDs)
+        sessions = sessions.filter { sessionIDs.contains($0.key) }
+        commandEvents.removeAll { deleted.contains($0.sessionID) }
+        features.removeAll { deleted.contains($0.sessionID) }
+    }
+
     func deleteAllCommandEvents() async throws {
         commandEvents.removeAll()
     }

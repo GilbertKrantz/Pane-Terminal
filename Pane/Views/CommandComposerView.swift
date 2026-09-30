@@ -138,7 +138,7 @@ struct CommandComposerView: View {
               query.hasCurrentToken,
               suggestionsQuery == query,
               dismissedQuery != query else { return [] }
-        return autocompleteSuggestions
+        return Array(autocompleteSuggestions.prefix(session.completionResultLimit))
     }
 
     private var contextRefreshID: ComposerContextRefreshID {
@@ -239,7 +239,7 @@ struct CommandComposerView: View {
             } else if session.commandDraft.isEmpty {
                 Text(editorPlaceholder)
                     .font(.callout)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.primary.opacity(0.75))
                     .padding(.top, PaneMetrics.composerVerticalTextInset + 1)
                     .padding(.leading, PaneMetrics.composerHorizontalTextInset)
                     .allowsHitTesting(false)
@@ -474,7 +474,7 @@ struct CommandComposerView: View {
         if presentedCommandBlock != nil {
             return "Continue the command…"
         }
-        return ""
+        return "Type a command"
     }
 
     private var editorHelp: String {
@@ -722,7 +722,7 @@ private struct DirectInputPrompt: View {
         }
         .font(.caption.weight(.semibold))
         .buttonStyle(.borderless)
-        .accessibilityLabel("Focus the authoritative terminal for direct input")
+        .accessibilityLabel("Focus Terminal for direct keyboard input")
     }
 }
 
