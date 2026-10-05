@@ -1,0 +1,95 @@
+{
+  "configuration": "Release -O, isolated NSHostingView probe, macOS 27.0.1, arm64",
+  "timeline_samples": {
+    "10": [
+      {
+        "mount_ms": 61.779022216796875,
+        "resize_ms": 2.14993953704834,
+        "draft_update_ms": 8.314013481140137
+      },
+      {
+        "mount_ms": 52.99711227416992,
+        "resize_ms": 2.8378963470458984,
+        "draft_update_ms": 5.814075469970703
+      },
+      {
+        "mount_ms": 43.231964111328125,
+        "resize_ms": 2.582073211669922,
+        "draft_update_ms": 6.330013275146484
+      }
+    ],
+    "100": [
+      {
+        "mount_ms": 341.27700328826904,
+        "resize_ms": 23.07891845703125,
+        "draft_update_ms": 46.68307304382324
+      },
+      {
+        "mount_ms": 348.68693351745605,
+        "resize_ms": 31.7080020904541,
+        "draft_update_ms": 43.15507411956787
+      },
+      {
+        "mount_ms": 383.98098945617676,
+        "resize_ms": 34.35409069061279,
+        "draft_update_ms": 81.30490779876709
+      }
+    ],
+    "500": [
+      {
+        "mount_ms": 1819.7600841522217,
+        "resize_ms": 184.29601192474365,
+        "draft_update_ms": 375.0540018081665
+      },
+      {
+        "mount_ms": 2203.1110525131226,
+        "resize_ms": 366.86789989471436,
+        "draft_update_ms": 266.58904552459717
+      },
+      {
+        "mount_ms": 2350.550055503845,
+        "resize_ms": 381.6499710083008,
+        "draft_update_ms": 299.11506175994873
+      }
+    ],
+    "1000": [
+      {
+        "mount_ms": 4846.352100372314,
+        "resize_ms": 841.4769172668457,
+        "draft_update_ms": 778.2989740371704
+      },
+      {
+        "mount_ms": 5985.796093940735,
+        "resize_ms": 1246.4179992675781,
+        "draft_update_ms": 1192.2019720077515
+      },
+      {
+        "mount_ms": 5959.2790603637695,
+        "resize_ms": 1277.5249481201172,
+        "draft_update_ms": 1406.9730043411255
+      }
+    ]
+  },
+  "timeline_medians": {
+    "10": {
+      "mount_ms": 52.997,
+      "resize_ms": 2.582,
+      "draft_update_ms": 6.33
+    },
+    "100": {
+      "mount_ms": 348.687,
+      "resize_ms": 31.708,
+      "draft_update_ms": 46.683
+    },
+    "500": {
+      "mount_ms": 2203.111,
+      "resize_ms": 366.868,
+      "draft_update_ms": 299.115
+    },
+    "1000": {
+      "mount_ms": 5959.279,
+      "resize_ms": 1246.418,
+      "draft_update_ms": 1192.202
+    }
+  }
+}

@@ -48,7 +48,7 @@ func paneTerminalAppearanceSignature(for terminalView: TerminalView) -> String {
     ].joined(separator: "|")
 }
 
-#if DEBUG
+#if DEBUG || PANE_TESTING
 @MainActor
 enum AuthoritativeTerminalRenderInstrumentation {
     private(set) static var updateAttempts = 0
@@ -200,6 +200,11 @@ struct TerminalMountRepairPolicy: Equatable, Sendable {
 }
 
 final class AuthoritativeTerminalHostView: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard window != nil else { return }
+        DispatchQueue.main.async { [weak self] in self?.terminalView.onDisplaySubmitted?() }
+    }
     let terminalView: PaneTerminalView
     var onMountedIntoWindow: (() -> Void)?
     private var leadingConstraint: NSLayoutConstraint!
@@ -299,7 +304,7 @@ final class AuthoritativeTerminalMountView: NSView {
         mountedLeaseID = lease.id
         hasPendingWindowMountCallback = true
         requestPostMountLayoutCallback(generation: lease.sequence)
-#if DEBUG
+#if DEBUG || PANE_TESTING
         AuthoritativeTerminalRenderInstrumentation.recordHostReparent()
 #endif
         scheduleWindowMountCallbackIfNeeded()
@@ -368,7 +373,7 @@ final class AuthoritativeTerminalMountView: NSView {
                 return
             }
             self.hasPendingPostMountLayoutCallback = false
-#if DEBUG
+#if DEBUG || PANE_TESTING
             AuthoritativeTerminalRenderInstrumentation.recordPostMountCallback()
 #endif
             self.onMountedIntoWindow?()
@@ -666,6 +671,7 @@ enum PaneTerminalMetalBufferingPolicy: Equatable {
 }
 
 final class PaneTerminalView: TerminalView {
+    var onDisplaySubmitted: (() -> Void)?
     var onAlternateScreenChanged: ((Bool) -> Void)?
     var onTerminalResponse: ((ArraySlice<UInt8>) -> Void)?
     var metalRendererActivation: ((PaneTerminalView) throws -> Void)?
@@ -702,7 +708,7 @@ final class PaneTerminalView: TerminalView {
         guard wasUsingMetalRenderer, !isUsingMetalRenderer else { return }
         rendererStatus = .coreGraphicsFallback
         metalRendererFailureDescription = "Metal renderer could not be rebound to the new window"
-#if DEBUG
+#if DEBUG || PANE_TESTING
         AuthoritativeTerminalRenderInstrumentation.recordMetalFallback()
 #endif
     }
@@ -711,7 +717,7 @@ final class PaneTerminalView: TerminalView {
         guard window != nil, !hasAttemptedMetalRendererActivation else { return }
         hasAttemptedMetalRendererActivation = true
         updateMetalBufferingPolicy(isAlternate: terminal.isCurrentBufferAlternate)
-#if DEBUG
+#if DEBUG || PANE_TESTING
         AuthoritativeTerminalRenderInstrumentation.recordMetalEnableAttempt()
 #endif
         do {
@@ -725,13 +731,13 @@ final class PaneTerminalView: TerminalView {
             }
             rendererStatus = .metal
             metalRendererFailureDescription = nil
-#if DEBUG
+#if DEBUG || PANE_TESTING
             AuthoritativeTerminalRenderInstrumentation.recordMetalEnableSuccess()
 #endif
         } catch {
             rendererStatus = .coreGraphicsFallback
             metalRendererFailureDescription = String(describing: error)
-#if DEBUG
+#if DEBUG || PANE_TESTING
             AuthoritativeTerminalRenderInstrumentation.recordMetalEnableFailure()
 #endif
             NSLog(
@@ -753,7 +759,7 @@ final class PaneTerminalView: TerminalView {
         case .perFrameAggregated:
             metalBufferingMode = .perFrameAggregated
         }
-#if DEBUG
+#if DEBUG || PANE_TESTING
         AuthoritativeTerminalRenderInstrumentation.recordMetalBufferingModeChange()
 #endif
     }
@@ -841,7 +847,7 @@ final class PaneTerminalView: TerminalView {
         source.updateFullScreen()
         setNeedsDisplay(bounds)
         layer?.setNeedsDisplay()
-#if DEBUG
+#if DEBUG || PANE_TESTING
         AuthoritativeTerminalRenderInstrumentation.recordFullScreenInvalidation()
 #endif
 
@@ -906,7 +912,7 @@ struct TerminalViewRepresentable: NSViewRepresentable {
     }
 
     func updateNSView(_ mountView: AuthoritativeTerminalMountView, context: Context) {
-#if DEBUG
+#if DEBUG || PANE_TESTING
         AuthoritativeTerminalRenderInstrumentation.recordUpdateAttempt()
 #endif
         context.coordinator.updatePlacement(placement, session: session)

@@ -1,0 +1,843 @@
+warning: '--skip-update' option is deprecated and will be removed in a future release
+warning: /Users/chandraw/Library/org.swift.swiftpm/configuration is not accessible or not writable, disabling user-level cache features.
+warning: /Users/chandraw/Library/org.swift.swiftpm/security is not accessible or not writable, disabling user-level cache features.
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for production...
+[2/13] Write sources
+[2/13] /tmp/PanePerformanceAudit/arm64-apple-macosx/release/PanePackageTests.derived/runner.swift
+[2/13] Copying Shaders.metal
+[5/13] Write sources
+[9/13] Copying Fixtures
+[10/13] Write swift-version--58304C5D6DBC2206.txt
+[12/14] Compiling SwiftTerm AppleTerminalView.swift
+[13/15] Compiling Pane BehavioralCompletion.swift
+[14/17] Compiling PaneCompatibilityTests CompatibilityTests.swift
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/CompatibilityTests.swift:205:42: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 203 |         sshSession.session.visibilityState = .selected
+ 204 |         peerSession.session.visibilityState = .background
+ 205 |         let sshView = sshSession.session.debugAuthoritativeTerminalView
+     |                                          `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 206 |         let peerMarker = "PANE_SSH_PEER_\(UUID().uuidString)"
+ 207 |         peerSession.session.submit(
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/CompatibilityTests.swift:255:32: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 253 |         XCTAssertFalse(peerBlock.output.contains(remoteMarker))
+ 254 |         XCTAssertTrue(
+ 255 |             sshSession.session.debugAuthoritativeTerminalView === sshView
+     |                                `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 256 |         )
+ 257 |         XCTAssertEqual(sshSession.session.inputRequirement, .shellIdle)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/CompatibilityTests.swift:318:49: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 316 |             harness.session.isShellReadyForInput
+ 317 |         }
+ 318 |         let authoritativeView = harness.session.debugAuthoritativeTerminalView
+     |                                                 `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 319 |         let fixture = try FixtureLocator.paneFixture(
+ 320 |             testCase: PaneConnectedCompatibilityTests.self
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/CompatibilityTests.swift:332:29: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 330 |         XCTAssertTrue(block.output.contains("👩‍💻"))
+ 331 |         XCTAssertTrue(
+ 332 |             harness.session.debugAuthoritativeTerminalView === authoritativeView
+     |                             `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 333 |         )
+ 334 |     }
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/CompatibilityTests.swift:383:29: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 381 |         }
+ 382 |         XCTAssertTrue(
+ 383 |             harness.session.debugAuthoritativeTerminalView === authoritativeView
+     |                             `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 384 |         )
+ 385 |     }
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/CompatibilityTests.swift:580:45: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 578 |         selected.session.visibilityState = .selected
+ 579 |         background.session.visibilityState = .background
+ 580 |         let selectedView = selected.session.debugAuthoritativeTerminalView
+     |                                             `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 581 |         let backgroundView = background.session.debugAuthoritativeTerminalView
+ 582 |         let fixture = try FixtureLocator.paneFixture(
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/CompatibilityTests.swift:581:49: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 579 |         background.session.visibilityState = .background
+ 580 |         let selectedView = selected.session.debugAuthoritativeTerminalView
+ 581 |         let backgroundView = background.session.debugAuthoritativeTerminalView
+     |                                                 `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 582 |         let fixture = try FixtureLocator.paneFixture(
+ 583 |             testCase: PaneConnectedCompatibilityTests.self
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/CompatibilityTests.swift:616:30: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 614 |         )
+ 615 |         XCTAssertTrue(
+ 616 |             selected.session.debugAuthoritativeTerminalView === selectedView
+     |                              `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 617 |         )
+ 618 |         XCTAssertTrue(
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/CompatibilityTests.swift:619:32: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 617 |         )
+ 618 |         XCTAssertTrue(
+ 619 |             background.session.debugAuthoritativeTerminalView === backgroundView
+     |                                `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 620 |         )
+ 621 |     }
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/Support/PaneSoakRunner.swift:688:46: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+686 | 
+687 |     private func makeHarness(_ tab: TerminalTab) throws -> Harness {
+688 |         guard let terminalView = tab.session.debugAuthoritativeTerminalView
+    |                                              `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+689 |                 as? PaneTerminalView else {
+690 |             throw PaneSoakFailure(
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/Support/WorkspaceStressRunner.swift:279:32: error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+277 |                 identityChanges += 1
+278 |             }
+279 |             if harness.session.debugProcessGeneration
+    |                                `- error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+280 |                 != harness.initialPTYGeneration {
+281 |                 generationChanges += 1
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/Support/WorkspaceStressRunner.swift:545:47: error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+543 |         let first = harnesses[0]
+544 |         let second = harnesses[1]
+545 |         let beforeWrongSource = first.session.debugPTYWindowSize
+    |                                               `- error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+546 |         first.session.sizeChanged(
+547 |             source: second.terminalView,
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/Support/WorkspaceStressRunner.swift:553:27: error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+551 |         if !sameWindowSize(
+552 |             beforeWrongSource,
+553 |             first.session.debugPTYWindowSize
+    |                           `- error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+554 |         ) {
+555 |             violations.append("wrong terminal source resized \(first.id)")
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/Support/WorkspaceStressRunner.swift:562:47: error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+560 |                 uniqueKeysWithValues: harnesses
+561 |                     .filter { $0.id != harness.id }
+562 |                     .map { ($0.id, $0.session.debugPTYWindowSize) }
+    |                                               `- error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+563 |             )
+564 |             harness.terminalView.setFrameSize(
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/Support/WorkspaceStressRunner.swift:579:39: error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+577 |                 if !sameWindowSize(
+578 |                     previous,
+579 |                     candidate.session.debugPTYWindowSize
+    |                                       `- error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+580 |                 ) {
+581 |                     violations.append(
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/Support/WorkspaceStressRunner.swift:588:35: error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+586 |         }
+587 |         let dimensions = Set(harnesses.map {
+588 |             let size = $0.session.debugPTYWindowSize
+    |                                   `- error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+589 |             return "\(size.ws_xpixel)x\(size.ws_ypixel)"
+590 |         })
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/Support/WorkspaceStressRunner.swift:629:46: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+627 | 
+628 |     private func makeHarness(_ tab: TerminalTab) throws -> Harness {
+629 |         guard let terminalView = tab.session.debugAuthoritativeTerminalView
+    |                                              `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+630 |                 as? PaneTerminalView else {
+631 |             throw WorkspaceStressFailure(
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/Support/WorkspaceStressRunner.swift:641:47: error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+639 |             terminalView: terminalView,
+640 |             initialTerminalIdentity: ObjectIdentifier(terminalView),
+641 |             initialPTYGeneration: tab.session.debugProcessGeneration
+    |                                               `- error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+642 |         )
+643 |     }
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/Support/WorkspaceStressRunner.swift:666:42: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+664 |             return true
+665 |         }
+666 |         guard let terminalView = session.debugAuthoritativeTerminalView
+    |                                          `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+667 |                 as? PaneTerminalView else {
+668 |             return false
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/Support/WorkspaceStressRunner.swift:671:68: error: cannot infer contextual base in reference to member 'active'
+669 |         }
+670 |         return String(
+671 |             decoding: terminalView.terminal.getBufferAsData(kind: .active),
+    |                                                                    `- error: cannot infer contextual base in reference to member 'active'
+672 |             as: UTF8.self
+673 |         ).contains(marker)
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionHardeningTests.swift:24:36: error: generic parameter 'T' could not be inferred
+ 22 |         }
+ 23 |         assertHealthySession(session)
+ 24 |         let terminalIdentity = try XCTUnwrap(session.debugAuthoritativeTerminalView)
+    |                                    `- error: generic parameter 'T' could not be inferred
+ 25 | 
+ 26 |         for index in 0..<16 {
+
+XCTest.XCTUnwrap:1:13: note: in call to function 'XCTUnwrap(_:_:file:line:)'
+1 | public func XCTUnwrap<T>(_ expression: @autoclosure () throws -> T?, _ message: @autoclosure () -> String = "", file: StaticString = #filePath, line: UInt = #line) throws -> T
+  |             `- note: in call to function 'XCTUnwrap(_:_:file:line:)'
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionHardeningTests.swift:24:54: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 22 |         }
+ 23 |         assertHealthySession(session)
+ 24 |         let terminalIdentity = try XCTUnwrap(session.debugAuthoritativeTerminalView)
+    |                                                      `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 25 | 
+ 26 |         for index in 0..<16 {
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionHardeningTests.swift:33:35: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 31 |             )
+ 32 |             assertHealthySession(session)
+ 33 |             XCTAssertTrue(session.debugAuthoritativeTerminalView === terminalIdentity)
+    |                                   `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 34 |         }
+ 35 | 
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionHardeningTests.swift:45:32: error: value of type 'TerminalSession' has no member 'debugHasForegroundProcess'
+ 43 |                 session.activeCommandBlock?.command == command
+ 44 |                     && session.activeCommandBlock?.state == .running
+ 45 |                     && session.debugHasForegroundProcess
+    |                                `- error: value of type 'TerminalSession' has no member 'debugHasForegroundProcess'
+ 46 |             }
+ 47 |             let interruptedBlockID = try XCTUnwrap(session.activeCommandBlock?.id)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionHardeningTests.swift:72:35: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 70 |             session.setMode(.blocks)
+ 71 |             assertHealthySession(session)
+ 72 |             XCTAssertTrue(session.debugAuthoritativeTerminalView === terminalIdentity)
+    |                                   `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 73 |         }
+ 74 | 
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionHardeningTests.swift:167:31: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+165 |         XCTAssertGreaterThan(session.debugSnapshot.processGeneration, previousGeneration)
+166 |         assertHealthySession(session)
+167 |         XCTAssertTrue(session.debugAuthoritativeTerminalView === terminalIdentity)
+    |                               `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+168 | 
+169 |         try await runCommand(
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionHardeningTests.swift:394:33: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+392 |         XCTAssertTrue(session.isShellReadyForInput, diagnostic, file: file, line: line)
+393 |         XCTAssertFalse(session.isCommandActive, diagnostic, file: file, line: line)
+394 |         XCTAssertNotNil(session.debugAuthoritativeTerminalView, diagnostic, file: file, line: line)
+    |                                 `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+395 |     }
+396 | 
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:540:40: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 538 |         XCTAssertEqual(session.activeTerminalPresentation, .authoritativeInBlock)
+ 539 | 
+ 540 |         let terminalIdentity = session.debugAuthoritativeTerminalView
+     |                                        `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 541 |         let hostIdentity = session.makeAuthoritativeTerminalHostView()
+ 542 |         let processGeneration = session.debugProcessGeneration
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:542:41: error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+ 540 |         let terminalIdentity = session.debugAuthoritativeTerminalView
+ 541 |         let hostIdentity = session.makeAuthoritativeTerminalHostView()
+ 542 |         let processGeneration = session.debugProcessGeneration
+     |                                         `- error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+ 543 |         session.setMode(.terminal)
+ 544 |         XCTAssertEqual(session.activeTerminalPresentation, .fullTerminal)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:548:31: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 546 |         XCTAssertEqual(session.activeTerminalPresentation, .authoritativeInBlock)
+ 547 |         XCTAssertEqual(session.focusTarget, .authoritativeTerminal)
+ 548 |         XCTAssertTrue(session.debugAuthoritativeTerminalView === terminalIdentity)
+     |                               `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 549 |         XCTAssertTrue(session.debugAuthoritativeHostView === hostIdentity)
+ 550 |         XCTAssertEqual(session.debugProcessGeneration, processGeneration)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:549:31: error: value of type 'TerminalSession' has no member 'debugAuthoritativeHostView'
+ 547 |         XCTAssertEqual(session.focusTarget, .authoritativeTerminal)
+ 548 |         XCTAssertTrue(session.debugAuthoritativeTerminalView === terminalIdentity)
+ 549 |         XCTAssertTrue(session.debugAuthoritativeHostView === hostIdentity)
+     |                               `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeHostView'
+ 550 |         XCTAssertEqual(session.debugProcessGeneration, processGeneration)
+ 551 | 
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:550:32: error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+ 548 |         XCTAssertTrue(session.debugAuthoritativeTerminalView === terminalIdentity)
+ 549 |         XCTAssertTrue(session.debugAuthoritativeHostView === hostIdentity)
+ 550 |         XCTAssertEqual(session.debugProcessGeneration, processGeneration)
+     |                                `- error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+ 551 | 
+ 552 |         session.sendInterrupt()
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:620:9: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+ 618 |         XCTAssertFalse(session.isSecureInputActive)
+ 619 |         await drainMainQueue(turns: 3)
+ 620 |         AuthoritativeTerminalRenderInstrumentation.reset()
+     |         `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+ 621 |         try await Task.sleep(for: .seconds(10))
+ 622 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.hostReparents, 0)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:622:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+ 620 |         AuthoritativeTerminalRenderInstrumentation.reset()
+ 621 |         try await Task.sleep(for: .seconds(10))
+ 622 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.hostReparents, 0)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+ 623 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 0)
+ 624 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 0)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:623:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+ 621 |         try await Task.sleep(for: .seconds(10))
+ 622 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.hostReparents, 0)
+ 623 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 0)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+ 624 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 0)
+ 625 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAccepted, 0)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:624:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+ 622 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.hostReparents, 0)
+ 623 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 0)
+ 624 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 0)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+ 625 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAccepted, 0)
+ 626 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.focusResponderChanges, 0)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:625:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+ 623 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 0)
+ 624 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 0)
+ 625 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAccepted, 0)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+ 626 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.focusResponderChanges, 0)
+ 627 |         session.sendInterrupt()
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:626:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+ 624 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 0)
+ 625 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAccepted, 0)
+ 626 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.focusResponderChanges, 0)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+ 627 |         session.sendInterrupt()
+ 628 |     }
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:664:41: error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+ 662 |         let terminalIdentity = session.makeAuthoritativeTerminalView()
+ 663 |         let hostIdentity = session.makeAuthoritativeTerminalHostView()
+ 664 |         let processGeneration = session.debugProcessGeneration
+     |                                         `- error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+ 665 |         let command = #"trap 'printf "\033[?1049l"; stty echo icanon; exit 130' INT TERM; stty -echo -icanon min 1 time 0; printf '\033[?1049hPANE_ALT_READY\n'; read -k 1 pane_a; printf 'PANE_ALT_A=%s\n' "$pane_a"; read -k 1 pane_b; printf 'PANE_ALT_B=%s\n' "$pane_b"; read -k 1 pane_c; printf 'PANE_ALT_C=%s\n' "$pane_c"; printf '\033[?1049l'; stty echo icanon"#
+ 666 |         session.submit(command: command)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:717:35: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 715 |                     && terminalIdentity.window === window
+ 716 |             }
+ 717 |             XCTAssertTrue(session.debugAuthoritativeTerminalView === terminalIdentity)
+     |                                   `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 718 |             XCTAssertTrue(session.debugAuthoritativeHostView === hostIdentity)
+ 719 |             XCTAssertEqual(session.debugProcessGeneration, processGeneration)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:718:35: error: value of type 'TerminalSession' has no member 'debugAuthoritativeHostView'
+ 716 |             }
+ 717 |             XCTAssertTrue(session.debugAuthoritativeTerminalView === terminalIdentity)
+ 718 |             XCTAssertTrue(session.debugAuthoritativeHostView === hostIdentity)
+     |                                   `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeHostView'
+ 719 |             XCTAssertEqual(session.debugProcessGeneration, processGeneration)
+ 720 |         }
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:719:36: error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+ 717 |             XCTAssertTrue(session.debugAuthoritativeTerminalView === terminalIdentity)
+ 718 |             XCTAssertTrue(session.debugAuthoritativeHostView === hostIdentity)
+ 719 |             XCTAssertEqual(session.debugProcessGeneration, processGeneration)
+     |                                    `- error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+ 720 |         }
+ 721 | 
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:732:31: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 730 |         }
+ 731 | 
+ 732 |         XCTAssertTrue(session.debugAuthoritativeTerminalView === terminalIdentity)
+     |                               `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 733 |         XCTAssertTrue(session.debugAuthoritativeHostView === hostIdentity)
+ 734 |         XCTAssertEqual(session.debugProcessGeneration, processGeneration)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:733:31: error: value of type 'TerminalSession' has no member 'debugAuthoritativeHostView'
+ 731 | 
+ 732 |         XCTAssertTrue(session.debugAuthoritativeTerminalView === terminalIdentity)
+ 733 |         XCTAssertTrue(session.debugAuthoritativeHostView === hostIdentity)
+     |                               `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeHostView'
+ 734 |         XCTAssertEqual(session.debugProcessGeneration, processGeneration)
+ 735 |     }
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:734:32: error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+ 732 |         XCTAssertTrue(session.debugAuthoritativeTerminalView === terminalIdentity)
+ 733 |         XCTAssertTrue(session.debugAuthoritativeHostView === hostIdentity)
+ 734 |         XCTAssertEqual(session.debugProcessGeneration, processGeneration)
+     |                                `- error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+ 735 |     }
+ 736 | 
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:779:37: error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+ 777 |         let terminal = session.makeAuthoritativeTerminalView()
+ 778 |         let terminalIdentity = ObjectIdentifier(terminal)
+ 779 |         let ptyGeneration = session.debugProcessGeneration
+     |                                     `- error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+ 780 | 
+ 781 |         terminal.send(data: [0x1A][...])
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:808:32: error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+ 806 | 
+ 807 |         XCTAssertEqual(ObjectIdentifier(session.makeAuthoritativeTerminalView()), terminalIdentity)
+ 808 |         XCTAssertEqual(session.debugProcessGeneration, ptyGeneration)
+     |                                `- error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+ 809 |         XCTAssertGreaterThan(terminal.visibleRect.height, hostingView.bounds.height * 0.65)
+ 810 | 
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:865:41: error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+ 863 | 
+ 864 |         let hostIdentity = session.makeAuthoritativeTerminalHostView()
+ 865 |         let processGeneration = session.debugProcessGeneration
+     |                                         `- error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+ 866 |         session.setMode(.terminal)
+ 867 |         try await waitUntil("normal-buffer direct input to mount in Full Terminal", timeout: 5) {
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:893:31: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 891 |             return false
+ 892 |         }
+ 893 |         XCTAssertTrue(session.debugAuthoritativeTerminalView === mountedTerminal)
+     |                               `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+ 894 |         XCTAssertTrue(session.debugAuthoritativeHostView === hostIdentity)
+ 895 |         XCTAssertEqual(session.debugProcessGeneration, processGeneration)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:894:31: error: value of type 'TerminalSession' has no member 'debugAuthoritativeHostView'
+ 892 |         }
+ 893 |         XCTAssertTrue(session.debugAuthoritativeTerminalView === mountedTerminal)
+ 894 |         XCTAssertTrue(session.debugAuthoritativeHostView === hostIdentity)
+     |                               `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeHostView'
+ 895 |         XCTAssertEqual(session.debugProcessGeneration, processGeneration)
+ 896 |     }
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:895:32: error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+ 893 |         XCTAssertTrue(session.debugAuthoritativeTerminalView === mountedTerminal)
+ 894 |         XCTAssertTrue(session.debugAuthoritativeHostView === hostIdentity)
+ 895 |         XCTAssertEqual(session.debugProcessGeneration, processGeneration)
+     |                                `- error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+ 896 |     }
+ 897 | 
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2140:9: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2138 |         }
+2139 | 
+2140 |         AuthoritativeTerminalRenderInstrumentation.reset()
+     |         `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2141 |         firstWindow.contentView = host
+2142 |         firstWindow.makeKeyAndOrderFront(nil)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2146:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2144 | 
+2145 |         XCTAssertTrue(terminal.hasAttemptedMetalRendererActivation)
+2146 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalEnableAttempts, 1)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2147 |         if MTLCreateSystemDefaultDevice() == nil {
+2148 |             XCTAssertEqual(terminal.rendererStatus, .coreGraphicsFallback)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2150:28: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2148 |             XCTAssertEqual(terminal.rendererStatus, .coreGraphicsFallback)
+2149 |             XCTAssertFalse(terminal.isUsingMetalRenderer)
+2150 |             XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalEnableFailures, 1)
+     |                            `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2151 |         } else {
+2152 |             XCTAssertEqual(terminal.rendererStatus, .metal)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2154:28: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2152 |             XCTAssertEqual(terminal.rendererStatus, .metal)
+2153 |             XCTAssertTrue(terminal.isUsingMetalRenderer)
+2154 |             XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalEnableSuccesses, 1)
+     |                            `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2155 |         }
+2156 | 
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2162:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2160 | 
+2161 |         XCTAssertTrue(host.terminalView === terminal)
+2162 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalEnableAttempts, 1)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2163 |         if MTLCreateSystemDefaultDevice() != nil {
+2164 |             XCTAssertEqual(terminal.rendererStatus, .metal)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2166:28: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2164 |             XCTAssertEqual(terminal.rendererStatus, .metal)
+2165 |             XCTAssertTrue(terminal.isUsingMetalRenderer)
+2166 |             XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalFallbacks, 0)
+     |                            `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2167 |         }
+2168 |     }
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2193:9: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2191 |         defer { window.orderOut(nil) }
+2192 | 
+2193 |         AuthoritativeTerminalRenderInstrumentation.reset()
+     |         `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2194 |         window.contentView = host
+2195 |         window.makeKeyAndOrderFront(nil)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2204:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2202 |         XCTAssertNotNil(terminal.metalRendererFailureDescription)
+2203 |         XCTAssertFalse(terminal.isUsingMetalRenderer)
+2204 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalEnableAttempts, 1)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2205 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalEnableSuccesses, 0)
+2206 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalEnableFailures, 1)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2205:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2203 |         XCTAssertFalse(terminal.isUsingMetalRenderer)
+2204 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalEnableAttempts, 1)
+2205 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalEnableSuccesses, 0)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2206 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalEnableFailures, 1)
+2207 |     }
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2206:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2204 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalEnableAttempts, 1)
+2205 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalEnableSuccesses, 0)
+2206 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalEnableFailures, 1)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2207 |     }
+2208 | 
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2248:41: error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+2246 |         host.layoutSubtreeIfNeeded()
+2247 |         await drainMainQueue(turns: 2)
+2248 |         let compactWindowSize = session.debugPTYWindowSize
+     |                                         `- error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+2249 |         session.enterSecureInput()
+2250 |         session.restoreAuthoritativeFocusAfterMount()
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2253:9: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2251 |         await drainMainQueue(turns: 2)
+2252 |         XCTAssertTrue(window.firstResponder === host.terminalView)
+2253 |         AuthoritativeTerminalRenderInstrumentation.reset()
+     |         `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2254 |         session.restoreAuthoritativeFocusAfterMount()
+2255 |         session.restoreAuthoritativeFocusAfterMount()
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2257:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2255 |         session.restoreAuthoritativeFocusAfterMount()
+2256 |         await drainMainQueue(turns: 2)
+2257 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.focusRepairAttempts, 0)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2258 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.focusResponderChanges, 0)
+2259 | 
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2258:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2256 |         await drainMainQueue(turns: 2)
+2257 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.focusRepairAttempts, 0)
+2258 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.focusResponderChanges, 0)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2259 | 
+2260 |         XCTAssertTrue(session.terminalMountCoordinator.present(lease: secondLease, in: secondMount))
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2266:31: error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+2264 |         await drainMainQueue(turns: 2)
+2265 |         XCTAssertTrue(window.firstResponder === host.terminalView)
+2266 |         XCTAssertTrue(session.debugAuthoritativeTerminalView === host.terminalView)
+     |                               `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeTerminalView'
+2267 |         XCTAssertTrue(session.debugAuthoritativeHostView === host)
+2268 |         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_col, compactWindowSize.ws_col)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2267:31: error: value of type 'TerminalSession' has no member 'debugAuthoritativeHostView'
+2265 |         XCTAssertTrue(window.firstResponder === host.terminalView)
+2266 |         XCTAssertTrue(session.debugAuthoritativeTerminalView === host.terminalView)
+2267 |         XCTAssertTrue(session.debugAuthoritativeHostView === host)
+     |                               `- error: value of type 'TerminalSession' has no member 'debugAuthoritativeHostView'
+2268 |         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_col, compactWindowSize.ws_col)
+2269 |         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_row, compactWindowSize.ws_row)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2268:38: error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+2266 |         XCTAssertTrue(session.debugAuthoritativeTerminalView === host.terminalView)
+2267 |         XCTAssertTrue(session.debugAuthoritativeHostView === host)
+2268 |         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_col, compactWindowSize.ws_col)
+     |                                      `- error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+2269 |         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_row, compactWindowSize.ws_row)
+2270 |         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_xpixel, compactWindowSize.ws_xpixel)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2269:38: error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+2267 |         XCTAssertTrue(session.debugAuthoritativeHostView === host)
+2268 |         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_col, compactWindowSize.ws_col)
+2269 |         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_row, compactWindowSize.ws_row)
+     |                                      `- error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+2270 |         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_xpixel, compactWindowSize.ws_xpixel)
+2271 |         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_ypixel, compactWindowSize.ws_ypixel)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2270:38: error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+2268 |         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_col, compactWindowSize.ws_col)
+2269 |         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_row, compactWindowSize.ws_row)
+2270 |         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_xpixel, compactWindowSize.ws_xpixel)
+     |                                      `- error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+2271 |         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_ypixel, compactWindowSize.ws_ypixel)
+2272 |         let currentWindowSize = session.debugPTYWindowSize
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2271:38: error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+2269 |         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_row, compactWindowSize.ws_row)
+2270 |         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_xpixel, compactWindowSize.ws_xpixel)
+2271 |         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_ypixel, compactWindowSize.ws_ypixel)
+     |                                      `- error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+2272 |         let currentWindowSize = session.debugPTYWindowSize
+2273 | 
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2272:41: error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+2270 |         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_xpixel, compactWindowSize.ws_xpixel)
+2271 |         XCTAssertGreaterThan(session.debugPTYWindowSize.ws_ypixel, compactWindowSize.ws_ypixel)
+2272 |         let currentWindowSize = session.debugPTYWindowSize
+     |                                         `- error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+2273 | 
+2274 |         XCTAssertFalse(session.terminalMountCoordinator.present(lease: firstLease, in: firstMount))
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2277:32: error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+2275 |         XCTAssertTrue(host.superview === secondMount)
+2276 |         XCTAssertNil(firstMount.subviews.first { $0 === host })
+2277 |         XCTAssertEqual(session.debugPTYWindowSize.ws_col, currentWindowSize.ws_col)
+     |                                `- error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+2278 |         XCTAssertEqual(session.debugPTYWindowSize.ws_row, currentWindowSize.ws_row)
+2279 | 
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2278:32: error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+2276 |         XCTAssertNil(firstMount.subviews.first { $0 === host })
+2277 |         XCTAssertEqual(session.debugPTYWindowSize.ws_col, currentWindowSize.ws_col)
+2278 |         XCTAssertEqual(session.debugPTYWindowSize.ws_row, currentWindowSize.ws_row)
+     |                                `- error: value of type 'TerminalSession' has no member 'debugPTYWindowSize'
+2279 | 
+2280 |         session.terminalMountCoordinator.release(lease: firstLease, from: firstMount)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2377:9: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2375 | 
+2376 |         session.requestFocus(.none)
+2377 |         AuthoritativeTerminalRenderInstrumentation.reset()
+     |         `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2378 |         session.commandDraft = "unrelated publication"
+2379 |         await drainMainQueue(turns: 2)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2382:13: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2380 | 
+2381 |         XCTAssertGreaterThan(
+2382 |             AuthoritativeTerminalRenderInstrumentation.updateAttempts,
+     |             `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2383 |             0
+2384 |         )
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2385:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2383 |             0
+2384 |         )
+2385 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.hostReparents, 0)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2386 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 0)
+2387 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 0)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2386:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2384 |         )
+2385 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.hostReparents, 0)
+2386 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 0)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2387 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 0)
+2388 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAttempts, 0)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2387:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2385 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.hostReparents, 0)
+2386 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 0)
+2387 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 0)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2388 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAttempts, 0)
+2389 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.focusRepairAttempts, 0)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2388:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2386 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 0)
+2387 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 0)
+2388 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAttempts, 0)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2389 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.focusRepairAttempts, 0)
+2390 |         XCTAssertTrue(window.firstResponder === searchField.currentEditor())
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2389:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2387 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 0)
+2388 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAttempts, 0)
+2389 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.focusRepairAttempts, 0)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2390 |         XCTAssertTrue(window.firstResponder === searchField.currentEditor())
+2391 |     }
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2421:9: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2419 |         await drainMainQueue(turns: 3)
+2420 | 
+2421 |         AuthoritativeTerminalRenderInstrumentation.reset()
+     |         `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2422 |         window.setContentSize(NSSize(width: 800, height: 400))
+2423 |         mount.layoutSubtreeIfNeeded()
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2425:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2423 |         mount.layoutSubtreeIfNeeded()
+2424 |         await drainMainQueue(turns: 3)
+2425 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 1)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2426 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 1)
+2427 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAccepted, 1)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2426:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2424 |         await drainMainQueue(turns: 3)
+2425 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 1)
+2426 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 1)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2427 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAccepted, 1)
+2428 | 
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2427:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2425 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 1)
+2426 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 1)
+2427 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAccepted, 1)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2428 | 
+2429 |         AuthoritativeTerminalRenderInstrumentation.reset()
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2429:9: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2427 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAccepted, 1)
+2428 | 
+2429 |         AuthoritativeTerminalRenderInstrumentation.reset()
+     |         `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2430 |         mount.requestPostMountLayoutCallback(generation: 10_000)
+2431 |         mount.requestPostMountLayoutCallback(generation: 10_000)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2436:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2434 |         await drainMainQueue(turns: 3)
+2435 | 
+2436 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 1)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2437 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 0)
+2438 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAttempts, 0)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2437:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2435 | 
+2436 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 1)
+2437 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 0)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2438 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAttempts, 0)
+2439 | 
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2438:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2436 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 1)
+2437 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 0)
+2438 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAttempts, 0)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2439 | 
+2440 |         mount.requestPostMountLayoutCallback(generation: 10_000)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2443:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2441 |         mount.layoutSubtreeIfNeeded()
+2442 |         await drainMainQueue(turns: 2)
+2443 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 1)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2444 | 
+2445 |         AuthoritativeTerminalRenderInstrumentation.reset()
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2445:9: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2443 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.postMountCallbacks, 1)
+2444 | 
+2445 |         AuthoritativeTerminalRenderInstrumentation.reset()
+     |         `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2446 |         let nextLease = session.terminalMountCoordinator.issueLease(for: .fullTerminal)
+2447 |         XCTAssertFalse(session.terminalMountCoordinator.present(lease: nextLease, in: mount))
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2451:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2449 |         await drainMainQueue(turns: 3)
+2450 | 
+2451 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.hostReparents, 0)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2452 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 1)
+2453 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAccepted, 0)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2452:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2450 | 
+2451 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.hostReparents, 0)
+2452 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 1)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2453 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAccepted, 0)
+2454 |     }
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2453:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2451 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.hostReparents, 0)
+2452 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 1)
+2453 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.ptyResizeAccepted, 0)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2454 |     }
+2455 | 
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2461:9: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2459 |             frame: NSRect(x: 0, y: 0, width: 640, height: 320)
+2460 |         )
+2461 |         AuthoritativeTerminalRenderInstrumentation.reset()
+     |         `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2462 |         XCTAssertEqual(terminalView.metalBufferingPolicy, .perRowPersistent)
+2463 | 
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2467:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2465 |         terminalView.feed(text: "\u{001B}[?1049h")
+2466 |         await drainMainQueue(turns: 2)
+2467 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 1)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2468 |         XCTAssertEqual(terminalView.metalBufferingPolicy, .perFrameAggregated)
+2469 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalBufferingModeChanges, 1)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2469:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2467 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 1)
+2468 |         XCTAssertEqual(terminalView.metalBufferingPolicy, .perFrameAggregated)
+2469 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalBufferingModeChanges, 1)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2470 | 
+2471 |         terminalView.feed(text: "\u{001B}[?1049l")
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2474:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2472 |         terminalView.feed(text: "\u{001B}[?1049l")
+2473 |         await drainMainQueue(turns: 2)
+2474 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 2)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2475 |         XCTAssertEqual(terminalView.metalBufferingPolicy, .perRowPersistent)
+2476 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalBufferingModeChanges, 2)
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2476:24: error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2474 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.fullScreenInvalidations, 2)
+2475 |         XCTAssertEqual(terminalView.metalBufferingPolicy, .perRowPersistent)
+2476 |         XCTAssertEqual(AuthoritativeTerminalRenderInstrumentation.metalBufferingModeChanges, 2)
+     |                        `- error: cannot find 'AuthoritativeTerminalRenderInstrumentation' in scope
+2477 |     }
+2478 | 
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2508:37: error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+2506 |         let terminal = session.makeAuthoritativeTerminalView()
+2507 |         let host = session.makeAuthoritativeTerminalHostView()
+2508 |         let ptyGeneration = session.debugProcessGeneration
+     |                                     `- error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+2509 | 
+2510 |         host.removeFromSuperview()
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2518:32: error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+2516 |         XCTAssertTrue(host.superview === mount)
+2517 |         XCTAssertTrue(session.makeAuthoritativeTerminalView() === terminal)
+2518 |         XCTAssertEqual(session.debugProcessGeneration, ptyGeneration)
+     |                                `- error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+2519 |         XCTAssertTrue(session.ptyController.isRunning)
+2520 |     }
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2533:37: error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+2531 |         let terminal = session.makeAuthoritativeTerminalView()
+2532 |         let host = session.makeAuthoritativeTerminalHostView()
+2533 |         let ptyGeneration = session.debugProcessGeneration
+     |                                     `- error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+2534 |         let hostingView = NSHostingView(
+2535 |             rootView: AnyView(
+
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/TerminalSessionIntegrationTests.swift:2563:36: error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+2561 |             hostingView.layoutSubtreeIfNeeded()
+2562 |             XCTAssertTrue(session.makeAuthoritativeTerminalView() === terminal)
+2563 |             XCTAssertEqual(session.debugProcessGeneration, ptyGeneration)
+     |                                    `- error: value of type 'TerminalSession' has no member 'debugProcessGeneration'
+2564 |             XCTAssertNotNil(host.superview)
+2565 |         }
+
+error: fatalError

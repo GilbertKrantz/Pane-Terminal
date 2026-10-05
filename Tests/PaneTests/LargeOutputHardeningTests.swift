@@ -3,6 +3,29 @@ import XCTest
 @testable import Pane
 
 final class LargeOutputHardeningTests: XCTestCase {
+    func testSearchIndexReusesUnchangedTextAndRemovesPrunedDocuments() async {
+        let index = BlockSearchIndex()
+        var first = CommandBlock(command: "first", workingDirectory: "/tmp",
+                                 state: .completed(exitCode: 0), output: "old needle")
+        let second = CommandBlock(command: "second", workingDirectory: "/tmp",
+                                  state: .completed(exitCode: 0), output: "other")
+        let initial = await index.replace(blocks: [first, second])
+        first.isCollapsed = true
+        let collapsed = await index.replace(blocks: [first, second])
+        let initialCount = await index.normalizedDocumentCount
+        XCTAssertEqual(collapsed, initial)
+        XCTAssertEqual(initialCount, 2)
+        first.output = "replacement needle"
+        _ = await index.replace(blocks: [first, second])
+        let updatedCount = await index.normalizedDocumentCount
+        XCTAssertEqual(updatedCount, 3)
+        let updated = await index.search(BlockSearchQuery(text: "replacement", filter: .output), debounce: .zero)
+        XCTAssertEqual(updated?.blockIDs, [first.id])
+        _ = await index.replace(blocks: [second])
+        let removed = await index.search(BlockSearchQuery(text: "needle", filter: .output), debounce: .zero)
+        XCTAssertEqual(removed?.blockIDs, [])
+    }
+
     @MainActor
     func testCompletedOutputUsesBoundedUTF8SafeHeadTailExcerpt() throws {
         let controller = BlockLifecycleController()

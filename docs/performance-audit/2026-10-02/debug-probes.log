@@ -1,0 +1,135 @@
+warning: '--skip-update' option is deprecated and will be removed in a future release
+warning: /Users/chandraw/Library/org.swift.swiftpm/configuration is not accessible or not writable, disabling user-level cache features.
+warning: /Users/chandraw/Library/org.swift.swiftpm/security is not accessible or not writable, disabling user-level cache features.
+[0/1] Planning build
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/6] Write sources
+[3/6] Write swift-version--58304C5D6DBC2206.txt
+[5/8] Emitting module PaneTests
+[6/8] Compiling PaneTests PerformanceAuditProbeTests.swift
+[6/8] Write Objects.LinkFileList
+[7/8] Linking PanePackageTests
+Build complete! (1.33s)
+Test Suite 'Selected tests' started at 2026-10-02 13:30:57.780.
+Test Suite 'PanePackageTests.xctest' started at 2026-10-02 13:30:57.780.
+Test Suite 'PerformanceAuditProbeTests' started at 2026-10-02 13:30:57.780.
+Test Case '-[PaneTests.PerformanceAuditProbeTests testIndexReplacementCost]' started.
+Test Case '-[PaneTests.PerformanceAuditProbeTests testIndexReplacementCost]' passed (0.094 seconds).
+Test Case '-[PaneTests.PerformanceAuditProbeTests testTimelineScaling]' started.
+2026-10-02 13:30:58.415 xctest[7526:98509] Error received in message reply handler: Connection invalid
+2026-10-02 13:30:58.415 xctest[7526:98514] Connection Invalid error for service com.apple.hiservices-xpcservice.
+2026-10-02 13:31:18.521 xctest[7526:98547] Spell server connection invalidated
+2026-10-02 13:31:18.521 xctest[7526:98514] Spell server connection invalidated
+2026-10-02 13:31:18.521 xctest[7526:98514] dataFromCheckingGrammarInString received error Error Domain=NSCocoaErrorDomain Code=4099 "The connection to service named com.apple.naturallanguaged was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction." UserInfo={NSDebugDescription=The connection to service named com.apple.naturallanguaged was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction.}
+Test Case '-[PaneTests.PerformanceAuditProbeTests testTimelineScaling]' passed (50.785 seconds).
+Test Suite 'PerformanceAuditProbeTests' passed at 2026-10-02 13:31:48.660.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 50.879 (50.879) seconds
+Test Suite 'PanePackageTests.xctest' passed at 2026-10-02 13:31:48.660.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 50.879 (50.879) seconds
+Test Suite 'Selected tests' passed at 2026-10-02 13:31:48.660.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 50.879 (50.880) seconds
+AUDIT index_replace blocks=100 bytes=389300 ms=[0.9260177612304688, 0.8959770202636719, 0.8949041366577148, 0.9090900421142578, 0.8929967880249023]
+AUDIT index_replace blocks=500 bytes=2021300 ms=[4.860043525695801, 4.556059837341309, 4.620075225830078, 4.604935646057129, 4.567980766296387]
+AUDIT index_replace blocks=1000 bytes=4061300 ms=[9.685993194580078, 9.189963340759277, 9.204983711242676, 9.23001766204834, 9.376049041748047]
+Pane lifecycle session[2A8E8969-DDF1-4947-924A-1FA89BE2509E] created
+AUDIT timeline blocks=10 trial=0 mounted_outputs=10 mount_ms=153.43105792999268 resize_ms=2.6639699935913086 draft_update_ms=238.8230562210083
+Pane lifecycle session[DE480AF4-8F53-4F0E-AE85-CF0769059B4C] created
+Pane lifecycle session[2A8E8969-DDF1-4947-924A-1FA89BE2509E] shutdown started
+Pane lifecycle autocomplete[82F088E0-943C-403E-8832-8B21786A906F] stopped
+Pane lifecycle session[2A8E8969-DDF1-4947-924A-1FA89BE2509E] shutdown completed
+Pane lifecycle session[DE480AF4-8F53-4F0E-AE85-CF0769059B4C] deallocated
+Pane lifecycle session[2A8E8969-DDF1-4947-924A-1FA89BE2509E] deallocated
+Pane lifecycle session[796A31A6-B1EE-43D4-BB2F-552E681A25FA] created
+AUDIT timeline blocks=10 trial=1 mounted_outputs=10 mount_ms=48.98500442504883 resize_ms=3.1849145889282227 draft_update_ms=6.291031837463379
+Pane lifecycle session[300CC3A8-4EC7-4BAD-B21F-E9B8D4543B23] created
+Pane lifecycle session[796A31A6-B1EE-43D4-BB2F-552E681A25FA] shutdown started
+Pane lifecycle autocomplete[9DAE24FE-FD71-442E-BEF4-9B1F10803AE0] stopped
+Pane lifecycle session[796A31A6-B1EE-43D4-BB2F-552E681A25FA] shutdown completed
+Pane lifecycle session[300CC3A8-4EC7-4BAD-B21F-E9B8D4543B23] deallocated
+Pane lifecycle session[796A31A6-B1EE-43D4-BB2F-552E681A25FA] deallocated
+Pane lifecycle session[2068B5A3-C1D9-44CE-AD30-DD47EA6C1C2A] created
+AUDIT timeline blocks=10 trial=2 mounted_outputs=10 mount_ms=65.87505340576172 resize_ms=2.761960029602051 draft_update_ms=6.538987159729004
+Pane lifecycle session[6D9FB101-62E9-4E75-B34E-5E76DB2CA747] created
+Pane lifecycle session[2068B5A3-C1D9-44CE-AD30-DD47EA6C1C2A] shutdown started
+Pane lifecycle autocomplete[C29DF490-9F03-4999-82D5-43C47D622696] stopped
+Pane lifecycle session[2068B5A3-C1D9-44CE-AD30-DD47EA6C1C2A] shutdown completed
+Pane lifecycle session[6D9FB101-62E9-4E75-B34E-5E76DB2CA747] deallocated
+Pane lifecycle session[2068B5A3-C1D9-44CE-AD30-DD47EA6C1C2A] deallocated
+Pane lifecycle session[8F0C21F4-B1BB-4EEC-9CBD-D561484641E2] created
+AUDIT timeline blocks=100 trial=0 mounted_outputs=100 mount_ms=337.0630741119385 resize_ms=23.37193489074707 draft_update_ms=50.065040588378906
+Pane lifecycle session[EC2CA516-A39A-4E7F-989A-087067073D23] created
+Pane lifecycle session[8F0C21F4-B1BB-4EEC-9CBD-D561484641E2] shutdown started
+Pane lifecycle autocomplete[280EF79D-8862-4B03-BF97-9028192C5DFC] stopped
+Pane lifecycle session[8F0C21F4-B1BB-4EEC-9CBD-D561484641E2] shutdown completed
+Pane lifecycle session[EC2CA516-A39A-4E7F-989A-087067073D23] deallocated
+Pane lifecycle session[8F0C21F4-B1BB-4EEC-9CBD-D561484641E2] deallocated
+Pane lifecycle session[AADB02EC-D734-4EFF-A748-5918A4517389] created
+AUDIT timeline blocks=100 trial=1 mounted_outputs=100 mount_ms=318.25900077819824 resize_ms=28.798937797546387 draft_update_ms=51.6049861907959
+Pane lifecycle session[CE70EEE7-10F7-4D3F-ACF6-FFC6F95C8054] created
+Pane lifecycle session[AADB02EC-D734-4EFF-A748-5918A4517389] shutdown started
+Pane lifecycle autocomplete[AD1F01A8-32AA-4D51-A1E6-5A79907D2A0E] stopped
+Pane lifecycle session[AADB02EC-D734-4EFF-A748-5918A4517389] shutdown completed
+Pane lifecycle session[CE70EEE7-10F7-4D3F-ACF6-FFC6F95C8054] deallocated
+Pane lifecycle session[AADB02EC-D734-4EFF-A748-5918A4517389] deallocated
+Pane lifecycle session[2DA3E301-8799-44AF-A2F8-086AFCE6B710] created
+AUDIT timeline blocks=100 trial=2 mounted_outputs=100 mount_ms=352.6519536972046 resize_ms=32.992005348205566 draft_update_ms=56.34796619415283
+Pane lifecycle session[7FD2B06B-F4EC-4E8D-8429-307AE3852DDB] created
+Pane lifecycle session[2DA3E301-8799-44AF-A2F8-086AFCE6B710] shutdown started
+Pane lifecycle autocomplete[CA4ED6F4-A21B-40F0-84BE-9B017136172B] stopped
+Pane lifecycle session[2DA3E301-8799-44AF-A2F8-086AFCE6B710] shutdown completed
+Pane lifecycle session[7FD2B06B-F4EC-4E8D-8429-307AE3852DDB] deallocated
+Pane lifecycle session[2DA3E301-8799-44AF-A2F8-086AFCE6B710] deallocated
+Pane lifecycle session[85C41134-31B8-4D00-AAC1-CDFFE5D9DCCC] created
+AUDIT timeline blocks=500 trial=0 mounted_outputs=500 mount_ms=1789.7109985351562 resize_ms=180.6778907775879 draft_update_ms=298.9250421524048
+Pane lifecycle session[6F271291-5041-415A-86FC-7E0101138C2A] created
+Pane lifecycle session[85C41134-31B8-4D00-AAC1-CDFFE5D9DCCC] shutdown started
+Pane lifecycle autocomplete[C6FE2BE4-B357-47AF-96A2-37A38174D87E] stopped
+Pane lifecycle session[85C41134-31B8-4D00-AAC1-CDFFE5D9DCCC] shutdown completed
+Pane lifecycle session[6F271291-5041-415A-86FC-7E0101138C2A] deallocated
+Pane lifecycle session[85C41134-31B8-4D00-AAC1-CDFFE5D9DCCC] deallocated
+Pane lifecycle session[F7C1EE31-DF9B-4A6D-A162-5D40DE13D806] created
+AUDIT timeline blocks=500 trial=1 mounted_outputs=500 mount_ms=2223.333954811096 resize_ms=376.98400020599365 draft_update_ms=398.3060121536255
+Pane lifecycle session[DB85D307-1487-4344-97F5-06F3FC50FBF5] created
+Pane lifecycle session[F7C1EE31-DF9B-4A6D-A162-5D40DE13D806] shutdown started
+Pane lifecycle autocomplete[838542A4-E6E9-47B0-A280-879C5747AEEB] stopped
+Pane lifecycle session[F7C1EE31-DF9B-4A6D-A162-5D40DE13D806] shutdown completed
+Pane lifecycle session[DB85D307-1487-4344-97F5-06F3FC50FBF5] deallocated
+Pane lifecycle session[F7C1EE31-DF9B-4A6D-A162-5D40DE13D806] deallocated
+Pane lifecycle session[20CCAE47-A58E-4C37-BBD5-A7B7CFAE7F5F] created
+AUDIT timeline blocks=500 trial=2 mounted_outputs=500 mount_ms=2462.881088256836 resize_ms=373.2140064239502 draft_update_ms=679.298996925354
+Pane lifecycle session[C457B578-8967-455B-BE48-C90E0C0D3585] created
+Pane lifecycle session[20CCAE47-A58E-4C37-BBD5-A7B7CFAE7F5F] shutdown started
+Pane lifecycle autocomplete[9A3B08A2-D8BA-4C44-8134-D5A72A0DA108] stopped
+Pane lifecycle session[20CCAE47-A58E-4C37-BBD5-A7B7CFAE7F5F] shutdown completed
+Pane lifecycle session[C457B578-8967-455B-BE48-C90E0C0D3585] deallocated
+Pane lifecycle session[20CCAE47-A58E-4C37-BBD5-A7B7CFAE7F5F] deallocated
+Pane lifecycle session[5A5202D0-D000-469B-8368-1E02A37DE9E5] created
+AUDIT timeline blocks=1000 trial=0 mounted_outputs=1000 mount_ms=4858.788013458252 resize_ms=780.0610065460205 draft_update_ms=1592.6790237426758
+Pane lifecycle session[10BA671D-D94F-4CBE-8837-3CDA11389BDD] created
+Pane lifecycle session[5A5202D0-D000-469B-8368-1E02A37DE9E5] shutdown started
+Pane lifecycle autocomplete[116585D8-6368-40A4-B247-BB83CD8DA720] stopped
+Pane lifecycle session[5A5202D0-D000-469B-8368-1E02A37DE9E5] shutdown completed
+Pane lifecycle session[10BA671D-D94F-4CBE-8837-3CDA11389BDD] deallocated
+Pane lifecycle session[5A5202D0-D000-469B-8368-1E02A37DE9E5] deallocated
+Pane lifecycle session[85139D34-4764-4340-9616-DAC24B91F8B0] created
+AUDIT timeline blocks=1000 trial=1 mounted_outputs=1000 mount_ms=6240.005970001221 resize_ms=1290.5150651931763 draft_update_ms=2223.997950553894
+Pane lifecycle session[400695DE-1799-4532-9A25-26EA4FBCB253] created
+Pane lifecycle session[85139D34-4764-4340-9616-DAC24B91F8B0] shutdown started
+Pane lifecycle autocomplete[8EE0B921-96C6-4846-B6BB-08DA75385E35] stopped
+Pane lifecycle session[85139D34-4764-4340-9616-DAC24B91F8B0] shutdown completed
+Pane lifecycle session[400695DE-1799-4532-9A25-26EA4FBCB253] deallocated
+Pane lifecycle session[85139D34-4764-4340-9616-DAC24B91F8B0] deallocated
+Pane lifecycle session[21438B8C-8895-4D92-86F3-AF18949CFDAA] created
+AUDIT timeline blocks=1000 trial=2 mounted_outputs=1000 mount_ms=6662.414908409119 resize_ms=1310.10901927948 draft_update_ms=2445.694088935852
+Pane lifecycle session[3A6B9133-A8D9-4D11-8917-50AA0FED87AF] created
+Pane lifecycle session[21438B8C-8895-4D92-86F3-AF18949CFDAA] shutdown started
+Pane lifecycle autocomplete[EE742A0E-F9C1-4A75-B538-071A002E3C12] stopped
+Pane lifecycle session[21438B8C-8895-4D92-86F3-AF18949CFDAA] shutdown completed
+Pane lifecycle session[3A6B9133-A8D9-4D11-8917-50AA0FED87AF] deallocated
+Pane lifecycle session[21438B8C-8895-4D92-86F3-AF18949CFDAA] deallocated
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

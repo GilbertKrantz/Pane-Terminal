@@ -1,0 +1,29 @@
+2026-10-02 13:35:05.461 PaneAuditReleaseProbe[7786:104032] Error received in message reply handler: Connection invalid
+2026-10-02 13:35:05.461 PaneAuditReleaseProbe[7786:104352] Connection Invalid error for service com.apple.hiservices-xpcservice.
+2026-10-02 13:35:25.287 PaneAuditReleaseProbe[7786:104355] Spell server connection invalidated
+2026-10-02 13:35:25.287 PaneAuditReleaseProbe[7786:104873] Spell server connection invalidated
+2026-10-02 13:35:25.288 PaneAuditReleaseProbe[7786:104873] dataFromCheckingGrammarInString received error Error Domain=NSCocoaErrorDomain Code=4099 "The connection to service named com.apple.naturallanguaged was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction." UserInfo={NSDebugDescription=The connection to service named com.apple.naturallanguaged was invalidated: Connection init failed at lookup with error 159 - Sandbox restriction.}
+AUDIT index_replace blocks=100 bytes=389300 ms=[1.4160871505737305, 1.145005226135254, 0.9909868240356445, 1.0050535202026367, 1.168966293334961]
+AUDIT index_replace blocks=500 bytes=2021300 ms=[5.558967590332031, 5.087018013000488, 5.348086357116699, 4.524946212768555, 4.805922508239746]
+AUDIT index_replace blocks=1000 bytes=4061300 ms=[10.318994522094727, 9.528040885925293, 9.527087211608887, 9.4529390335083, 10.956048965454102]
+AUDIT text bytes=4070 trial=0 update_ms=5.284905433654785 layout_ms=2.804994583129883
+AUDIT text bytes=4070 trial=1 update_ms=1.8669366836547852 layout_ms=1.1639595031738281
+AUDIT text bytes=4070 trial=2 update_ms=1.405954360961914 layout_ms=1.0449886322021484
+AUDIT text bytes=65527 trial=0 update_ms=20.59793472290039 layout_ms=16.766071319580078
+AUDIT text bytes=65527 trial=1 update_ms=20.445942878723145 layout_ms=16.766071319580078
+AUDIT text bytes=65527 trial=2 update_ms=20.583033561706543 layout_ms=16.163945198059082
+AUDIT text bytes=262108 trial=0 update_ms=96.48704528808594 layout_ms=71.89297676086426
+AUDIT text bytes=262108 trial=1 update_ms=93.19305419921875 layout_ms=64.74697589874268
+AUDIT text bytes=262108 trial=2 update_ms=86.77005767822266 layout_ms=65.64593315124512
+AUDIT timeline blocks=10 trial=0 mounted_outputs=10 mount_ms=61.779022216796875 resize_ms=2.14993953704834 draft_update_ms=8.314013481140137
+AUDIT timeline blocks=10 trial=1 mounted_outputs=10 mount_ms=52.99711227416992 resize_ms=2.8378963470458984 draft_update_ms=5.814075469970703
+AUDIT timeline blocks=10 trial=2 mounted_outputs=10 mount_ms=43.231964111328125 resize_ms=2.582073211669922 draft_update_ms=6.330013275146484
+AUDIT timeline blocks=100 trial=0 mounted_outputs=100 mount_ms=341.27700328826904 resize_ms=23.07891845703125 draft_update_ms=46.68307304382324
+AUDIT timeline blocks=100 trial=1 mounted_outputs=100 mount_ms=348.68693351745605 resize_ms=31.7080020904541 draft_update_ms=43.15507411956787
+AUDIT timeline blocks=100 trial=2 mounted_outputs=100 mount_ms=383.98098945617676 resize_ms=34.35409069061279 draft_update_ms=81.30490779876709
+AUDIT timeline blocks=500 trial=0 mounted_outputs=500 mount_ms=1819.7600841522217 resize_ms=184.29601192474365 draft_update_ms=375.0540018081665
+AUDIT timeline blocks=500 trial=1 mounted_outputs=500 mount_ms=2203.1110525131226 resize_ms=366.86789989471436 draft_update_ms=266.58904552459717
+AUDIT timeline blocks=500 trial=2 mounted_outputs=500 mount_ms=2350.550055503845 resize_ms=381.6499710083008 draft_update_ms=299.11506175994873
+AUDIT timeline blocks=1000 trial=0 mounted_outputs=1000 mount_ms=4846.352100372314 resize_ms=841.4769172668457 draft_update_ms=778.2989740371704
+AUDIT timeline blocks=1000 trial=1 mounted_outputs=1000 mount_ms=5985.796093940735 resize_ms=1246.4179992675781 draft_update_ms=1192.2019720077515
+AUDIT timeline blocks=1000 trial=2 mounted_outputs=1000 mount_ms=5959.2790603637695 resize_ms=1277.5249481201172 draft_update_ms=1406.9730043411255

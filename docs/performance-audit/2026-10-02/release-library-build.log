@@ -1,0 +1,9 @@
+warning: '--skip-update' option is deprecated and will be removed in a future release
+warning: /Users/chandraw/Library/org.swift.swiftpm/configuration is not accessible or not writable, disabling user-level cache features.
+warning: /Users/chandraw/Library/org.swift.swiftpm/security is not accessible or not writable, disabling user-level cache features.
+[0/1] Planning build
+Building for production...
+[0/1] Write swift-version--58304C5D6DBC2206.txt
+[2/2] Compiling SwiftTerm AppleTerminalView.swift
+[3/3] Compiling Pane BehavioralCompletion.swift
+Build of target: 'Pane' complete! (30.50s)

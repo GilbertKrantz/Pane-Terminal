@@ -1,10 +1,62 @@
 import AppKit
+import Combine
 import SwiftUI
 import XCTest
 @testable import Pane
 
 @MainActor
 final class BlocksViewScrollTests: XCTestCase {
+    func testRecycledHistoryBoundsMountedViewsAndReachesOffscreenSelection() async throws {
+        let session = makeTestSession()
+        defer { session.shutdown() }
+        let blocks = (0..<1000).map { index in
+            CommandBlock(command: "echo \(index)", workingDirectory: "/tmp",
+                         state: .completed(exitCode: 0), output: "recycled-marker-\(index)")
+        }
+        session.blockLifecycleController.restore(blocks)
+        let host = NSHostingView(rootView: BlocksView(session: session))
+        host.frame = NSRect(x: 0, y: 0, width: 1120, height: 620)
+        host.layoutSubtreeIfNeeded()
+        let timeline = try XCTUnwrap(scrollViews(in: host).compactMap { $0 as? BlocksTimelineScrollView }.first)
+        XCTAssertNotNil(commandOutputView(containing: "recycled-marker-999", in: host))
+        XCTAssertLessThan(scrollViews(in: timeline.documentView!).count, 50)
+        timeline.contentView.scroll(to: .zero)
+        timeline.reflectScrolledClipView(timeline.contentView)
+        host.layoutSubtreeIfNeeded()
+        XCTAssertNotNil(commandOutputView(containing: "recycled-marker-0", in: host))
+        session.selectBlock(blocks[500].id)
+        await drainMainQueue(turns: 4)
+        host.layoutSubtreeIfNeeded()
+        let selected = try XCTUnwrap(commandOutputView(containing: "recycled-marker-500", in: host))
+        XCTAssertTrue(selected.convert(selected.bounds, to: timeline.contentView).intersects(timeline.contentView.bounds))
+        XCTAssertLessThan(scrollViews(in: timeline.documentView!).count, 50)
+        let selectedText = try XCTUnwrap(selected as? NSTextView)
+        selectedText.setSelectedRange(NSRange(location: 0, length: 8))
+        host.frame.size.width = 760
+        host.layoutSubtreeIfNeeded()
+        let resized = try XCTUnwrap(commandOutputView(containing: "recycled-marker-500", in: host))
+        XCTAssertTrue(resized === selected, "Resizing must retain the native text view")
+        XCTAssertEqual((resized as? NSTextView)?.selectedRange(), NSRange(location: 0, length: 8))
+    }
+
+    func testDraftEditingDoesNotPublishFinalizedTimelinePresentation() async {
+        let session = makeTestSession()
+        defer { session.shutdown() }
+        session.blockLifecycleController.restore([
+            CommandBlock(command: "echo done", workingDirectory: "/tmp",
+                         state: .completed(exitCode: 0), output: "done")
+        ])
+        let presentation = session.blocksPresentation
+        var publications = 0
+        let observer = presentation.$snapshot.dropFirst().sink { _ in publications += 1 }
+        session.commandDraft = "g"
+        await drainMainQueue(turns: 4)
+        session.commandDraft = "git status"
+        await drainMainQueue(turns: 4)
+        XCTAssertEqual(publications, 0)
+        withExtendedLifetime(observer) {}
+    }
+
     func testHugeOutputUsesCappedInlineScroller() async throws {
         NSWindow.allowsAutomaticWindowTabbing = false
         let session = makeTestSession()
@@ -394,6 +446,12 @@ final class BlocksViewScrollTests: XCTestCase {
     }
 
     private func makeWindow<Content: View>(hostingView: NSHostingView<Content>) -> NSWindow {
+        // This harness owns the window's explicit resize scenarios. Letting
+        // NSHostingView advertise a minimum/preferred window size can shrink
+        // it to the root's measurement proposal while a native viewport mounts.
+        hostingView.sizingOptions = []
+        hostingView.frame = NSRect(x: 0, y: 0, width: 800, height: 420)
+        hostingView.autoresizingMask = [.width, .height]
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 800, height: 420),
             styleMask: [.titled, .closable, .resizable],

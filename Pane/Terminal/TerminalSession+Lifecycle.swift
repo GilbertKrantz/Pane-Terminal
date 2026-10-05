@@ -133,6 +133,7 @@ extension TerminalSession {
     private func makeShutdownTask(
         reason: CommandInterruptionReason
     ) -> Task<SessionShutdownResult, Never> {
+        presentationTimings.cancel()
         _ = interactionController.handle(.applicationClosing)
         isShuttingDown = true
         requestFocus(.none)
@@ -175,7 +176,6 @@ extension TerminalSession {
             completedShutdownResult = result
             shutdownTask = nil
 #if DEBUG
-            debugShutdownCompleted = true
             lifecycleLog("shutdown completed")
 #endif
             await PaneLifecycleEventRing.shared.append(PaneLifecycleEvent(

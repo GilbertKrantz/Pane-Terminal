@@ -5,6 +5,39 @@ import XCTest
 
 @MainActor
 final class CommandClickableTextViewTests: XCTestCase {
+    func testCachedMeasurementInvalidatesAfterTextAndFontChanges() {
+        let view = CommandClickableTextView.makeTextView()
+        let initialFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        CommandClickableTextView(text: "short", font: initialFont, textColor: .labelColor).updateTextView(view)
+        let initial = view.height(fitting: 120)
+        CommandClickableTextView(text: String(repeating: "wrapped text ", count: 40),
+                                 font: initialFont, textColor: .labelColor).updateTextView(view)
+        let wrapped = view.height(fitting: 120)
+        XCTAssertGreaterThan(wrapped, initial)
+        view.font = .monospacedSystemFont(ofSize: 24, weight: .regular)
+        XCTAssertGreaterThan(view.height(fitting: 120), wrapped)
+        view.textStorage?.replaceCharacters(in: NSRange(location: 0, length: view.string.utf16.count), with: "x")
+        XCTAssertLessThan(view.height(fitting: 120), wrapped)
+    }
+
+    func testLargeOutputLinksRemainCorrectAfterReplacementAndAppearanceChange() async throws {
+        let view = CommandClickableTextView.makeTextView()
+        let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        let old = String(repeating: "old ", count: 3000) + "https://example.com/old"
+        let replacement = String(repeating: "new ", count: 3000) + "https://example.com/new"
+        CommandClickableTextView(text: old, font: font, textColor: .labelColor).updateTextView(view)
+        CommandClickableTextView(text: replacement, font: font, textColor: .labelColor).updateTextView(view)
+        CommandClickableTextView(text: replacement, font: font, textColor: .secondaryLabelColor).updateTextView(view)
+        let offset = replacement.utf16.count - "https://example.com/new".utf16.count
+        for _ in 0..<100 {
+            if view.textStorage?.attribute(.link, at: offset, effectiveRange: nil) != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(view.string, replacement)
+        XCTAssertEqual(view.textStorage?.attribute(.link, at: offset, effectiveRange: nil) as? URL,
+                       URL(string: "https://example.com/new"))
+    }
+
     func testHeightUsesTheProposedWidthInsteadOfTheInitialZeroWidth() {
         let textView = CommandClickableNSTextView()
         textView.font = .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)

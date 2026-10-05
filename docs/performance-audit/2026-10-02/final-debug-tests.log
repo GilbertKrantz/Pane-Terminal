@@ -1,0 +1,151 @@
+warning: '--skip-update' option is deprecated and will be removed in a future release
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/5] Write sources
+[3/5] Write swift-version--58304C5D6DBC2206.txt
+[5/7] Emitting module Pane
+[6/7] Compiling Pane BlocksView.swift
+[6/8] Write Objects.LinkFileList
+[7/8] Linking PanePackageTests
+Build complete! (1.86s)
+Test Suite 'Selected tests' started at 2026-10-02 14:48:56.063.
+Test Suite 'PanePackageTests.xctest' started at 2026-10-02 14:48:56.063.
+Test Suite 'BlocksViewScrollTests' started at 2026-10-02 14:48:56.063.
+Test Case '-[PaneTests.BlocksViewScrollTests testBulkTimelineMountsNewestBlockWithLargeOutputCards]' started.
+Test Case '-[PaneTests.BlocksViewScrollTests testBulkTimelineMountsNewestBlockWithLargeOutputCards]' passed (0.566 seconds).
+Test Case '-[PaneTests.BlocksViewScrollTests testCompletedCommandPinsTimelineToItsTrueBottom]' started.
+Test Case '-[PaneTests.BlocksViewScrollTests testCompletedCommandPinsTimelineToItsTrueBottom]' passed (0.394 seconds).
+Test Case '-[PaneTests.BlocksViewScrollTests testDraftEditingDoesNotPublishFinalizedTimelinePresentation]' started.
+Test Case '-[PaneTests.BlocksViewScrollTests testDraftEditingDoesNotPublishFinalizedTimelinePresentation]' passed (0.001 seconds).
+Test Case '-[PaneTests.BlocksViewScrollTests testHugeOutputUsesCappedInlineScroller]' started.
+Test Case '-[PaneTests.BlocksViewScrollTests testHugeOutputUsesCappedInlineScroller]' passed (0.410 seconds).
+Test Case '-[PaneTests.BlocksViewScrollTests testRecycledHistoryBoundsMountedViewsAndReachesOffscreenSelection]' started.
+Test Case '-[PaneTests.BlocksViewScrollTests testRecycledHistoryBoundsMountedViewsAndReachesOffscreenSelection]' passed (0.189 seconds).
+Test Case '-[PaneTests.BlocksViewScrollTests testTimelineRemainsVisibleAfterCollapsingOutput]' started.
+Test Case '-[PaneTests.BlocksViewScrollTests testTimelineRemainsVisibleAfterCollapsingOutput]' passed (0.546 seconds).
+Test Case '-[PaneTests.BlocksViewScrollTests testTimelineRemainsVisibleAfterRemountAndResize]' started.
+Test Case '-[PaneTests.BlocksViewScrollTests testTimelineRemainsVisibleAfterRemountAndResize]' passed (1.748 seconds).
+Test Case '-[PaneTests.BlocksViewScrollTests testVisibleTimelineTracksWindowResizeWithoutRemounting]' started.
+Test Case '-[PaneTests.BlocksViewScrollTests testVisibleTimelineTracksWindowResizeWithoutRemounting]' passed (0.720 seconds).
+Test Suite 'BlocksViewScrollTests' passed at 2026-10-02 14:49:00.638.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 4.574 (4.575) seconds
+Test Suite 'CommandClickableTextViewTests' started at 2026-10-02 14:49:00.638.
+Test Case '-[PaneTests.CommandClickableTextViewTests testCachedMeasurementInvalidatesAfterTextAndFontChanges]' started.
+Test Case '-[PaneTests.CommandClickableTextViewTests testCachedMeasurementInvalidatesAfterTextAndFontChanges]' passed (0.010 seconds).
+Test Case '-[PaneTests.CommandClickableTextViewTests testCompletedSnapshotUsesPlainBlockOutputPresentation]' started.
+Test Case '-[PaneTests.CommandClickableTextViewTests testCompletedSnapshotUsesPlainBlockOutputPresentation]' passed (0.007 seconds).
+Test Case '-[PaneTests.CommandClickableTextViewTests testHeightUsesTheProposedWidthInsteadOfTheInitialZeroWidth]' started.
+Test Case '-[PaneTests.CommandClickableTextViewTests testHeightUsesTheProposedWidthInsteadOfTheInitialZeroWidth]' passed (0.001 seconds).
+Test Case '-[PaneTests.CommandClickableTextViewTests testLargeOutputLinksRemainCorrectAfterReplacementAndAppearanceChange]' started.
+Test Case '-[PaneTests.CommandClickableTextViewTests testLargeOutputLinksRemainCorrectAfterReplacementAndAppearanceChange]' passed (0.014 seconds).
+Test Suite 'CommandClickableTextViewTests' passed at 2026-10-02 14:49:00.670.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.032 (0.032) seconds
+Test Suite 'LargeOutputHardeningTests' started at 2026-10-02 14:49:00.670.
+Test Case '-[PaneTests.LargeOutputHardeningTests testCompletedOutputUsesBoundedUTF8SafeHeadTailExcerpt]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testCompletedOutputUsesBoundedUTF8SafeHeadTailExcerpt]' passed (0.033 seconds).
+Test Case '-[PaneTests.LargeOutputHardeningTests testIndexedSearchHandlesTenThousandBlocksAtSessionScope]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testIndexedSearchHandlesTenThousandBlocksAtSessionScope]' passed (0.049 seconds).
+Test Case '-[PaneTests.LargeOutputHardeningTests testIndexedSearchRejectsStaleDebouncedGeneration]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testIndexedSearchRejectsStaleDebouncedGeneration]' passed (0.051 seconds).
+Test Case '-[PaneTests.LargeOutputHardeningTests testLifecyclePublishesSessionLevelPruningNotice]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testLifecyclePublishesSessionLevelPruningNotice]' passed (0.000 seconds).
+Test Case '-[PaneTests.LargeOutputHardeningTests testPolicyPrunesByCombinedOutputAndReplayBytesDeterministically]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testPolicyPrunesByCombinedOutputAndReplayBytesDeterministically]' passed (0.000 seconds).
+Test Case '-[PaneTests.LargeOutputHardeningTests testPolicyPrunesOldestFinalizedBlocksButNeverRunningOrQueued]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testPolicyPrunesOldestFinalizedBlocksButNeverRunningOrQueued]' passed (0.000 seconds).
+Test Case '-[PaneTests.LargeOutputHardeningTests testRichReplayAndPlainOutputShareOneBoundedCapture]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testRichReplayAndPlainOutputShareOneBoundedCapture]' passed (0.044 seconds).
+Test Case '-[PaneTests.LargeOutputHardeningTests testSearchIndexReusesUnchangedTextAndRemovesPrunedDocuments]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testSearchIndexReusesUnchangedTextAndRemovesPrunedDocuments]' passed (0.000 seconds).
+Test Suite 'LargeOutputHardeningTests' passed at 2026-10-02 14:49:00.849.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.178 (0.179) seconds
+Test Suite 'ResourcePerformanceTests' started at 2026-10-02 14:49:00.849.
+Test Case '-[PaneTests.ResourcePerformanceTests testCompletionCancellationWaitsForTrackedTaskCleanup]' started.
+Test Case '-[PaneTests.ResourcePerformanceTests testCompletionCancellationWaitsForTrackedTaskCleanup]' passed (0.006 seconds).
+Test Case '-[PaneTests.ResourcePerformanceTests testDisplayTimingWaitsForTheExpectedBlockAndCancellationDoesNotRecordSuccess]' started.
+Test Case '-[PaneTests.ResourcePerformanceTests testDisplayTimingWaitsForTheExpectedBlockAndCancellationDoesNotRecordSuccess]' passed (0.000 seconds).
+Test Case '-[PaneTests.ResourcePerformanceTests testGitCacheUsesVisibilitySpecificTTL]' started.
+Test Case '-[PaneTests.ResourcePerformanceTests testGitCacheUsesVisibilitySpecificTTL]' passed (0.001 seconds).
+Test Case '-[PaneTests.ResourcePerformanceTests testLifecycleEventRingRetainsNewestEventsInOrder]' started.
+Test Case '-[PaneTests.ResourcePerformanceTests testLifecycleEventRingRetainsNewestEventsInOrder]' passed (0.000 seconds).
+Test Case '-[PaneTests.ResourcePerformanceTests testPerformanceThresholdsMatchP2ReleaseGuardrails]' started.
+Test Case '-[PaneTests.ResourcePerformanceTests testPerformanceThresholdsMatchP2ReleaseGuardrails]' passed (0.000 seconds).
+Test Case '-[PaneTests.ResourcePerformanceTests testProcessMetricsAndSoakSamplingAreBoundedAndPopulated]' started.
+Test Case '-[PaneTests.ResourcePerformanceTests testProcessMetricsAndSoakSamplingAreBoundedAndPopulated]' passed (0.006 seconds).
+Test Case '-[PaneTests.ResourcePerformanceTests testResourceCountersAreBalancedAndSnapshotIsCodable]' started.
+Test Case '-[PaneTests.ResourcePerformanceTests testResourceCountersAreBalancedAndSnapshotIsCodable]' passed (0.000 seconds).
+Test Suite 'ResourcePerformanceTests' passed at 2026-10-02 14:49:00.864.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.014 (0.015) seconds
+Test Suite 'PanePackageTests.xctest' passed at 2026-10-02 14:49:00.864.
+	 Executed 27 tests, with 0 failures (0 unexpected) in 4.798 (4.800) seconds
+Test Suite 'Selected tests' passed at 2026-10-02 14:49:00.864.
+	 Executed 27 tests, with 0 failures (0 unexpected) in 4.798 (4.801) seconds
+Pane lifecycle session[899B7039-8E2C-4622-9B4B-B65C273EB4A0] created
+Pane lifecycle PTY[0715AF8C-953E-4B7C-A59F-1E3969DE3CE0] process started generation=1
+Pane lifecycle session[899B7039-8E2C-4622-9B4B-B65C273EB4A0] shutdown started
+Pane lifecycle PTY[0715AF8C-953E-4B7C-A59F-1E3969DE3CE0] process termination requested pid=21778
+Pane lifecycle session[76BF8B7A-DD6F-4175-B56A-0EBA14752BBD] created
+Pane lifecycle autocomplete[D16F4F41-D224-443E-BF47-770C3E99CAC6] stopped
+Pane lifecycle PTY[1D89E8C8-F604-4AD6-8610-4D969EDFDEE2] process started generation=1
+Pane lifecycle session[76BF8B7A-DD6F-4175-B56A-0EBA14752BBD] shutdown started
+Pane lifecycle PTY[1D89E8C8-F604-4AD6-8610-4D969EDFDEE2] process termination requested pid=21783
+Pane lifecycle session[8B0CC134-B420-460D-A0E7-8920CE678BE7] created
+Pane lifecycle autocomplete[6C11B5EB-3E97-4E91-84A6-335D550715CF] stopped
+Pane lifecycle session[8B0CC134-B420-460D-A0E7-8920CE678BE7] shutdown started
+Pane lifecycle session[FA639406-0CA4-4D52-8182-3B30EFACDD3D] created
+Pane lifecycle autocomplete[F72B7433-8CE0-463D-B528-8B8B9E6C3071] stopped
+Pane lifecycle PTY[251A6B91-83F9-4930-96F5-F971264C8D92] process started generation=1
+Pane lifecycle session[8B0CC134-B420-460D-A0E7-8920CE678BE7] shutdown completed
+Pane lifecycle session[8B0CC134-B420-460D-A0E7-8920CE678BE7] deallocated
+Pane lifecycle session[FA639406-0CA4-4D52-8182-3B30EFACDD3D] shutdown started
+Pane lifecycle PTY[251A6B91-83F9-4930-96F5-F971264C8D92] process termination requested pid=21794
+Pane lifecycle session[60F53F3F-6820-4648-A62E-D53B24B40A15] created
+Pane lifecycle autocomplete[875210C8-3FE2-4E63-9993-CFBD57369FD2] stopped
+Pane lifecycle session[60F53F3F-6820-4648-A62E-D53B24B40A15] shutdown started
+Pane lifecycle session[6B3DBD2E-2E4D-4337-8085-3801276FC518] created
+Pane lifecycle PTY[0715AF8C-953E-4B7C-A59F-1E3969DE3CE0] process terminated pid=21778 outcome=killed
+Pane lifecycle session[899B7039-8E2C-4622-9B4B-B65C273EB4A0] shutdown completed
+Pane lifecycle session[899B7039-8E2C-4622-9B4B-B65C273EB4A0] deallocated
+Pane lifecycle autocomplete[E6BF8AD6-AAFC-4663-B68E-14C84D2E68CA] stopped
+Pane lifecycle PTY[4A100A67-0A5B-41CA-A1DF-B3528ED2C128] process started generation=1
+Pane lifecycle session[60F53F3F-6820-4648-A62E-D53B24B40A15] shutdown completed
+Pane lifecycle session[60F53F3F-6820-4648-A62E-D53B24B40A15] deallocated
+Pane lifecycle PTY[1D89E8C8-F604-4AD6-8610-4D969EDFDEE2] process terminated pid=21783 outcome=killed
+Pane lifecycle session[76BF8B7A-DD6F-4175-B56A-0EBA14752BBD] shutdown completed
+Pane lifecycle session[76BF8B7A-DD6F-4175-B56A-0EBA14752BBD] deallocated
+Pane lifecycle session[6B3DBD2E-2E4D-4337-8085-3801276FC518] shutdown started
+Pane lifecycle PTY[4A100A67-0A5B-41CA-A1DF-B3528ED2C128] process termination requested pid=21808
+Pane lifecycle session[43094C2E-E39F-400C-B0B5-853C6CD7D989] created
+Pane lifecycle session[53ECA373-5CCD-4C2F-91F9-0CB302D4C60F] created
+Pane lifecycle autocomplete[8310F102-6B42-4C6F-A0CC-627371712CCA] stopped
+Pane lifecycle PTY[997BD798-7B47-4866-8FDC-FFD57E02F894] process started generation=1
+Pane lifecycle PTY[DFA05137-189F-48E2-8278-A61F0FCC87F9] process started generation=1
+Pane lifecycle PTY[251A6B91-83F9-4930-96F5-F971264C8D92] process terminated pid=21794 outcome=killed
+Pane lifecycle session[FA639406-0CA4-4D52-8182-3B30EFACDD3D] shutdown completed
+Pane lifecycle session[FA639406-0CA4-4D52-8182-3B30EFACDD3D] deallocated
+Pane lifecycle PTY[4A100A67-0A5B-41CA-A1DF-B3528ED2C128] process terminated pid=21808 outcome=killed
+Pane lifecycle session[6B3DBD2E-2E4D-4337-8085-3801276FC518] shutdown completed
+Pane lifecycle session[6B3DBD2E-2E4D-4337-8085-3801276FC518] deallocated
+Pane lifecycle session[43094C2E-E39F-400C-B0B5-853C6CD7D989] shutdown started
+Pane lifecycle PTY[997BD798-7B47-4866-8FDC-FFD57E02F894] process termination requested pid=21813
+Pane lifecycle session[53ECA373-5CCD-4C2F-91F9-0CB302D4C60F] shutdown started
+Pane lifecycle PTY[DFA05137-189F-48E2-8278-A61F0FCC87F9] process termination requested pid=21818
+Pane lifecycle session[76443BE2-52F5-4C52-B8C5-A489D4830452] created
+Pane lifecycle autocomplete[E4A1CAA6-80F4-41BF-923C-706807A08754] stopped
+Pane lifecycle autocomplete[DBDDF03E-9CBD-4AEB-8803-B5049E538DA9] stopped
+Pane lifecycle PTY[E0FED487-CCFF-404C-AA2C-2386056F36FA] process started generation=1
+Pane lifecycle session[76443BE2-52F5-4C52-B8C5-A489D4830452] shutdown started
+Pane lifecycle PTY[E0FED487-CCFF-404C-AA2C-2386056F36FA] process termination requested pid=21825
+Pane lifecycle session[313F6583-BB13-41A6-A3A3-8694FB02D261] created
+Pane lifecycle session[313F6583-BB13-41A6-A3A3-8694FB02D261] shutdown started
+Pane lifecycle autocomplete[D17A46A3-518F-4BED-97A0-400B5E5C2BBF] stopped
+Pane lifecycle autocomplete[EF2F0A48-B3CF-4382-99E4-BED80468A033] stopped
+Pane lifecycle session[313F6583-BB13-41A6-A3A3-8694FB02D261] shutdown completed
+Pane lifecycle session[313F6583-BB13-41A6-A3A3-8694FB02D261] deallocated
+Pane lifecycle autocomplete[ADFF3FC7-BC66-4C3F-A941-BACDC690D6AA] request started
+Pane lifecycle autocomplete[ADFF3FC7-BC66-4C3F-A941-BACDC690D6AA] cancelled and stopped
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

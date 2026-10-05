@@ -1,0 +1,870 @@
+warning: '--skip-update' option is deprecated and will be removed in a future release
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for production...
+[2/6] Write sources
+[3/6] Write swift-version--58304C5D6DBC2206.txt
+[5/8] Compiling PaneCompatibilityTests CompatibilityTests.swift
+[6/8] Compiling PaneTests AlternateScreenTranscriptFilterTests.swift
+[7/9] Compiling PanePackageTests runner.swift
+[7/9] Write Objects.LinkFileList
+[8/9] Linking PanePackageTests
+Build complete! (11.69s)
+Test Suite 'All tests' started at 2026-10-02 14:41:38.381.
+Test Suite 'PanePackageTests.xctest' started at 2026-10-02 14:41:38.383.
+Test Suite 'AlternateScreenTranscriptFilterTests' started at 2026-10-02 14:41:38.383.
+Test Case '-[PaneTests.AlternateScreenTranscriptFilterTests testAllSupportedPrivateModesToggleAcrossSingleByteChunks]' started.
+Test Case '-[PaneTests.AlternateScreenTranscriptFilterTests testAllSupportedPrivateModesToggleAcrossSingleByteChunks]' passed (0.001 seconds).
+Test Case '-[PaneTests.AlternateScreenTranscriptFilterTests testAlternateScreenFramesAreReplacedWithoutMergingNormalContent]' started.
+Test Case '-[PaneTests.AlternateScreenTranscriptFilterTests testAlternateScreenFramesAreReplacedWithoutMergingNormalContent]' passed (0.000 seconds).
+Test Case '-[PaneTests.AlternateScreenTranscriptFilterTests testCombinedPrivateModeSequenceIsRecognized]' started.
+Test Case '-[PaneTests.AlternateScreenTranscriptFilterTests testCombinedPrivateModeSequenceIsRecognized]' passed (0.000 seconds).
+Test Case '-[PaneTests.AlternateScreenTranscriptFilterTests testLifecycleMarkerPassesThroughWhileAlternateScreenIsActive]' started.
+Test Case '-[PaneTests.AlternateScreenTranscriptFilterTests testLifecycleMarkerPassesThroughWhileAlternateScreenIsActive]' passed (0.000 seconds).
+Test Case '-[PaneTests.AlternateScreenTranscriptFilterTests testOversizedSequenceDoesNotResetAlternateScreenState]' started.
+Test Case '-[PaneTests.AlternateScreenTranscriptFilterTests testOversizedSequenceDoesNotResetAlternateScreenState]' passed (0.000 seconds).
+Test Case '-[PaneTests.AlternateScreenTranscriptFilterTests testOversizedUnterminatedOSCIsDiscardedAndNormalParsingRecovers]' started.
+Test Case '-[PaneTests.AlternateScreenTranscriptFilterTests testOversizedUnterminatedOSCIsDiscardedAndNormalParsingRecovers]' passed (0.000 seconds).
+Test Case '-[PaneTests.AlternateScreenTranscriptFilterTests testRepeatedEnterEmitsOnePlaceholderPerInactiveToActiveTransition]' started.
+Test Case '-[PaneTests.AlternateScreenTranscriptFilterTests testRepeatedEnterEmitsOnePlaceholderPerInactiveToActiveTransition]' passed (0.000 seconds).
+Test Case '-[PaneTests.AlternateScreenTranscriptFilterTests testUnrelatedEscapeSequencesRemainByteForByteIdentical]' started.
+Test Case '-[PaneTests.AlternateScreenTranscriptFilterTests testUnrelatedEscapeSequencesRemainByteForByteIdentical]' passed (0.000 seconds).
+Test Suite 'AlternateScreenTranscriptFilterTests' passed at 2026-10-02 14:41:38.385.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+Test Suite 'AutocompleteRequestGateTests' started at 2026-10-02 14:41:38.385.
+Test Case '-[PaneTests.AutocompleteRequestGateTests testClearInvalidatesRequestAndStartsNoEmptyRequest]' started.
+Test Case '-[PaneTests.AutocompleteRequestGateTests testClearInvalidatesRequestAndStartsNoEmptyRequest]' passed (0.000 seconds).
+Test Case '-[PaneTests.AutocompleteRequestGateTests testOlderGenerationCannotPublishOverNewerInput]' started.
+Test Case '-[PaneTests.AutocompleteRequestGateTests testOlderGenerationCannotPublishOverNewerInput]' passed (0.000 seconds).
+Test Case '-[PaneTests.AutocompleteRequestGateTests testQueryValidationIsTrimmedButCaseSensitive]' started.
+Test Case '-[PaneTests.AutocompleteRequestGateTests testQueryValidationIsTrimmedButCaseSensitive]' passed (0.000 seconds).
+Test Case '-[PaneTests.AutocompleteRequestGateTests testRequestIsScopedToSessionAndTab]' started.
+Test Case '-[PaneTests.AutocompleteRequestGateTests testRequestIsScopedToSessionAndTab]' passed (0.000 seconds).
+Test Case '-[PaneTests.AutocompleteRequestGateTests testSubmissionInvalidationRejectsPendingResult]' started.
+Test Case '-[PaneTests.AutocompleteRequestGateTests testSubmissionInvalidationRejectsPendingResult]' passed (0.000 seconds).
+Test Suite 'AutocompleteRequestGateTests' passed at 2026-10-02 14:41:38.385.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'BlockLifecycleControllerTests' started at 2026-10-02 14:41:38.385.
+Test Case '-[PaneTests.BlockLifecycleControllerTests testQueueAPIsRejectAwaitingAndRunningBlocks]' started.
+Test Case '-[PaneTests.BlockLifecycleControllerTests testQueueAPIsRejectAwaitingAndRunningBlocks]' passed (0.000 seconds).
+Test Case '-[PaneTests.BlockLifecycleControllerTests testQueuedCommandsSupportFIFORemovalAndReordering]' started.
+Test Case '-[PaneTests.BlockLifecycleControllerTests testQueuedCommandsSupportFIFORemovalAndReordering]' passed (0.000 seconds).
+Test Case '-[PaneTests.BlockLifecycleControllerTests testQueueStartAndCompletionHaveOneAuthoritativeLifecycle]' started.
+Test Case '-[PaneTests.BlockLifecycleControllerTests testQueueStartAndCompletionHaveOneAuthoritativeLifecycle]' passed (0.000 seconds).
+Test Case '-[PaneTests.BlockLifecycleControllerTests testRestartInterruptsRunningBlockButPreservesQueuedBlocks]' started.
+Test Case '-[PaneTests.BlockLifecycleControllerTests testRestartInterruptsRunningBlockButPreservesQueuedBlocks]' passed (0.000 seconds).
+Test Case '-[PaneTests.BlockLifecycleControllerTests testSecondCommandCannotStartWhileAnotherBlockIsRunning]' started.
+Test Case '-[PaneTests.BlockLifecycleControllerTests testSecondCommandCannotStartWhileAnotherBlockIsRunning]' passed (0.000 seconds).
+Test Suite 'BlockLifecycleControllerTests' passed at 2026-10-02 14:41:38.386.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'BlockOutputSanitizerTests' started at 2026-10-02 14:41:38.386.
+Test Case '-[PaneTests.BlockOutputSanitizerTests testCarriageReturnProgressKeepsOnlyTheLastFrame]' started.
+Test Case '-[PaneTests.BlockOutputSanitizerTests testCarriageReturnProgressKeepsOnlyTheLastFrame]' passed (0.000 seconds).
+Test Case '-[PaneTests.BlockOutputSanitizerTests testEraseLineRemovesLongerPreviousProgressFrame]' started.
+Test Case '-[PaneTests.BlockOutputSanitizerTests testEraseLineRemovesLongerPreviousProgressFrame]' passed (0.000 seconds).
+Test Case '-[PaneTests.BlockOutputSanitizerTests testRemovesANSIAndNormalizesCarriageReturns]' started.
+Test Case '-[PaneTests.BlockOutputSanitizerTests testRemovesANSIAndNormalizesCarriageReturns]' passed (0.000 seconds).
+Test Case '-[PaneTests.BlockOutputSanitizerTests testRemovesOperatingSystemCommands]' started.
+Test Case '-[PaneTests.BlockOutputSanitizerTests testRemovesOperatingSystemCommands]' passed (0.000 seconds).
+Test Suite 'BlockOutputSanitizerTests' passed at 2026-10-02 14:41:38.387.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'BlockStreamParserTests' started at 2026-10-02 14:41:38.387.
+Test Case '-[PaneTests.BlockStreamParserTests testMalformedMarkerIsConsumedWithoutCreatingLifecycleEvent]' started.
+Test Case '-[PaneTests.BlockStreamParserTests testMalformedMarkerIsConsumedWithoutCreatingLifecycleEvent]' passed (0.000 seconds).
+Test Case '-[PaneTests.BlockStreamParserTests testOnlyAPossiblePartialMarkerIsRetainedAcrossChunks]' started.
+Test Case '-[PaneTests.BlockStreamParserTests testOnlyAPossiblePartialMarkerIsRetainedAcrossChunks]' passed (0.000 seconds).
+Test Case '-[PaneTests.BlockStreamParserTests testOrdinaryShortOutputIsEmittedImmediately]' started.
+Test Case '-[PaneTests.BlockStreamParserTests testOrdinaryShortOutputIsEmittedImmediately]' passed (0.000 seconds).
+Test Case '-[PaneTests.BlockStreamParserTests testOversizedTerminatedMarkerDoesNotHideFollowingValidMarker]' started.
+Test Case '-[PaneTests.BlockStreamParserTests testOversizedTerminatedMarkerDoesNotHideFollowingValidMarker]' passed (0.000 seconds).
+Test Case '-[PaneTests.BlockStreamParserTests testOversizedUnterminatedMarkerIsDiscardedAndParserRecovers]' started.
+Test Case '-[PaneTests.BlockStreamParserTests testOversizedUnterminatedMarkerIsDiscardedAndParserRecovers]' passed (0.000 seconds).
+Test Case '-[PaneTests.BlockStreamParserTests testParsesMarkersAcrossChunkBoundariesAndPreservesOutput]' started.
+Test Case '-[PaneTests.BlockStreamParserTests testParsesMarkersAcrossChunkBoundariesAndPreservesOutput]' passed (0.000 seconds).
+Test Case '-[PaneTests.BlockStreamParserTests testStartMarkerDecodesDirectTerminalCommand]' started.
+Test Case '-[PaneTests.BlockStreamParserTests testStartMarkerDecodesDirectTerminalCommand]' passed (0.000 seconds).
+Test Suite 'BlockStreamParserTests' passed at 2026-10-02 14:41:38.388.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'BlocksViewScrollTests' started at 2026-10-02 14:41:38.388.
+Test Case '-[PaneTests.BlocksViewScrollTests testBulkTimelineMountsNewestBlockWithLargeOutputCards]' started.
+Test Case '-[PaneTests.BlocksViewScrollTests testBulkTimelineMountsNewestBlockWithLargeOutputCards]' passed (0.377 seconds).
+Test Case '-[PaneTests.BlocksViewScrollTests testCompletedCommandPinsTimelineToItsTrueBottom]' started.
+Test Case '-[PaneTests.BlocksViewScrollTests testCompletedCommandPinsTimelineToItsTrueBottom]' passed (0.616 seconds).
+Test Case '-[PaneTests.BlocksViewScrollTests testDraftEditingDoesNotPublishFinalizedTimelinePresentation]' started.
+Test Case '-[PaneTests.BlocksViewScrollTests testDraftEditingDoesNotPublishFinalizedTimelinePresentation]' passed (0.002 seconds).
+Test Case '-[PaneTests.BlocksViewScrollTests testHugeOutputUsesCappedInlineScroller]' started.
+Test Case '-[PaneTests.BlocksViewScrollTests testHugeOutputUsesCappedInlineScroller]' passed (0.298 seconds).
+Test Case '-[PaneTests.BlocksViewScrollTests testRecycledHistoryBoundsMountedViewsAndReachesOffscreenSelection]' started.
+Test Case '-[PaneTests.BlocksViewScrollTests testRecycledHistoryBoundsMountedViewsAndReachesOffscreenSelection]' passed (0.164 seconds).
+Test Case '-[PaneTests.BlocksViewScrollTests testTimelineRemainsVisibleAfterCollapsingOutput]' started.
+Test Case '-[PaneTests.BlocksViewScrollTests testTimelineRemainsVisibleAfterCollapsingOutput]' passed (0.513 seconds).
+Test Case '-[PaneTests.BlocksViewScrollTests testTimelineRemainsVisibleAfterRemountAndResize]' started.
+Test Case '-[PaneTests.BlocksViewScrollTests testTimelineRemainsVisibleAfterRemountAndResize]' passed (1.683 seconds).
+Test Case '-[PaneTests.BlocksViewScrollTests testVisibleTimelineTracksWindowResizeWithoutRemounting]' started.
+Test Case '-[PaneTests.BlocksViewScrollTests testVisibleTimelineTracksWindowResizeWithoutRemounting]' passed (0.694 seconds).
+Test Suite 'BlocksViewScrollTests' passed at 2026-10-02 14:41:42.736.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 4.347 (4.348) seconds
+Test Suite 'CommandAutocompleteTests' started at 2026-10-02 14:41:42.736.
+Test Case '-[PaneTests.CommandAutocompleteTests testAcceptEscapesPathSpaces]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testAcceptEscapesPathSpaces]' passed (0.003 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testAcceptingFullCommandHistoryReplacesDraftInsteadOfDuplicatingPrefix]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testAcceptingFullCommandHistoryReplacesDraftInsteadOfDuplicatingPrefix]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testAcceptingTokenHistoryStillReplacesOnlyCurrentToken]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testAcceptingTokenHistoryStillReplacesOnlyCurrentToken]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testAcceptReplacesOnlyCurrentTokenAndPreservesMultilineDraft]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testAcceptReplacesOnlyCurrentTokenAndPreservesMultilineDraft]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testBoundedProcessOutputStopsMonitoringAtEOF]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testBoundedProcessOutputStopsMonitoringAtEOF]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testBuiltInsAreDeterministicAndResultCountIsCapped]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testBuiltInsAreDeterministicAndResultCountIsCapped]' passed (0.001 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testCanonicalDeduplicationMeetsThousandCandidateLatencyTarget]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testCanonicalDeduplicationMeetsThousandCandidateLatencyTarget]' passed (0.035 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testCanonicalIdentityHandlesUnicodeAndRejectsSplitSurrogateRange]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testCanonicalIdentityHandlesUnicodeAndRejectsSplitSurrogateRange]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testCanonicalIdentityPreservesSemanticDifferences]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testCanonicalIdentityPreservesSemanticDifferences]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testCapturedSuggestionsAreDeduplicatedAndCappedWithoutReordering]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testCapturedSuggestionsAreDeduplicatedAndCappedWithoutReordering]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testCapturedSuggestionsPreserveCompsysContext]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testCapturedSuggestionsPreserveCompsysContext]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testCompletionRankerMergesEvidenceAndPrefersProjectProvider]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testCompletionRankerMergesEvidenceAndPrefersProjectProvider]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testCompletionServiceDoesNotPublishAfterContextBecomesInvalid]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testCompletionServiceDoesNotPublishAfterContextBecomesInvalid]' passed (0.040 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testCompletionServicePreservesWholeDraftEditForPartialHistoryPrefix]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testCompletionServicePreservesWholeDraftEditForPartialHistoryPrefix]' passed (0.010 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testCompletionServicePublishesLocalThenMergesValidZsh]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testCompletionServicePublishesLocalThenMergesValidZsh]' passed (0.156 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testCompletionServiceTreatsValidEmptyZshAsAnEmptyContribution]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testCompletionServiceTreatsValidEmptyZshAsAnEmptyContribution]' passed (0.022 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testCompletionSourceMappingCoversEverySource]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testCompletionSourceMappingCoversEverySource]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testComposerContextResponsiveLayoutStillShowsNameAt320Points]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testComposerContextResponsiveLayoutStillShowsNameAt320Points]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testComposerContextResponsiveLayoutUsesIconOnlyBelow320Points]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testComposerContextResponsiveLayoutUsesIconOnlyBelow320Points]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testComposerContextResponsiveLayoutUsesLargeTextCapAt500Points]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testComposerContextResponsiveLayoutUsesLargeTextCapAt500Points]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testComposerContextResponsiveLayoutUsesMediumTextCapBelow500Points]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testComposerContextResponsiveLayoutUsesMediumTextCapBelow500Points]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testComposerIdleLayoutIsACompactTwoStoryStack]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testComposerIdleLayoutIsACompactTwoStoryStack]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testCopyBranchCopiesOnlyBranchName]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testCopyBranchCopiesOnlyBranchName]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testCopyBranchHiddenWithoutBranch]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testCopyBranchHiddenWithoutBranch]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testCopyPathCopiesAbsolutePath]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testCopyPathCopiesAbsolutePath]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testDetachedHeadTooltip]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testDetachedHeadTooltip]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testDifferentReplacementRangesProducingSameResultMerge]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testDifferentReplacementRangesProducingSameResultMerge]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testExecutableIndexDoesNotReuseRelativePATHAcrossDirectories]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testExecutableIndexDoesNotReuseRelativePATHAcrossDirectories]' passed (0.004 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testExecutableIndexInvalidatesWhenPATHChanges]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testExecutableIndexInvalidatesWhenPATHChanges]' passed (0.004 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testExecutablesAreOnlySuggestedAtACommandPosition]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testExecutablesAreOnlySuggestedAtACommandPosition]' passed (0.002 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testFileSystemSuggestionsResolveAgainstProvidedCurrentDirectory]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testFileSystemSuggestionsResolveAgainstProvidedCurrentDirectory]' passed (0.002 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testFolderNameUsedWithoutProject]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testFolderNameUsedWithoutProject]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testFullCommandHistoryCarriesWholeDraftReplacementRange]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testFullCommandHistoryCarriesWholeDraftReplacementRange]' passed (0.013 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testFullPathUsesTildeForDisplay]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testFullPathUsesTildeForDisplay]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testGitContextStopsReadingWhenEmptyRemoteOutputReachesEOF]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testGitContextStopsReadingWhenEmptyRemoteOutputReachesEOF]' passed (0.585 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testHistorySuggestionsSupportMultilineDrafts]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testHistorySuggestionsSupportMultilineDrafts]' passed (0.001 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testHistorySuggestionsUseCurrentSessionRecencyAndCommandContext]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testHistorySuggestionsUseCurrentSessionRecencyAndCommandContext]' passed (0.001 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testHomeDirectoryDisplaysHome]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testHomeDirectoryDisplaysHome]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testKeyboardSelectionCyclesWithoutChangingSuggestionOrder]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testKeyboardSelectionCyclesWithoutChangingSuggestionOrder]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testKeyboardSelectionMovesBackwardAndResetsForEmptyResults]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testKeyboardSelectionMovesBackwardAndResetsForEmptyResults]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testLateProviderResponseCannotOverwriteNewRequest]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testLateProviderResponseCannotOverwriteNewRequest]' passed (0.006 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testLocalProviderCompletesProjectScriptWithoutDuplicatingCommandPrefix]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testLocalProviderCompletesProjectScriptWithoutDuplicatingCommandPrefix]' passed (0.002 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testLongBranchIsTruncatedOnlyInTooltip]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testLongBranchIsTruncatedOnlyInTooltip]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testNextCommandAndDirectoryRemainDistinct]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testNextCommandAndDirectoryRemainDistinct]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testNormalizedCommandFrequencyDoesNotUseSubstringMatching]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testNormalizedCommandFrequencyDoesNotUseSubstringMatching]' passed (0.012 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testOpenInFinderDisabledForMissingDirectory]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testOpenInFinderDisabledForMissingDirectory]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testPATHSuggestionsIncludeOnlyExecutableFilesAndDeduplicateNames]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testPATHSuggestionsIncludeOnlyExecutableFilesAndDeduplicateNames]' passed (0.004 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testProjectContextFindsNestedPackageScriptsAndMakeTargets]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testProjectContextFindsNestedPackageScriptsAndMakeTargets]' passed (0.004 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testProjectDefinitionAndGitCachesHaveIndependentFreshness]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testProjectDefinitionAndGitCachesHaveIndependentFreshness]' passed (0.002 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testProjectNameTakesPriorityOverFolderName]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testProjectNameTakesPriorityOverFolderName]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testProjectScriptAndHistoryProducingSameCommandMerge]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testProjectScriptAndHistoryProducingSameCommandMerge]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testRecentCommandOutranksOlderCommandUsingTimestamps]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testRecentCommandOutranksOlderCommandUsingTimestamps]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testRootDirectoryDisplaysSlash]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testRootDirectoryDisplaysSlash]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testSameReplacementAtDifferentRangesDoesNotMergeWhenResultsDiffer]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testSameReplacementAtDifferentRangesDoesNotMergeWhenResultsDiffer]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testSecureEligibilityRejectsProviderWork]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testSecureEligibilityRejectsProviderWork]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testSingleSuggestionRequiresTwoTabsBeforeAccepting]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testSingleSuggestionRequiresTwoTabsBeforeAccepting]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testSlowProviderTimesOutWithoutBlockingUsefulResults]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testSlowProviderTimesOutWithoutBlockingUsefulResults]' passed (0.008 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testStagedProvidersNeverPublishDuplicateRowsAndKeepStableIdentity]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testStagedProvidersNeverPublishDuplicateRowsAndKeepStableIdentity]' passed (0.021 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testTooltipIncludesBranch]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testTooltipIncludesBranch]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testTooltipOmitsBranchOutsideGitRepository]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testTooltipOmitsBranchOutsideGitRepository]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testTrailingWhitespaceDoesNotCreateDuplicate]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testTrailingWhitespaceDoesNotCreateDuplicate]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testValidEmptyCapturedResultDoesNotBecomeLocalHeuristicSuggestions]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testValidEmptyCapturedResultDoesNotBecomeLocalHeuristicSuggestions]' passed (0.002 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testWarmZshRequestFramePreservesBufferCursorAndDeadline]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testWarmZshRequestFramePreservesBufferCursorAndDeadline]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandAutocompleteTests testWarmZshResponseFrameDecodesLengthPrefixedCandidate]' started.
+Test Case '-[PaneTests.CommandAutocompleteTests testWarmZshResponseFrameDecodesLengthPrefixedCandidate]' passed (0.000 seconds).
+Test Suite 'CommandAutocompleteTests' passed at 2026-10-02 14:41:43.682.
+	 Executed 64 tests, with 0 failures (0 unexpected) in 0.943 (0.946) seconds
+Test Suite 'CommandBlockTimelineTests' started at 2026-10-02 14:41:43.682.
+Test Case '-[PaneTests.CommandBlockTimelineTests testBlockPresentationKeepsSuccessQuietAndFailureExplicit]' started.
+Test Case '-[PaneTests.CommandBlockTimelineTests testBlockPresentationKeepsSuccessQuietAndFailureExplicit]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandBlockTimelineTests testClearFinalizedPreservesRunningAndQueuedCommands]' started.
+Test Case '-[PaneTests.CommandBlockTimelineTests testClearFinalizedPreservesRunningAndQueuedCommands]' passed (0.001 seconds).
+Test Case '-[PaneTests.CommandBlockTimelineTests testCommandsStartInSubmissionOrder]' started.
+Test Case '-[PaneTests.CommandBlockTimelineTests testCommandsStartInSubmissionOrder]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandBlockTimelineTests testCompletionStatusLabelsAreHonest]' started.
+Test Case '-[PaneTests.CommandBlockTimelineTests testCompletionStatusLabelsAreHonest]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandBlockTimelineTests testFinalOutputIsCommittedOnlyWhenTheActiveCommandFinishes]' started.
+Test Case '-[PaneTests.CommandBlockTimelineTests testFinalOutputIsCommittedOnlyWhenTheActiveCommandFinishes]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandBlockTimelineTests testInterruptedRunningCommandRetainsMemoryOnlyTerminalSnapshot]' started.
+Test Case '-[PaneTests.CommandBlockTimelineTests testInterruptedRunningCommandRetainsMemoryOnlyTerminalSnapshot]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandBlockTimelineTests testInterruptUnfinishedLeavesCompletedBlocksUntouched]' started.
+Test Case '-[PaneTests.CommandBlockTimelineTests testInterruptUnfinishedLeavesCompletedBlocksUntouched]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandBlockTimelineTests testQueuedCommandAcceptsContinuationAndCanBeInterrupted]' started.
+Test Case '-[PaneTests.CommandBlockTimelineTests testQueuedCommandAcceptsContinuationAndCanBeInterrupted]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandBlockTimelineTests testQueuedCommandBecomesRunningAndCompletes]' started.
+Test Case '-[PaneTests.CommandBlockTimelineTests testQueuedCommandBecomesRunningAndCompletes]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandBlockTimelineTests testRestoredCollapsedStateIsPreserved]' started.
+Test Case '-[PaneTests.CommandBlockTimelineTests testRestoredCollapsedStateIsPreserved]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandBlockTimelineTests testSearchMatchesCommandOutputDirectoryAndFailureState]' started.
+Test Case '-[PaneTests.CommandBlockTimelineTests testSearchMatchesCommandOutputDirectoryAndFailureState]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandBlockTimelineTests testStatusScopeSearchesOnlyStatusPresentation]' started.
+Test Case '-[PaneTests.CommandBlockTimelineTests testStatusScopeSearchesOnlyStatusPresentation]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandBlockTimelineTests testUndoClearDoesNotRestoreRunningOrQueuedSnapshots]' started.
+Test Case '-[PaneTests.CommandBlockTimelineTests testUndoClearDoesNotRestoreRunningOrQueuedSnapshots]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandBlockTimelineTests testUndoRemovalPreservesNewRunningCommandAndOrder]' started.
+Test Case '-[PaneTests.CommandBlockTimelineTests testUndoRemovalPreservesNewRunningCommandAndOrder]' passed (0.000 seconds).
+Test Suite 'CommandBlockTimelineTests' passed at 2026-10-02 14:41:43.684.
+	 Executed 14 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+Test Suite 'CommandClickableTextViewTests' started at 2026-10-02 14:41:43.684.
+Test Case '-[PaneTests.CommandClickableTextViewTests testCachedMeasurementInvalidatesAfterTextAndFontChanges]' started.
+Test Case '-[PaneTests.CommandClickableTextViewTests testCachedMeasurementInvalidatesAfterTextAndFontChanges]' passed (0.007 seconds).
+Test Case '-[PaneTests.CommandClickableTextViewTests testCompletedSnapshotUsesPlainBlockOutputPresentation]' started.
+Test Case '-[PaneTests.CommandClickableTextViewTests testCompletedSnapshotUsesPlainBlockOutputPresentation]' passed (0.007 seconds).
+Test Case '-[PaneTests.CommandClickableTextViewTests testHeightUsesTheProposedWidthInsteadOfTheInitialZeroWidth]' started.
+Test Case '-[PaneTests.CommandClickableTextViewTests testHeightUsesTheProposedWidthInsteadOfTheInitialZeroWidth]' passed (0.001 seconds).
+Test Case '-[PaneTests.CommandClickableTextViewTests testLargeOutputLinksRemainCorrectAfterReplacementAndAppearanceChange]' started.
+Test Case '-[PaneTests.CommandClickableTextViewTests testLargeOutputLinksRemainCorrectAfterReplacementAndAppearanceChange]' passed (0.013 seconds).
+Test Suite 'CommandClickableTextViewTests' passed at 2026-10-02 14:41:43.713.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.029 (0.029) seconds
+Test Suite 'CommandHistoryTests' started at 2026-10-02 14:41:43.713.
+Test Case '-[PaneTests.CommandHistoryTests testConsecutiveDuplicateIsStoredOnce]' started.
+Test Case '-[PaneTests.CommandHistoryTests testConsecutiveDuplicateIsStoredOnce]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandHistoryTests testContinuationCanReplaceMostRecentEntry]' started.
+Test Case '-[PaneTests.CommandHistoryTests testContinuationCanReplaceMostRecentEntry]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandHistoryTests testEmptyCommandIsNotStored]' started.
+Test Case '-[PaneTests.CommandHistoryTests testEmptyCommandIsNotStored]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandHistoryTests testHistoryRetainsOnlyNewestConfiguredEntries]' started.
+Test Case '-[PaneTests.CommandHistoryTests testHistoryRetainsOnlyNewestConfiguredEntries]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandHistoryTests testNavigatesBackwardAndForwardAndRestoresDraft]' started.
+Test Case '-[PaneTests.CommandHistoryTests testNavigatesBackwardAndForwardAndRestoresDraft]' passed (0.000 seconds).
+Test Suite 'CommandHistoryTests' passed at 2026-10-02 14:41:43.713.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'CommandSerializerTests' started at 2026-10-02 14:41:43.713.
+Test Case '-[PaneTests.CommandSerializerTests testActiveInputDoesNotInjectBracketedPasteMarkers]' started.
+Test Case '-[PaneTests.CommandSerializerTests testActiveInputDoesNotInjectBracketedPasteMarkers]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandSerializerTests testAppendsExactlyOneCarriageReturn]' started.
+Test Case '-[PaneTests.CommandSerializerTests testAppendsExactlyOneCarriageReturn]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandSerializerTests testDoesNotNormalizeExistingLineEndings]' started.
+Test Case '-[PaneTests.CommandSerializerTests testDoesNotNormalizeExistingLineEndings]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandSerializerTests testEmptyCommandSerializesAsBlankShellLine]' started.
+Test Case '-[PaneTests.CommandSerializerTests testEmptyCommandSerializesAsBlankShellLine]' passed (0.000 seconds).
+Test Case '-[PaneTests.CommandSerializerTests testPreservesMultilineCommand]' started.
+Test Case '-[PaneTests.CommandSerializerTests testPreservesMultilineCommand]' passed (0.000 seconds).
+Test Suite 'CommandSerializerTests' passed at 2026-10-02 14:41:43.714.
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'InputModeTests' started at 2026-10-02 14:41:43.714.
+Test Case '-[PaneTests.InputModeTests testForegroundSnapshotCarriesEchoStateForSecureInputDetection]' started.
+Test Case '-[PaneTests.InputModeTests testForegroundSnapshotCarriesEchoStateForSecureInputDetection]' passed (0.000 seconds).
+Test Case '-[PaneTests.InputModeTests testForegroundSnapshotRecognizesInteractivePrograms]' started.
+Test Case '-[PaneTests.InputModeTests testForegroundSnapshotRecognizesInteractivePrograms]' passed (0.000 seconds).
+Test Case '-[PaneTests.InputModeTests testForegroundSnapshotRecognizesShellForeground]' started.
+Test Case '-[PaneTests.InputModeTests testForegroundSnapshotRecognizesShellForeground]' passed (0.000 seconds).
+Test Case '-[PaneTests.InputModeTests testForegroundSnapshotUsesRawTermiosAsTerminalSignal]' started.
+Test Case '-[PaneTests.InputModeTests testForegroundSnapshotUsesRawTermiosAsTerminalSignal]' passed (0.000 seconds).
+Test Case '-[PaneTests.InputModeTests testKnownInteractiveFallbackRecognizesNormalBufferAgentTUIs]' started.
+Test Case '-[PaneTests.InputModeTests testKnownInteractiveFallbackRecognizesNormalBufferAgentTUIs]' passed (0.000 seconds).
+Test Case '-[PaneTests.InputModeTests testModeAttributionExplanationsAreUserFacing]' started.
+Test Case '-[PaneTests.InputModeTests testModeAttributionExplanationsAreUserFacing]' passed (0.000 seconds).
+Test Case '-[PaneTests.InputModeTests testModeSwitcherPresentationExposesSelectionToAccessibility]' started.
+Test Case '-[PaneTests.InputModeTests testModeSwitcherPresentationExposesSelectionToAccessibility]' passed (0.000 seconds).
+Test Case '-[PaneTests.InputModeTests testModeSwitcherPresentationRespectsReducedMotion]' started.
+Test Case '-[PaneTests.InputModeTests testModeSwitcherPresentationRespectsReducedMotion]' passed (0.000 seconds).
+Test Case '-[PaneTests.InputModeTests testModeSwitcherPresentationRestoresSliderGeometry]' started.
+Test Case '-[PaneTests.InputModeTests testModeSwitcherPresentationRestoresSliderGeometry]' passed (0.000 seconds).
+Test Case '-[PaneTests.InputModeTests testModeTitlesAreUserFacing]' started.
+Test Case '-[PaneTests.InputModeTests testModeTitlesAreUserFacing]' passed (0.000 seconds).
+Test Case '-[PaneTests.InputModeTests testRawInteractiveInputIsNotMistakenForSecureInput]' started.
+Test Case '-[PaneTests.InputModeTests testRawInteractiveInputIsNotMistakenForSecureInput]' passed (0.000 seconds).
+Test Case '-[PaneTests.InputModeTests testSecureInputAttributionIsExplicit]' started.
+Test Case '-[PaneTests.InputModeTests testSecureInputAttributionIsExplicit]' passed (0.000 seconds).
+Test Case '-[PaneTests.InputModeTests testTerminalInputRequirementModelsBlockFirstStates]' started.
+Test Case '-[PaneTests.InputModeTests testTerminalInputRequirementModelsBlockFirstStates]' passed (0.000 seconds).
+Test Case '-[PaneTests.InputModeTests testTerminalPresentationIsIndependentFromInputRequirement]' started.
+Test Case '-[PaneTests.InputModeTests testTerminalPresentationIsIndependentFromInputRequirement]' passed (0.000 seconds).
+Test Case '-[PaneTests.InputModeTests testTerminalSecurityStateReflectsDisabledEcho]' started.
+Test Case '-[PaneTests.InputModeTests testTerminalSecurityStateReflectsDisabledEcho]' passed (0.000 seconds).
+Test Case '-[PaneTests.InputModeTests testToggleMovesBetweenBlocksAndTerminalModes]' started.
+Test Case '-[PaneTests.InputModeTests testToggleMovesBetweenBlocksAndTerminalModes]' passed (0.000 seconds).
+Test Suite 'InputModeTests' passed at 2026-10-02 14:41:43.716.
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+Test Suite 'LargeOutputHardeningTests' started at 2026-10-02 14:41:43.716.
+Test Case '-[PaneTests.LargeOutputHardeningTests testCompletedOutputUsesBoundedUTF8SafeHeadTailExcerpt]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testCompletedOutputUsesBoundedUTF8SafeHeadTailExcerpt]' passed (0.026 seconds).
+Test Case '-[PaneTests.LargeOutputHardeningTests testIndexedSearchHandlesTenThousandBlocksAtSessionScope]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testIndexedSearchHandlesTenThousandBlocksAtSessionScope]' passed (0.023 seconds).
+Test Case '-[PaneTests.LargeOutputHardeningTests testIndexedSearchRejectsStaleDebouncedGeneration]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testIndexedSearchRejectsStaleDebouncedGeneration]' passed (0.055 seconds).
+Test Case '-[PaneTests.LargeOutputHardeningTests testLifecyclePublishesSessionLevelPruningNotice]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testLifecyclePublishesSessionLevelPruningNotice]' passed (0.000 seconds).
+Test Case '-[PaneTests.LargeOutputHardeningTests testPolicyPrunesByCombinedOutputAndReplayBytesDeterministically]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testPolicyPrunesByCombinedOutputAndReplayBytesDeterministically]' passed (0.000 seconds).
+Test Case '-[PaneTests.LargeOutputHardeningTests testPolicyPrunesOldestFinalizedBlocksButNeverRunningOrQueued]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testPolicyPrunesOldestFinalizedBlocksButNeverRunningOrQueued]' passed (0.000 seconds).
+Test Case '-[PaneTests.LargeOutputHardeningTests testRichReplayAndPlainOutputShareOneBoundedCapture]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testRichReplayAndPlainOutputShareOneBoundedCapture]' passed (0.035 seconds).
+Test Case '-[PaneTests.LargeOutputHardeningTests testSearchIndexReusesUnchangedTextAndRemovesPrunedDocuments]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testSearchIndexReusesUnchangedTextAndRemovesPrunedDocuments]' passed (0.000 seconds).
+Test Suite 'LargeOutputHardeningTests' passed at 2026-10-02 14:41:43.856.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.140 (0.140) seconds
+Test Suite 'LargeOutputTests' started at 2026-10-02 14:41:43.856.
+Test Case '-[PaneCompatibilityTests.LargeOutputTests testScrollbackPolicyIsSessionBounded]' started.
+Test Case '-[PaneCompatibilityTests.LargeOutputTests testScrollbackPolicyIsSessionBounded]' passed (0.000 seconds).
+Test Suite 'LargeOutputTests' passed at 2026-10-02 14:41:43.856.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'PTYControllerTests' started at 2026-10-02 14:41:43.856.
+Test Case '-[PaneTests.PTYControllerTests testOneHundredProcessGenerationsReturnToBaseline]' started.
+Test Case '-[PaneTests.PTYControllerTests testOneHundredProcessGenerationsReturnToBaseline]' passed (0.000 seconds).
+Test Case '-[PaneTests.PTYControllerTests testStaleCallbacksAndDuplicateTerminationNeverReachConsumer]' started.
+Test Case '-[PaneTests.PTYControllerTests testStaleCallbacksAndDuplicateTerminationNeverReachConsumer]' passed (0.000 seconds).
+Test Case '-[PaneTests.PTYControllerTests testStartWriteResizeAndTerminateAreOwnedByController]' started.
+Test Case '-[PaneTests.PTYControllerTests testStartWriteResizeAndTerminateAreOwnedByController]' passed (0.000 seconds).
+Test Suite 'PTYControllerTests' passed at 2026-10-02 14:41:43.856.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'PTYGenerationGateTests' started at 2026-10-02 14:41:43.856.
+Test Case '-[PaneTests.PTYGenerationGateTests testStaleGenerationBytesAreRejectedAndTerminationIsExactlyOnce]' started.
+Test Case '-[PaneTests.PTYGenerationGateTests testStaleGenerationBytesAreRejectedAndTerminationIsExactlyOnce]' passed (0.000 seconds).
+Test Suite 'PTYGenerationGateTests' passed at 2026-10-02 14:41:43.857.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'PaneConnectedCompatibilityTests' started at 2026-10-02 14:41:43.857.
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testAlternateScreenInputAndResizeStayOnPanePTY]' started.
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testAlternateScreenInputAndResizeStayOnPanePTY]' passed (1.251 seconds).
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testBackgroundTerminalRejectsStaleUserInputAndClipboardCallbacks]' started.
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testBackgroundTerminalRejectsStaleUserInputAndClipboardCallbacks]' passed (1.412 seconds).
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testBracketedPasteUsesSelectedPaneTerminalOnly]' started.
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testBracketedPasteUsesSelectedPaneTerminalOnly]' passed (1.477 seconds).
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testCleanShellMatrixRunsThroughPanePTY]' started.
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testCleanShellMatrixRunsThroughPanePTY]' passed (1.173 seconds).
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testFixtureRunsThroughPanePTYAndAuthoritativeTerminal]' started.
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testFixtureRunsThroughPanePTYAndAuthoritativeTerminal]' passed (1.289 seconds).
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testLargeOutputThroughBackgroundPaneSessionStaysIsolated]' started.
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testLargeOutputThroughBackgroundPaneSessionStaysIsolated]' passed (2.330 seconds).
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testLessAndPythonREPLPreserveDirectInputAndReturnToComposer]' started.
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testLessAndPythonREPLPreserveDirectInputAndReturnToComposer]' passed (1.425 seconds).
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testLocalSSHThroughPanePTYStaysSessionLocalAndExitsCleanly]' started.
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testLocalSSHThroughPanePTYStaysSessionLocalAndExitsCleanly]' passed (2.660 seconds).
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testMouseReportingRejectsStaleBackgroundEvent]' started.
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testMouseReportingRejectsStaleBackgroundEvent]' passed (1.462 seconds).
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testNodeAndSQLiteREPLsPreserveSessionLocalInput]' started.
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testNodeAndSQLiteREPLsPreserveSessionLocalInput]' passed (1.611 seconds).
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testPanePTYResizeDeliversSIGWINCHToInteractiveFixture]' started.
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testPanePTYResizeDeliversSIGWINCHToInteractiveFixture]' passed (1.364 seconds).
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testSystemManAndTopExitWithoutTerminalStateCorruption]' started.
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testSystemManAndTopExitWithoutTerminalStateCorruption]' passed (1.654 seconds).
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testSystemVimEditsAcrossAlternateScreenAndExitsCleanly]' started.
+Test Case '-[PaneCompatibilityTests.PaneConnectedCompatibilityTests testSystemVimEditsAcrossAlternateScreenAndExitsCleanly]' passed (1.185 seconds).
+Test Suite 'PaneConnectedCompatibilityTests' passed at 2026-10-02 14:42:04.150.
+	 Executed 13 tests, with 0 failures (0 unexpected) in 20.291 (20.294) seconds
+Test Suite 'PanePreferencesStoreTests' started at 2026-10-02 14:42:04.150.
+Test Case '-[PaneTests.PanePreferencesStoreTests testCorruptSnapshotRecoversLegacyHistoryAndWritesValidData]' started.
+Test Case '-[PaneTests.PanePreferencesStoreTests testCorruptSnapshotRecoversLegacyHistoryAndWritesValidData]' passed (0.007 seconds).
+Test Case '-[PaneTests.PanePreferencesStoreTests testEmptyStoreLoadsAndPersistsDefaults]' started.
+Test Case '-[PaneTests.PanePreferencesStoreTests testEmptyStoreLoadsAndPersistsDefaults]' passed (0.005 seconds).
+Test Case '-[PaneTests.PanePreferencesStoreTests testLegacyAggregateMigrationIsIdempotent]' started.
+Test Case '-[PaneTests.PanePreferencesStoreTests testLegacyAggregateMigrationIsIdempotent]' passed (0.004 seconds).
+Test Case '-[PaneTests.PanePreferencesStoreTests testResetOnlyChangesPreferencesDomain]' started.
+Test Case '-[PaneTests.PanePreferencesStoreTests testResetOnlyChangesPreferencesDomain]' passed (0.003 seconds).
+Test Case '-[PaneTests.PanePreferencesStoreTests testSavesAndReloadsAllCategories]' started.
+Test Case '-[PaneTests.PanePreferencesStoreTests testSavesAndReloadsAllCategories]' passed (0.002 seconds).
+Test Case '-[PaneTests.PanePreferencesStoreTests testValidationClampsAndReplacesInvalidValues]' started.
+Test Case '-[PaneTests.PanePreferencesStoreTests testValidationClampsAndReplacesInvalidValues]' passed (0.002 seconds).
+Test Suite 'PanePreferencesStoreTests' passed at 2026-10-02 14:42:04.174.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.023 (0.024) seconds
+Test Suite 'PaneSoakRunnerTests' started at 2026-10-02 14:42:04.174.
+Test Case '-[PaneCompatibilityTests.PaneSoakRunnerTests testPaneBackedSoakWhenExplicitlyEnabled]' started.
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/PaneSoakRunnerTests.swift:21: -[PaneCompatibilityTests.PaneSoakRunnerTests testPaneBackedSoakWhenExplicitlyEnabled] : Test skipped - Run through Scripts/P2/run-soak.sh for Pane-backed soak evidence
+Test Case '-[PaneCompatibilityTests.PaneSoakRunnerTests testPaneBackedSoakWhenExplicitlyEnabled]' skipped (0.001 seconds).
+Test Case '-[PaneCompatibilityTests.PaneSoakRunnerTests testPresetsDescribeCommonTwoAndEightHourRuns]' started.
+Test Case '-[PaneCompatibilityTests.PaneSoakRunnerTests testPresetsDescribeCommonTwoAndEightHourRuns]' passed (0.000 seconds).
+Test Suite 'PaneSoakRunnerTests' passed at 2026-10-02 14:42:04.176.
+	 Executed 2 tests, with 1 test skipped and 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Suite 'ResourceLifecycleHardeningTests' started at 2026-10-02 14:42:04.176.
+Test Case '-[PaneTests.ResourceLifecycleHardeningTests testGitLaunchFailureClosesPipeWithoutCreatingChild]' started.
+Test Case '-[PaneTests.ResourceLifecycleHardeningTests testGitLaunchFailureClosesPipeWithoutCreatingChild]' passed (0.000 seconds).
+Test Case '-[PaneTests.ResourceLifecycleHardeningTests testGitTimeoutAndCancellationKillChildAndClosePipe]' started.
+Test Case '-[PaneTests.ResourceLifecycleHardeningTests testGitTimeoutAndCancellationKillChildAndClosePipe]' passed (0.000 seconds).
+Test Case '-[PaneTests.ResourceLifecycleHardeningTests testHundredCreateCloseCyclesWhenNightlyEnabled]' started.
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/PaneTests/ResourceLifecycleHardeningTests.swift:18: -[PaneTests.ResourceLifecycleHardeningTests testHundredCreateCloseCyclesWhenNightlyEnabled] : Test skipped - Nightly resource suite sets PANE_RUN_RESOURCE_STRESS=1
+Test Case '-[PaneTests.ResourceLifecycleHardeningTests testHundredCreateCloseCyclesWhenNightlyEnabled]' skipped (0.000 seconds).
+Test Case '-[PaneTests.ResourceLifecycleHardeningTests testHundredGitContextRefreshesConvergeProcessesAndDescriptors]' started.
+Test Case '-[PaneTests.ResourceLifecycleHardeningTests testHundredGitContextRefreshesConvergeProcessesAndDescriptors]' passed (0.000 seconds).
+Test Case '-[PaneTests.ResourceLifecycleHardeningTests testShortCreateCloseCycleConvergesResourcesAndDescriptors]' started.
+Test Case '-[PaneTests.ResourceLifecycleHardeningTests testShortCreateCloseCycleConvergesResourcesAndDescriptors]' passed (0.000 seconds).
+Test Suite 'ResourceLifecycleHardeningTests' passed at 2026-10-02 14:42:04.178.
+	 Executed 5 tests, with 1 test skipped and 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'ResourcePerformanceTests' started at 2026-10-02 14:42:04.178.
+Test Case '-[PaneTests.ResourcePerformanceTests testCompletionCancellationWaitsForTrackedTaskCleanup]' started.
+Test Case '-[PaneTests.ResourcePerformanceTests testCompletionCancellationWaitsForTrackedTaskCleanup]' passed (0.000 seconds).
+Test Case '-[PaneTests.ResourcePerformanceTests testDisplayTimingWaitsForTheExpectedBlockAndCancellationDoesNotRecordSuccess]' started.
+Test Case '-[PaneTests.ResourcePerformanceTests testDisplayTimingWaitsForTheExpectedBlockAndCancellationDoesNotRecordSuccess]' passed (0.000 seconds).
+Test Case '-[PaneTests.ResourcePerformanceTests testGitCacheUsesVisibilitySpecificTTL]' started.
+Test Case '-[PaneTests.ResourcePerformanceTests testGitCacheUsesVisibilitySpecificTTL]' passed (0.001 seconds).
+Test Case '-[PaneTests.ResourcePerformanceTests testLifecycleEventRingRetainsNewestEventsInOrder]' started.
+Test Case '-[PaneTests.ResourcePerformanceTests testLifecycleEventRingRetainsNewestEventsInOrder]' passed (0.000 seconds).
+Test Case '-[PaneTests.ResourcePerformanceTests testPerformanceThresholdsMatchP2ReleaseGuardrails]' started.
+Test Case '-[PaneTests.ResourcePerformanceTests testPerformanceThresholdsMatchP2ReleaseGuardrails]' passed (0.000 seconds).
+Test Case '-[PaneTests.ResourcePerformanceTests testProcessMetricsAndSoakSamplingAreBoundedAndPopulated]' started.
+Test Case '-[PaneTests.ResourcePerformanceTests testProcessMetricsAndSoakSamplingAreBoundedAndPopulated]' passed (0.007 seconds).
+Test Case '-[PaneTests.ResourcePerformanceTests testResourceCountersAreBalancedAndSnapshotIsCodable]' started.
+Test Case '-[PaneTests.ResourcePerformanceTests testResourceCountersAreBalancedAndSnapshotIsCodable]' passed (0.000 seconds).
+Test Suite 'ResourcePerformanceTests' passed at 2026-10-02 14:42:04.187.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.009 (0.009) seconds
+Test Suite 'RuntimeStateStoreTests' started at 2026-10-02 14:42:04.187.
+Test Case '-[PaneTests.RuntimeStateStoreTests testActiveSessionsAreMarkedInterruptedOnRecovery]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testActiveSessionsAreMarkedInterruptedOnRecovery]' passed (0.000 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testBehavioralAggregatesAreScopedTimestampedAndIdempotent]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testBehavioralAggregatesAreScopedTimestampedAndIdempotent]' passed (0.011 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testBehavioralStoreLearnsBoundedTransitionAndFeedback]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testBehavioralStoreLearnsBoundedTransitionAndFeedback]' passed (0.011 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testCollapsedStateUpdatePersistsForRestoration]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testCollapsedStateUpdatePersistsForRestoration]' passed (0.000 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testCommandEventPersistenceNeverRegressesFinality]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testCommandEventPersistenceNeverRegressesFinality]' passed (0.008 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testControllerDisabledPersistenceUsesMemoryWithoutCreatingDatabase]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testControllerDisabledPersistenceUsesMemoryWithoutCreatingDatabase]' passed (0.001 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testControllerHonorsSummaryAndFilePathCollectionControls]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testControllerHonorsSummaryAndFilePathCollectionControls]' passed (0.008 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testControllerReportsCommandHistoryAndVisibleRecoveryIndependently]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testControllerReportsCommandHistoryAndVisibleRecoveryIndependently]' passed (0.009 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testControllerRestoreIsWorkspaceScopedGlobalOnlyByOptInAndDisabledWithoutPaths]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testControllerRestoreIsWorkspaceScopedGlobalOnlyByOptInAndDisabledWithoutPaths]' passed (0.009 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testControllerRestoresDurableWorkspaceHistoryAcrossRecreation]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testControllerRestoresDurableWorkspaceHistoryAcrossRecreation]' passed (0.008 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testCoordinatorShutdownClosesStoreDeterministically]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testCoordinatorShutdownClosesStoreDeterministically]' passed (0.005 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testCorruptDatabaseIsMovedAsideWithoutStartupLoop]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testCorruptDatabaseIsMovedAsideWithoutStartupLoop]' passed (0.009 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testDataManagementReportsUnavailableStorageInsteadOfSuccess]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testDataManagementReportsUnavailableStorageInsteadOfSuccess]' passed (0.000 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testDeletingWorkspaceOnlyRemovesMatchingSessions]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testDeletingWorkspaceOnlyRemovesMatchingSessions]' passed (0.000 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testDisablingPredictionHistoryClearsLiveAutocompleteHistory]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testDisablingPredictionHistoryClearsLiveAutocompleteHistory]' passed (0.001 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testEightConcurrentStoreOpensShareMigrationWithoutBusyFailure]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testEightConcurrentStoreOpensShareMigrationWithoutBusyFailure]' passed (0.071 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testEphemeralStoreCreatesNoPersistenceFiles]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testEphemeralStoreCreatesNoPersistenceFiles]' passed (0.001 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testFutureSchemaIsPreservedAndFallsBackToMemory]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testFutureSchemaIsPreservedAndFallsBackToMemory]' passed (0.002 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testInjectedMigrationCommitFaultRollsBackAndCanRetry]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testInjectedMigrationCommitFaultRollsBackAndCanRetry]' passed (0.006 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testInMemoryRestoreScopesWorkspacesUnlessGlobalRequested]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testInMemoryRestoreScopesWorkspacesUnlessGlobalRequested]' passed (0.000 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testInMemoryStoreRestoresRecentWorkspaceContextWithoutTypedInput]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testInMemoryStoreRestoresRecentWorkspaceContextWithoutTypedInput]' passed (0.000 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testPartiallyMigratedVersionThreeDatabaseFinishesSchemaFiveMigration]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testPartiallyMigratedVersionThreeDatabaseFinishesSchemaFiveMigration]' passed (0.008 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testPermanentDeletionDiscardsUndoSnapshot]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testPermanentDeletionDiscardsUndoSnapshot]' passed (0.001 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testPermanentDeletionPropagatesStorageFailureAndKeepsVisibleBlocks]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testPermanentDeletionPropagatesStorageFailureAndKeepsVisibleBlocks]' passed (0.001 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testPreviousSessionDeletionPreservesEveryOpenTabInBothStores]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testPreviousSessionDeletionPreservesEveryOpenTabInBothStores]' passed (0.005 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testRestoreAcrossWorkspacesDefaultsOffInSettings]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testRestoreAcrossWorkspacesDefaultsOffInSettings]' passed (0.002 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testRestoreLimitsPreferNewestSessionsCommandsAndOutput]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testRestoreLimitsPreferNewestSessionsCommandsAndOutput]' passed (0.000 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testRuntimeSettingsMigratesLegacyPredictionHistoryOnce]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testRuntimeSettingsMigratesLegacyPredictionHistoryOnce]' passed (0.002 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testRuntimeSettingsPersistOnlyPreferenceFlags]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testRuntimeSettingsPersistOnlyPreferenceFlags]' passed (0.002 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testSensitiveBehavioralCommandIsExcluded]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testSensitiveBehavioralCommandIsExcluded]' passed (0.005 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testSessionLifecycleDefaultsToActiveAndCanCloseCleanly]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testSessionLifecycleDefaultsToActiveAndCanCloseCleanly]' passed (0.000 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testSharedCoordinatorRecoversPriorLaunchOnlyOnce]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testSharedCoordinatorRecoversPriorLaunchOnlyOnce]' passed (0.007 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testSQLiteRetentionKeepsNewestBoundedCommandEvents]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testSQLiteRetentionKeepsNewestBoundedCommandEvents]' passed (0.006 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testSQLiteSessionAndWorkspaceDeletionCascadeCommandEvents]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testSQLiteSessionAndWorkspaceDeletionCascadeCommandEvents]' passed (0.005 seconds).
+Test Case '-[PaneTests.RuntimeStateStoreTests testSQLiteStoreSurvivesRecreationAndSanitizesAtStorageBoundary]' started.
+Test Case '-[PaneTests.RuntimeStateStoreTests testSQLiteStoreSurvivesRecreationAndSanitizesAtStorageBoundary]' passed (0.008 seconds).
+Test Suite 'RuntimeStateStoreTests' passed at 2026-10-02 14:42:04.400.
+	 Executed 35 tests, with 0 failures (0 unexpected) in 0.212 (0.214) seconds
+Test Suite 'SensitiveDataSanitizerTests' started at 2026-10-02 14:42:04.400.
+Test Case '-[PaneTests.SensitiveDataSanitizerTests testEnvironmentSanitizationUsesAllowlistAndDropsSensitiveValues]' started.
+Test Case '-[PaneTests.SensitiveDataSanitizerTests testEnvironmentSanitizationUsesAllowlistAndDropsSensitiveValues]' passed (0.000 seconds).
+Test Case '-[PaneTests.SensitiveDataSanitizerTests testOrdinaryCommandsArePreserved]' started.
+Test Case '-[PaneTests.SensitiveDataSanitizerTests testOrdinaryCommandsArePreserved]' passed (0.000 seconds).
+Test Case '-[PaneTests.SensitiveDataSanitizerTests testRedactsAuthorizationHeadersAndDatabaseURLs]' started.
+Test Case '-[PaneTests.SensitiveDataSanitizerTests testRedactsAuthorizationHeadersAndDatabaseURLs]' passed (0.000 seconds).
+Test Case '-[PaneTests.SensitiveDataSanitizerTests testRedactsPrivateKeys]' started.
+Test Case '-[PaneTests.SensitiveDataSanitizerTests testRedactsPrivateKeys]' passed (0.000 seconds).
+Test Case '-[PaneTests.SensitiveDataSanitizerTests testRedactsSecretCommandArgumentsAndEnvironmentAssignments]' started.
+Test Case '-[PaneTests.SensitiveDataSanitizerTests testRedactsSecretCommandArgumentsAndEnvironmentAssignments]' passed (0.000 seconds).
+Test Case '-[PaneTests.SensitiveDataSanitizerTests testTerminalSessionHistoryNeverRetainsSecretCommandArguments]' started.
+Test Case '-[PaneTests.SensitiveDataSanitizerTests testTerminalSessionHistoryNeverRetainsSecretCommandArguments]' passed (0.000 seconds).
+Test Suite 'SensitiveDataSanitizerTests' passed at 2026-10-02 14:42:04.402.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'SessionRecoveryTests' started at 2026-10-02 14:42:04.402.
+Test Case '-[PaneTests.SessionRecoveryTests testDirectoryFallbackUsesLatestUsableCommandDirectory]' started.
+Test Case '-[PaneTests.SessionRecoveryTests testDirectoryFallbackUsesLatestUsableCommandDirectory]' passed (0.000 seconds).
+Test Case '-[PaneTests.SessionRecoveryTests testDuplicateBlockIDsRestoreOnlyTheMostCompleteNewestRecord]' started.
+Test Case '-[PaneTests.SessionRecoveryTests testDuplicateBlockIDsRestoreOnlyTheMostCompleteNewestRecord]' passed (0.000 seconds).
+Test Case '-[PaneTests.SessionRecoveryTests testThreeHistoricalSessionsRestoreInOrderWithIndependentLifecycle]' started.
+Test Case '-[PaneTests.SessionRecoveryTests testThreeHistoricalSessionsRestoreInOrderWithIndependentLifecycle]' passed (0.000 seconds).
+Test Suite 'SessionRecoveryTests' passed at 2026-10-02 14:42:04.403.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Suite 'ShellConfigurationTests' started at 2026-10-02 14:42:04.403.
+Test Case '-[PaneTests.ShellConfigurationTests testLoginShellUsesExpectedExecutableAndTerminalEnvironment]' started.
+Test Case '-[PaneTests.ShellConfigurationTests testLoginShellUsesExpectedExecutableAndTerminalEnvironment]' passed (0.000 seconds).
+Test Case '-[PaneTests.ShellConfigurationTests testPreservesZDotDirectoryForOhMyZshConfiguration]' started.
+Test Case '-[PaneTests.ShellConfigurationTests testPreservesZDotDirectoryForOhMyZshConfiguration]' passed (0.000 seconds).
+Test Suite 'ShellConfigurationTests' passed at 2026-10-02 14:42:04.403.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'TerminalCompatibilityTests' started at 2026-10-02 14:42:04.403.
+Test Case '-[PaneCompatibilityTests.TerminalCompatibilityTests testCompatibilityResultRoundTripsWithoutLosingDuration]' started.
+Test Case '-[PaneCompatibilityTests.TerminalCompatibilityTests testCompatibilityResultRoundTripsWithoutLosingDuration]' passed (0.000 seconds).
+Test Case '-[PaneCompatibilityTests.TerminalCompatibilityTests testContinuousTenMegabyteFixtureWhenLargeSuiteEnabled]' started.
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/CompatibilityTests.swift:130: -[PaneCompatibilityTests.TerminalCompatibilityTests testContinuousTenMegabyteFixtureWhenLargeSuiteEnabled] : Test skipped - Enable in nightly CI with PANE_RUN_LARGE_COMPATIBILITY=1
+Test Case '-[PaneCompatibilityTests.TerminalCompatibilityTests testContinuousTenMegabyteFixtureWhenLargeSuiteEnabled]' skipped (0.000 seconds).
+Test Case '-[PaneCompatibilityTests.TerminalCompatibilityTests testEveryProtocolModeHasDeterministicMarkersAndExits]' started.
+Test Case '-[PaneCompatibilityTests.TerminalCompatibilityTests testEveryProtocolModeHasDeterministicMarkersAndExits]' passed (0.804 seconds).
+Test Case '-[PaneCompatibilityTests.TerminalCompatibilityTests testInteractiveProtocolModesReportTheExactAction]' started.
+Test Case '-[PaneCompatibilityTests.TerminalCompatibilityTests testInteractiveProtocolModesReportTheExactAction]' passed (0.312 seconds).
+Test Case '-[PaneCompatibilityTests.TerminalCompatibilityTests testInvalidUTF8FixtureRetainsBytesAndCompletes]' started.
+Test Case '-[PaneCompatibilityTests.TerminalCompatibilityTests testInvalidUTF8FixtureRetainsBytesAndCompletes]' passed (0.106 seconds).
+Test Case '-[PaneCompatibilityTests.TerminalCompatibilityTests testLargeOutputLineCountAndMarkers]' started.
+Test Case '-[PaneCompatibilityTests.TerminalCompatibilityTests testLargeOutputLineCountAndMarkers]' passed (0.118 seconds).
+Test Case '-[PaneCompatibilityTests.TerminalCompatibilityTests testResizeModeObservesSIGWINCHAndCleansUp]' started.
+Test Case '-[PaneCompatibilityTests.TerminalCompatibilityTests testResizeModeObservesSIGWINCHAndCleansUp]' passed (0.118 seconds).
+Test Case '-[PaneCompatibilityTests.TerminalCompatibilityTests testUnicodeModePreservesCompleteGraphemeSequences]' started.
+Test Case '-[PaneCompatibilityTests.TerminalCompatibilityTests testUnicodeModePreservesCompleteGraphemeSequences]' passed (0.099 seconds).
+Test Suite 'TerminalCompatibilityTests' passed at 2026-10-02 14:42:05.962.
+	 Executed 8 tests, with 1 test skipped and 0 failures (0 unexpected) in 1.559 (1.559) seconds
+Test Suite 'TerminalInteractionControllerTests' started at 2026-10-02 14:42:05.962.
+Test Case '-[PaneTests.TerminalInteractionControllerTests testAlternateScreenAtIdleTemporarilyOwnsInput]' started.
+Test Case '-[PaneTests.TerminalInteractionControllerTests testAlternateScreenAtIdleTemporarilyOwnsInput]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalInteractionControllerTests testAlternateScreenBlockToTerminalSwitchDoesNotLoseInput]' started.
+Test Case '-[PaneTests.TerminalInteractionControllerTests testAlternateScreenBlockToTerminalSwitchDoesNotLoseInput]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalInteractionControllerTests testBasicCommandReturnsComposerOwnership]' started.
+Test Case '-[PaneTests.TerminalInteractionControllerTests testBasicCommandReturnsComposerOwnership]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalInteractionControllerTests testDeterministicRandomizedTransitionsPreserveInvariants]' started.
+Test Case '-[PaneTests.TerminalInteractionControllerTests testDeterministicRandomizedTransitionsPreserveInvariants]' passed (0.011 seconds).
+Test Case '-[PaneTests.TerminalInteractionControllerTests testDirectInputFinishingWhileTerminalMountedReturnsCorrectOwner]' started.
+Test Case '-[PaneTests.TerminalInteractionControllerTests testDirectInputFinishingWhileTerminalMountedReturnsCorrectOwner]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalInteractionControllerTests testLifecycleStatesRejectPresentationAndCommandEvents]' started.
+Test Case '-[PaneTests.TerminalInteractionControllerTests testLifecycleStatesRejectPresentationAndCommandEvents]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalInteractionControllerTests testManualFullTerminalIsStickyAcrossCommands]' started.
+Test Case '-[PaneTests.TerminalInteractionControllerTests testManualFullTerminalIsStickyAcrossCommands]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalInteractionControllerTests testManualFullTerminalRemainsStickyAcrossAlternateScreenCompletion]' started.
+Test Case '-[PaneTests.TerminalInteractionControllerTests testManualFullTerminalRemainsStickyAcrossAlternateScreenCompletion]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalInteractionControllerTests testProjectedPresentationAndInputComeFromInteractionController]' started.
+Test Case '-[PaneTests.TerminalInteractionControllerTests testProjectedPresentationAndInputComeFromInteractionController]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalInteractionControllerTests testRepeatedFocusRequestInvalidatesOlderAsyncWork]' started.
+Test Case '-[PaneTests.TerminalInteractionControllerTests testRepeatedFocusRequestInvalidatesOlderAsyncWork]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalInteractionControllerTests testRestartDuringDirectInputDoesNotLeaveDeadFirstResponder]' started.
+Test Case '-[PaneTests.TerminalInteractionControllerTests testRestartDuringDirectInputDoesNotLeaveDeadFirstResponder]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalInteractionControllerTests testReturningFromFullTerminalRestoresActiveDirectInteraction]' started.
+Test Case '-[PaneTests.TerminalInteractionControllerTests testReturningFromFullTerminalRestoresActiveDirectInteraction]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalInteractionControllerTests testSecurePromptHasNoComposerOwner]' started.
+Test Case '-[PaneTests.TerminalInteractionControllerTests testSecurePromptHasNoComposerOwner]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalInteractionControllerTests testShellExitAndShutdownRemoveInputOwnership]' started.
+Test Case '-[PaneTests.TerminalInteractionControllerTests testShellExitAndShutdownRemoveInputOwnership]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalInteractionControllerTests testUpdateNSViewCannotStealNewerFocusRequest]' started.
+Test Case '-[PaneTests.TerminalInteractionControllerTests testUpdateNSViewCannotStealNewerFocusRequest]' passed (0.000 seconds).
+Test Suite 'TerminalInteractionControllerTests' passed at 2026-10-02 14:42:05.974.
+	 Executed 15 tests, with 0 failures (0 unexpected) in 0.012 (0.012) seconds
+Test Suite 'TerminalSessionHardeningTests' started at 2026-10-02 14:42:05.974.
+Test Case '-[PaneTests.TerminalSessionHardeningTests testSecureInputDisablesAutocomplete]' started.
+Test Case '-[PaneTests.TerminalSessionHardeningTests testSecureInputDisablesAutocomplete]' passed (0.052 seconds).
+Test Case '-[PaneTests.TerminalSessionHardeningTests testSecureInputDoesNotReappearAfterRestore]' started.
+Test Case '-[PaneTests.TerminalSessionHardeningTests testSecureInputDoesNotReappearAfterRestore]' passed (1.190 seconds).
+Test Case '-[PaneTests.TerminalSessionHardeningTests testSecureInputNeverEntersPersistentState]' started.
+Test Case '-[PaneTests.TerminalSessionHardeningTests testSecureInputNeverEntersPersistentState]' passed (1.125 seconds).
+Test Case '-[PaneTests.TerminalSessionHardeningTests testTerminalSessionLifecycleStressMaintainsInvariants]' started.
+Test Case '-[PaneTests.TerminalSessionHardeningTests testTerminalSessionLifecycleStressMaintainsInvariants]' passed (5.224 seconds).
+Test Suite 'TerminalSessionHardeningTests' passed at 2026-10-02 14:42:13.567.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 7.592 (7.592) seconds
+Test Suite 'TerminalSessionIntegrationTests' started at 2026-10-02 14:42:13.567.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testActiveBlockStreamsThroughReadOnlyTerminalThenFreezesOneSnapshot]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testActiveBlockStreamsThroughReadOnlyTerminalThenFreezesOneSnapshot]' passed (0.581 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testAlternateScreenEmbedsDirectTerminalWithoutLeavingBlocksLayout]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testAlternateScreenEmbedsDirectTerminalWithoutLeavingBlocksLayout]' passed (0.098 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testAlternateScreenInputSurvivesRapidBlocksTerminalReparenting]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testAlternateScreenInputSurvivesRapidBlocksTerminalReparenting]' passed (5.360 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testAlternateScreenLayoutRemovesBottomComposer]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testAlternateScreenLayoutRemovesBottomComposer]' passed (10.188 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testAlternateScreenOverridesTransientAutomaticSecureClassification]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testAlternateScreenOverridesTransientAutomaticSecureClassification]' passed (0.078 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testApplicationExitPersistsSensitiveCommandAsNonRerunnablePlaceholder]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testApplicationExitPersistsSensitiveCommandAsNonRerunnablePlaceholder]' passed (1.111 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testAuthoritativeHostAppliesViewportInsetsWithoutRecreatingTerminal]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testAuthoritativeHostAppliesViewportInsetsWithoutRecreatingTerminal]' passed (0.003 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testAuthoritativeTerminalAndHostIdentitySurviveRemounting]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testAuthoritativeTerminalAndHostIdentitySurviveRemounting]' passed (0.001 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testAutocompleteCapturesCompletionDefinedInTheWarmShell]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testAutocompleteCapturesCompletionDefinedInTheWarmShell]' passed (0.555 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testBlocksComposerHasAFullWidthEditableTextView]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testBlocksComposerHasAFullWidthEditableTextView]' passed (0.292 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testCancellingContinuationUnwedgesNextCommand]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testCancellingContinuationUnwedgesNextCommand]' passed (0.081 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testCharacterChoiceUsesCompactAuthoritativeBlockAndPreservesPrompt]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testCharacterChoiceUsesCompactAuthoritativeBlockAndPreservesPrompt]' passed (0.449 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testCommandAndRestartExposeCrashSimulationCheckpoints]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testCommandAndRestartExposeCrashSimulationCheckpoints]' passed (1.164 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testCommandReturnQueuesComposerDraftWhileCommandIsRunning]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testCommandReturnQueuesComposerDraftWhileCommandIsRunning]' passed (0.142 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testCommandsShareOnePersistentPTYBackedShell]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testCommandsShareOnePersistentPTYBackedShell]' passed (0.172 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testCompletedBlockPreservesStderrAndNonzeroExitCode]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testCompletedBlockPreservesStderrAndNonzeroExitCode]' passed (0.077 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testCompletedCommandPersistsAndRestoresOnlyPredictionHistory]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testCompletedCommandPersistsAndRestoresOnlyPredictionHistory]' passed (0.080 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testComposerControlCInterruptsForegroundCommand]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testComposerControlCInterruptsForegroundCommand]' passed (0.165 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testControlledShutdownPersistsActiveCommandOnceAndRejectsSubmissions]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testControlledShutdownPersistsActiveCommandOnceAndRejectsSubmissions]' passed (1.092 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testCopyOutputAndCombinedCopySanitizeBearerTokens]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testCopyOutputAndCombinedCopySanitizeBearerTokens]' passed (0.094 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testDEC1049UsesAnIsolatedAlternateBufferAndRestoresNormalBuffer]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testDEC1049UsesAnIsolatedAlternateBufferAndRestoresNormalBuffer]' passed (0.001 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testDirectTerminalCommandBecomesOneStructuredBlock]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testDirectTerminalCommandBecomesOneStructuredBlock]' passed (0.083 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testDismissingSearchRestoresTheCompleteBlocksTimeline]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testDismissingSearchRestoresTheCompleteBlocksTimeline]' passed (0.001 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testForegroundingSuspendedAlternateScreenRestoresExpandedWorkspaceGeometry]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testForegroundingSuspendedAlternateScreenRestoresExpandedWorkspaceGeometry]' passed (0.880 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testForegroundMonitorKeepsPaneShellInBlocksMode]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testForegroundMonitorKeepsPaneShellInBlocksMode]' passed (0.613 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testHiddenPrimaryTerminalStillEmitsProtocolReplies]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testHiddenPrimaryTerminalStillEmitsProtocolReplies]' passed (0.001 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testIncompleteCommandContinuesInComposerAndCompletesOneBlock]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testIncompleteCommandContinuesInComposerAndCompletesOneBlock]' passed (0.090 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testInteractiveLoginShellLoadsZshrcUsedByOhMyZsh]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testInteractiveLoginShellLoadsZshrcUsedByOhMyZsh]' passed (0.108 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testLiveMirrorDetachDoesNotLoseEarlierOutput]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testLiveMirrorDetachDoesNotLoseEarlierOutput]' passed (0.341 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testManualModeChoiceOverridesAlternateScreenAutoReturn]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testManualModeChoiceOverridesAlternateScreenAutoReturn]' passed (0.075 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testManualMountRepairPreservesTerminalAndPTYIdentity]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testManualMountRepairPreservesTerminalAndPTYIdentity]' passed (0.075 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testManualSecureInputSuspendsAndRestoresComposerDraft]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testManualSecureInputSuspendsAndRestoresComposerDraft]' passed (0.046 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testMetalActivationFailureFallsBackWithoutRetrying]' started.
+2026-10-02 14:42:37.679 xctest[19313:210272] Pane: Metal terminal renderer unavailable; using CoreGraphics: Error Domain=PaneTests.MetalActivation Code=1 "(null)"
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testMetalActivationFailureFallsBackWithoutRetrying]' passed (0.022 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testMountedAuthoritativeHostEnablesMetalOnceAndSurvivesWindowReparenting]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testMountedAuthoritativeHostEnablesMetalOnceAndSurvivesWindowReparenting]' passed (0.049 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testMountedRepresentableSurvivesTwoThousandDeterministicTransitions]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testMountedRepresentableSurvivesTwoThousandDeterministicTransitions]' passed (1.114 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testMountLeaseRejectsLateOutgoingUpdateAndRepairsOnlyTerminalFocusIntent]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testMountLeaseRejectsLateOutgoingUpdateAndRepairsOnlyTerminalFocusIntent]' passed (0.397 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testMultilineDraftProducesOneCompletedBlock]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testMultilineDraftProducesOneCompletedBlock]' passed (0.058 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testNoEchoInputBypassesDraftHistoryAutocompleteAndRenderedOutput]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testNoEchoInputBypassesDraftHistoryAutocompleteAndRenderedOutput]' passed (0.284 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testNoninteractiveForegroundProgramDoesNotForceDirectInput]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testNoninteractiveForegroundProgramDoesNotForceDirectInput]' passed (0.465 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testNormalCopyCommandRemainsUnchanged]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testNormalCopyCommandRemainsUnchanged]' passed (0.002 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testPostMountRequestsCoalesceAndMountGenerationRedrawsOnce]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testPostMountRequestsCoalesceAndMountGenerationRedrawsOnce]' passed (0.098 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testQueuedCommandCanBeReorderedRemovedAndEditedIntoComposer]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testQueuedCommandCanBeReorderedRemovedAndEditedIntoComposer]' passed (0.001 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testQueuedCommandNeverBecomesInputToCurrentInteractiveCommand]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testQueuedCommandNeverBecomesInputToCurrentInteractiveCommand]' passed (0.244 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testQueuedCommandsWaitForActiveCommandAndAdvanceInFIFOOrder]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testQueuedCommandsWaitForActiveCommandAndAdvanceInFIFOOrder]' passed (0.452 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testQueueDispatcherIsIdempotentWhileFirstCommandAwaitsStart]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testQueueDispatcherIsIdempotentWhileFirstCommandAwaitsStart]' passed (0.056 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testQueueSendFailureRetainsCommandAndReportsDiagnostic]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testQueueSendFailureRetainsCommandAndReportsDiagnostic]' passed (0.044 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testRapidAlternateScreenExitReturnsKeyboardFocusToComposer]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testRapidAlternateScreenExitReturnsKeyboardFocusToComposer]' passed (0.121 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testRawTermiosAutomaticallyUsesCompactDirectInput]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testRawTermiosAutomaticallyUsesCompactDirectInput]' passed (0.287 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testRawWaitStatusIsNormalizedForDisplay]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testRawWaitStatusIsNormalizedForDisplay]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testReadOnlyLiveMirrorHidesItsNoninteractiveScroller]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testReadOnlyLiveMirrorHidesItsNoninteractiveScroller]' passed (0.001 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testRepeatedBufferActivationInvalidatesOncePerActualTransition]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testRepeatedBufferActivationInvalidatesOncePerActualTransition]' passed (0.001 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testRestartPersistsActiveCommandAsInterruptedWithStableIDAndOutput]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testRestartPersistsActiveCommandAsInterruptedWithStableIDAndOutput]' passed (1.188 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testSearchFromFullTerminalReturnsToAuthoritativeTerminal]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testSearchFromFullTerminalReturnsToAuthoritativeTerminal]' passed (0.051 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testSearchPresentationAdvancesFocusGenerationAndRestoresComposer]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testSearchPresentationAdvancesFocusGenerationAndRestoresComposer]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testSecureInputFocusIntentOverridesAndSafelyReturnsToComposer]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testSecureInputFocusIntentOverridesAndSafelyReturnsToComposer]' passed (0.045 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testSecureInputRejectsQueueCreation]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testSecureInputRejectsQueueCreation]' passed (0.046 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testShellBuiltinReadSilentEntersSecureModeWithoutLeakingInput]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testShellBuiltinReadSilentEntersSecureModeWithoutLeakingInput]' passed (0.106 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testShellInitializationBlocksDraftSubmissionUntilReady]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testShellInitializationBlocksDraftSubmissionUntilReady]' passed (0.070 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testShellRestartPreservesAndResumesQueuedCommand]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testShellRestartPreservesAndResumesQueuedCommand]' passed (1.148 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testShutdownNeverDispatchesQueuedCommand]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testShutdownNeverDispatchesQueuedCommand]' passed (1.083 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testStaleFocusGenerationIsIgnored]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testStaleFocusGenerationIsIgnored]' passed (0.001 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testStandardCopyCommandSanitizesSecrets]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testStandardCopyCommandSanitizesSecrets]' passed (0.002 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testTerminalModePassesLiteralTabByteToPTY]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testTerminalModePassesLiteralTabByteToPTY]' passed (0.187 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testTerminalMountRepairPolicyRateLimitsAndCapsAutomaticAttempts]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testTerminalMountRepairPolicyRateLimitsAndCapsAutomaticAttempts]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testTerminalRepresentableUpdatePreservesSearchFieldFocus]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testTerminalRepresentableUpdatePreservesSearchFieldFocus]' passed (0.242 seconds).
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testUnexpectedShellExitPersistsActiveCommandAsInterrupted]' started.
+Test Case '-[PaneTests.TerminalSessionIntegrationTests testUnexpectedShellExitPersistsActiveCommandAsInterrupted]' passed (0.104 seconds).
+Test Suite 'TerminalSessionIntegrationTests' passed at 2026-10-02 14:42:45.641.
+	 Executed 66 tests, with 0 failures (0 unexpected) in 32.067 (32.074) seconds
+Test Suite 'TerminalWorkspaceControllerTests' started at 2026-10-02 14:42:45.641.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testAutomaticTabPresentationPrefersDirectoryAndPreservesFullMetadata]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testAutomaticTabPresentationPrefersDirectoryAndPreservesFullMetadata]' passed (0.004 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testBackgroundSessionRejectsDelayedFocusRequest]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testBackgroundSessionRejectsDelayedFocusRequest]' passed (0.002 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testBackgroundTabCreationPreservesSelection]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testBackgroundTabCreationPreservesSelection]' passed (0.019 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testClosingBackgroundTabPreservesSelection]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testClosingBackgroundTabPreservesSelection]' passed (0.026 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testClosingFinalTabCreatesReplacement]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testClosingFinalTabCreatesReplacement]' passed (0.011 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testClosingSelectedTabSelectsNeighbor]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testClosingSelectedTabSelectsNeighbor]' passed (0.012 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testCreatingTabSelectsIt]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testCreatingTabSelectsIt]' passed (0.003 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testDuplicateTabUsesSameDirectoryWithNewSession]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testDuplicateTabUsesSameDirectoryWithNewSession]' passed (0.023 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testHostHeavyAutomaticTitleUsesMiddleTruncation]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testHostHeavyAutomaticTitleUsesMiddleTruncation]' passed (0.001 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testNearestExistingDirectoryFallsBackToExistingParent]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testNearestExistingDirectoryFallsBackToExistingParent]' passed (0.001 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testRapidSelectionLeavesExactlyOneSelectedSession]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testRapidSelectionLeavesExactlyOneSelectedSession]' passed (0.029 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testReorderingPreservesSelectedIdentity]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testReorderingPreservesSelectedIdentity]' passed (0.066 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testRestorationPreservesOrderSelectionMetadataAndUsesFreshSessions]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testRestorationPreservesOrderSelectionMetadataAndUsesFreshSessions]' passed (0.087 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testRestoredTerminalModeWaitsForFreshShellReadiness]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testRestoredTerminalModeWaitsForFreshShellReadiness]' passed (0.229 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testTabActivityPresentationKeepsSemanticInputAndFailureSymbols]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testTabActivityPresentationKeepsSemanticInputAndFailureSymbols]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testTabActivityPresentationUsesQuietIdleAndAccentRunningDots]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testTabActivityPresentationUsesQuietIdleAndAccentRunningDots]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testTabDragDestinationClampsToBoundaryTabs]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testTabDragDestinationClampsToBoundaryTabs]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testTabDragDestinationKeepsTheSameTabAtItsCenter]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testTabDragDestinationKeepsTheSameTabAtItsCenter]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testTabDragDestinationMovesToTheLeftTab]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testTabDragDestinationMovesToTheLeftTab]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testTabDragDestinationMovesToTheRightTab]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testTabDragDestinationMovesToTheRightTab]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testTabDragDestinationUsesTheMiddleTab]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testTabDragDestinationUsesTheMiddleTab]' passed (0.000 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testTabLifecycleExposesCrashSimulationCheckpoints]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testTabLifecycleExposesCrashSimulationCheckpoints]' passed (0.032 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testTabReorderDoesNotRecreateSession]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testTabReorderDoesNotRecreateSession]' passed (0.002 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testUnsupportedSnapshotRecoversOneUsableDefaultTab]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testUnsupportedSnapshotRecoversOneUsableDefaultTab]' passed (0.016 seconds).
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testWorkspaceCreatesInitialTab]' started.
+Test Case '-[PaneTests.TerminalWorkspaceControllerTests testWorkspaceCreatesInitialTab]' passed (0.009 seconds).
+Test Suite 'TerminalWorkspaceControllerTests' passed at 2026-10-02 14:42:46.215.
+	 Executed 25 tests, with 0 failures (0 unexpected) in 0.572 (0.574) seconds
+Test Suite 'WorkspaceSnapshotStoreTests' started at 2026-10-02 14:42:46.215.
+Test Case '-[PaneTests.WorkspaceSnapshotStoreTests testAtomicSaveBoundsDraftAndRestoresSnapshot]' started.
+Test Case '-[PaneTests.WorkspaceSnapshotStoreTests testAtomicSaveBoundsDraftAndRestoresSnapshot]' passed (0.009 seconds).
+Test Case '-[PaneTests.WorkspaceSnapshotStoreTests testCorruptPrimaryFallsBackToLastKnownGoodBackup]' started.
+Test Case '-[PaneTests.WorkspaceSnapshotStoreTests testCorruptPrimaryFallsBackToLastKnownGoodBackup]' passed (0.006 seconds).
+Test Case '-[PaneTests.WorkspaceSnapshotStoreTests testFaultBeforeReplacementPreservesOnlyValidSnapshot]' started.
+Test Case '-[PaneTests.WorkspaceSnapshotStoreTests testFaultBeforeReplacementPreservesOnlyValidSnapshot]' passed (0.004 seconds).
+Test Case '-[PaneTests.WorkspaceSnapshotStoreTests testMixedSnapshotDropsMalformedEntryAndRepairsSelection]' started.
+Test Case '-[PaneTests.WorkspaceSnapshotStoreTests testMixedSnapshotDropsMalformedEntryAndRepairsSelection]' passed (0.002 seconds).
+Test Case '-[PaneTests.WorkspaceSnapshotStoreTests testSaveBoundsTabsAndDraftWithoutSplittingGraphemeClusters]' started.
+Test Case '-[PaneTests.WorkspaceSnapshotStoreTests testSaveBoundsTabsAndDraftWithoutSplittingGraphemeClusters]' passed (0.004 seconds).
+Test Case '-[PaneTests.WorkspaceSnapshotStoreTests testUnsupportedSchemaIsQuarantinedWithoutCrashLoop]' started.
+Test Case '-[PaneTests.WorkspaceSnapshotStoreTests testUnsupportedSchemaIsQuarantinedWithoutCrashLoop]' passed (0.003 seconds).
+Test Suite 'WorkspaceSnapshotStoreTests' passed at 2026-10-02 14:42:46.243.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.028 (0.028) seconds
+Test Suite 'WorkspaceStressRunnerTests' started at 2026-10-02 14:42:46.243.
+Test Case '-[PaneCompatibilityTests.WorkspaceStressRunnerTests testFakePTYBaselineExercisesExactP2ContractWithoutCrossover]' started.
+Test Case '-[PaneCompatibilityTests.WorkspaceStressRunnerTests testFakePTYBaselineExercisesExactP2ContractWithoutCrossover]' passed (0.455 seconds).
+Test Case '-[PaneCompatibilityTests.WorkspaceStressRunnerTests testRealPTYBaselineWhenExplicitlyEnabled]' started.
+/Users/chandraw/.codex/worktrees/7765/Webe's Term/Tests/Compatibility/WorkspaceStressRunnerTests.swift:45: -[PaneCompatibilityTests.WorkspaceStressRunnerTests testRealPTYBaselineWhenExplicitlyEnabled] : Test skipped - Enable the opt-in isolated-zsh baseline with PANE_RUN_REAL_STRESS=1
+Test Case '-[PaneCompatibilityTests.WorkspaceStressRunnerTests testRealPTYBaselineWhenExplicitlyEnabled]' skipped (0.000 seconds).
+Test Suite 'WorkspaceStressRunnerTests' passed at 2026-10-02 14:42:46.698.
+	 Executed 2 tests, with 1 test skipped and 0 failures (0 unexpected) in 0.455 (0.455) seconds
+Test Suite 'WorkspaceStressTests' started at 2026-10-02 14:42:46.698.
+Test Case '-[PaneCompatibilityTests.WorkspaceStressTests testBaselineConfigurationMatchesReleaseContract]' started.
+Test Case '-[PaneCompatibilityTests.WorkspaceStressTests testBaselineConfigurationMatchesReleaseContract]' passed (0.000 seconds).
+Test Suite 'WorkspaceStressTests' passed at 2026-10-02 14:42:46.699.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'PanePackageTests.xctest' passed at 2026-10-02 14:42:46.699.
+	 Executed 364 tests, with 4 tests skipped and 0 failures (0 unexpected) in 68.289 (68.316) seconds
+Test Suite 'All tests' passed at 2026-10-02 14:42:46.699.
+	 Executed 364 tests, with 4 tests skipped and 0 failures (0 unexpected) in 68.289 (68.318) seconds
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite TerminalReplaySanitizerTests started.
+◇ Test frozenReplayUsesCapturedGeometryAndPreservesCellStyles() started.
+◇ Test boundedCaptureRetainsNewestBytesAndKeepsTruncationSticky() started.
+◇ Test preservesOSC8HyperlinksButRemovesOtherEightBitControlStrings() started.
+◇ Test carriageReturnRewriteRequiresRichRendering() started.
+◇ Test removesSideEffectSequences() started.
+◇ Test plainLineOutputDoesNotRequireRichRendering() started.
+◇ Test preservesVisualSequencesAndText() started.
+✔ Test carriageReturnRewriteRequiresRichRendering() passed after 0.001 seconds.
+✔ Test removesSideEffectSequences() passed after 0.001 seconds.
+✔ Test plainLineOutputDoesNotRequireRichRendering() passed after 0.001 seconds.
+✔ Test preservesVisualSequencesAndText() passed after 0.001 seconds.
+✔ Test preservesOSC8HyperlinksButRemovesOtherEightBitControlStrings() passed after 0.001 seconds.
+✔ Test boundedCaptureRetainsNewestBytesAndKeepsTruncationSticky() passed after 0.001 seconds.
+✔ Test frozenReplayUsesCapturedGeometryAndPreservesCellStyles() passed after 0.045 seconds.
+✔ Suite TerminalReplaySanitizerTests passed after 0.045 seconds.
+✔ Test run with 7 tests in 1 suite passed after 0.045 seconds.

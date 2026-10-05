@@ -1,38 +1,19 @@
 import SwiftUI
 
 struct BlocksView: View {
-    @ObservedObject var session: TerminalSession
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var renderedFinalizedBlockCount = 0
-    @State private var viewportRestoreTask: Task<Void, Never>?
+    let session: TerminalSession
+    @ObservedObject private var presentation: BlocksPresentationState
 
-    private enum TimelineAnchor: Hashable {
-        case bottom
-        case queue
-    }
-
-    private var finalizedBlocks: [CommandBlock] {
-        session.visibleBlocks.filter { block in
-            switch block.state {
-            case .completed, .interrupted, .unknown:
-                return true
-            case .queued, .running:
-                return false
-            }
-        }
-    }
-
-    private var lastFinalizedBlockID: UUID? {
-        finalizedBlocks.last?.id
-    }
-
-    private var liveBlocks: [CommandBlock] {
-        finalizedBlocks.filter { $0.origin == .live }
+    init(session: TerminalSession) {
+        self.session = session
+        self.presentation = session.blocksPresentation
+        session.blocksPresentation.refresh()
     }
 
     var body: some View {
+        let snapshot = presentation.snapshot
         VStack(spacing: 0) {
-            if let notice = session.blockRemovalNotice {
+            if let notice = snapshot.removalNotice {
                 HStack {
                     Text(notice)
                     Spacer()
@@ -43,182 +24,64 @@ struct BlocksView: View {
                 .padding(.horizontal, 24)
                 .padding(.vertical, 8)
             }
-            if let restartedAt = session.lastShellRestartAt {
-                let restartDirectory = session.currentDirectory ?? "home directory"
-                Label(
-                    "Shell restarted at \(restartedAt.formatted(date: .omitted, time: .shortened)) · fresh shell in \(restartDirectory)",
-                    systemImage: "arrow.clockwise"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, PaneMetrics.blockOuterInset + PaneMetrics.blockInnerInset)
-                .frame(minHeight: PaneMetrics.systemEventHeight)
-                .accessibilityLabel("Shell restarted at \(restartedAt.formatted(date: .omitted, time: .shortened)), \(restartDirectory)")
+            if let restartedAt = snapshot.restartedAt {
+                Label("Shell restarted at \(restartedAt.formatted(date: .omitted, time: .shortened)) · fresh shell in \(snapshot.directory ?? "home directory")",
+                      systemImage: "arrow.clockwise")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, PaneMetrics.blockOuterInset + PaneMetrics.blockInnerInset)
+                    .frame(minHeight: PaneMetrics.systemEventHeight)
+                    .accessibilityLabel("Shell restarted at \(restartedAt.formatted(date: .omitted, time: .shortened)), \(snapshot.directory ?? "home directory")")
             }
-            if let notice = session.scrollbackPruningNotice {
+            if let notice = snapshot.pruningNotice {
                 HStack(spacing: 7) {
                     Image(systemName: "archivebox")
                     Text(notice.message)
                     Spacer(minLength: 8)
-                    Button("Dismiss") {
-                        session.dismissScrollbackPruningNotice()
-                    }
-                    .buttonStyle(.borderless)
+                    Button("Dismiss") { session.dismissScrollbackPruningNotice() }.buttonStyle(.borderless)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, PaneMetrics.blockOuterInset + PaneMetrics.blockInnerInset)
                 .frame(minHeight: PaneMetrics.systemEventHeight)
                 .accessibilityElement(children: .combine)
             }
-            ScrollViewReader { proxy in
-                ScrollView {
-                    // Keep document geometry exact across tab mounts and width
-                    // changes. Estimated lazy row heights can place the viewport
-                    // in an unmaterialized gap until a manual scroll occurs.
-                    VStack(spacing: PaneMetrics.blockVerticalSpacing) {
-                        if session.blockTimeline.blocks.isEmpty,
-                           session.commandDraft.isEmpty,
-                           session.isShellReadyForInput {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Type a command below").font(.headline)
-                                Text("Blocks keeps completed commands here. Switch to Terminal for interactive programs.")
-                                    .foregroundStyle(.primary.opacity(0.75))
-                                Button("Using Pane") {
-                                    NotificationCenter.default.post(name: .showPaneHelp, object: nil)
-                                }.buttonStyle(.link)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(12)
-                        }
-                        ForEach(session.restoredSessionOrder, id: \.self) { sessionID in
-                            if let boundary = session.sessionBoundaries[sessionID] {
-                                SessionBoundaryView(boundary: boundary)
-                            }
-                            ForEach(restoredBlocks(for: sessionID)) { block in
-                                commandBlockView(block)
-                            }
-                        }
-
-                        if !session.restoredSessionOrder.isEmpty,
-                           let boundary = session.newShellBoundary {
-                            NewShellBoundaryView(boundary: boundary)
-                        }
-
-                        ForEach(liveBlocks) { block in
-                            commandBlockView(block)
-                        }
-
-                        if !session.queuedBlocks.isEmpty {
-                            queuedCommands
-                                .padding(.bottom, timelineBottomInset)
-                                .id(TimelineAnchor.queue)
-                        }
-
-                        if finalizedBlocks.isEmpty && session.queuedBlocks.isEmpty {
-                            Color.clear
-                                .frame(height: 8)
-                                .id(TimelineAnchor.bottom)
-                        }
-                    }
-                    .padding(.horizontal, PaneMetrics.blockOuterInset)
-                    .padding(.top, 6)
-                }
-                .defaultScrollAnchor(.bottom)
+            RecycledBlocksTimeline(snapshot: snapshot, content: { row in
+                rowContent(row, selectedID: snapshot.selectedID)
+            }, onDisplay: { ids in
+                guard session.visibilityState == .selected else { return }
+                session.presentationTimings.didSubmitDisplay(visibleBlocks: ids)
+            })
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(PaneTheme.contentSurface)
-                .onGeometryChange(for: CGSize.self) { geometry in
-                    geometry.size
-                } action: { _ in
-                    restoreTimelineViewport(using: proxy)
-                }
-                .onAppear {
-                    let shouldRestoreAfterTerminal = session.consumeBlocksViewportRestoreRequest()
-                    renderedFinalizedBlockCount = finalizedBlocks.count
-                    if shouldRestoreAfterTerminal || !finalizedBlocks.isEmpty {
-                        restoreTimelineViewport(using: proxy)
-                    }
-                }
-                .onDisappear {
-                    viewportRestoreTask?.cancel()
-                    viewportRestoreTask = nil
-                }
-                .onChange(of: session.blockTimelineGeneration) { _, _ in
-                    let currentCount = finalizedBlocks.count
-                    let needsBulkViewportRecovery = currentCount < renderedFinalizedBlockCount
-                        || currentCount > renderedFinalizedBlockCount + 1
-                    renderedFinalizedBlockCount = currentCount
-                    if needsBulkViewportRecovery {
-                        restoreTimelineViewport(using: proxy)
-                    }
-                }
-                .onChange(of: session.selectedBlockID) { _, selectedID in
-                    guard let selectedID else { return }
-                    viewportRestoreTask?.cancel()
-                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) {
-                        proxy.scrollTo(selectedID, anchor: .center)
-                    }
-                }
-                .onChange(of: lastFinalizedBlockID) { _, blockID in
-                    guard blockID != nil else { return }
-                    restoreTimelineViewport(using: proxy)
-                }
-            }
         }
     }
 
-    private func restoreTimelineViewport(using proxy: ScrollViewProxy) {
-        // A single destination includes the trailing inset. Scrolling first to
-        // the command and later to a separate spacer visibly overshoots/snaps
-        // when tabs mount. Cancel pending work when this tab leaves the screen.
-        let target: AnyHashable = !session.queuedBlocks.isEmpty
-            ? AnyHashable(TimelineAnchor.queue)
-            : lastFinalizedBlockID.map { AnyHashable($0) }
-                ?? AnyHashable(TimelineAnchor.bottom)
-        viewportRestoreTask?.cancel()
-        viewportRestoreTask = Task { @MainActor in
-            await Task.yield()
-            guard !Task.isCancelled else { return }
-            var transaction = Transaction(animation: nil)
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                proxy.scrollTo(target, anchor: .bottom)
-            }
+    private func rowContent(_ row: BlocksTimelineRow, selectedID: UUID?) -> AnyView {
+        switch row {
+        case .block(let block):
+            return AnyView(CommandBlockView(block: block, isSelected: selectedID == block.id, session: session))
+        case .session(let boundary): return AnyView(SessionBoundaryView(boundary: boundary))
+        case .newShell(let boundary): return AnyView(NewShellBoundaryView(boundary: boundary))
+        case .queue(let blocks): return AnyView(queuedCommands(blocks))
+        case .empty:
+            return AnyView(VStack(alignment: .leading, spacing: 6) {
+                Text("Type a command below").font(.headline)
+                Text("Blocks keeps completed commands here. Switch to Terminal for interactive programs.")
+                    .foregroundStyle(.primary.opacity(0.75))
+                Button("Using Pane") { NotificationCenter.default.post(name: .showPaneHelp, object: nil) }
+                    .buttonStyle(.link)
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(12))
         }
     }
 
-    private var timelineBottomInset: CGFloat {
-        PaneMetrics.blockVerticalSpacing + 8
-    }
-
-    private func restoredBlocks(for sessionID: UUID) -> [CommandBlock] {
-        finalizedBlocks.filter { block in
-            if case .restored(let restoredSessionID) = block.origin {
-                return restoredSessionID == sessionID
-            }
-            return false
-        }
-    }
-
-    private func commandBlockView(_ block: CommandBlock) -> some View {
-        CommandBlockView(
-            block: block,
-            isSelected: session.selectedBlockID == block.id,
-            session: session
-        )
-        .padding(.bottom, block.id == lastFinalizedBlockID && session.queuedBlocks.isEmpty
-            ? timelineBottomInset : 0)
-        .id(block.id)
-    }
-
-    private var queuedCommands: some View {
+    private func queuedCommands(_ blocks: [CommandBlock]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Up next · \(session.queuedBlocks.count)")
+            Text("Up next · \(blocks.count)")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .accessibilityAddTraits(.isHeader)
-            ForEach(Array(session.queuedBlocks.enumerated()), id: \.element.id) { index, block in
+            ForEach(Array(blocks.enumerated()), id: \.element.id) { index, block in
                 HStack(spacing: 10) {
                     Text("\(index + 1)")
                         .font(.caption.monospacedDigit())
@@ -230,21 +93,21 @@ struct BlocksView: View {
                     Spacer(minLength: 8)
                     Button {
                         guard index > 0 else { return }
-                        session.moveQueuedBlock(id: block.id, before: session.queuedBlocks[index - 1].id)
+                        session.moveQueuedBlock(id: block.id, before: blocks[index - 1].id)
                     } label: { Image(systemName: "chevron.up") }
                         .buttonStyle(.borderless)
                         .disabled(index == 0)
                         .help("Move earlier")
                         .accessibilityLabel("Move queued command earlier")
                     Button {
-                        guard index + 1 < session.queuedBlocks.count else { return }
+                        guard index + 1 < blocks.count else { return }
                         session.moveQueuedBlock(
-                            id: session.queuedBlocks[index + 1].id,
+                            id: blocks[index + 1].id,
                             before: block.id
                         )
                     } label: { Image(systemName: "chevron.down") }
                         .buttonStyle(.borderless)
-                        .disabled(index + 1 == session.queuedBlocks.count)
+                        .disabled(index + 1 == blocks.count)
                         .help("Move later")
                         .accessibilityLabel("Move queued command later")
                     Button { session.editBlock(id: block.id) } label: {

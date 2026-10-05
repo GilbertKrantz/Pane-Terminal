@@ -67,13 +67,13 @@ private final class SwiftTermPTYProcessDriver: PTYProcessDriving {
 /// rejected before they reach the renderer or transcript pipeline.
 private final class PTYProcessDelegateBridge: LocalProcessDelegate {
     let generation: UInt64
-    private let dataHandler: ([UInt8], UInt64) -> Void
+    private let dataHandler: (Data, UInt64) -> Void
     private let terminationHandler: (Int32?, UInt64) -> Void
     private let windowSizeProvider: () -> winsize
 
     init(
         generation: UInt64,
-        dataHandler: @escaping ([UInt8], UInt64) -> Void,
+        dataHandler: @escaping (Data, UInt64) -> Void,
         terminationHandler: @escaping (Int32?, UInt64) -> Void,
         windowSizeProvider: @escaping () -> winsize
     ) {
@@ -84,7 +84,7 @@ private final class PTYProcessDelegateBridge: LocalProcessDelegate {
     }
 
     func dataReceived(slice: ArraySlice<UInt8>) {
-        dataHandler(Array(slice), generation)
+        dataHandler(Data(slice), generation)
     }
 
     func processTerminated(_ source: LocalProcess, exitCode: Int32?) {
@@ -279,12 +279,12 @@ final class PTYController {
 
     @discardableResult
     func resize(to newSize: winsize) -> Bool {
-#if DEBUG
+#if DEBUG || PANE_TESTING
         AuthoritativeTerminalRenderInstrumentation.recordPTYResizeAttempt()
 #endif
         guard !Self.equalWindowSizes(windowSize, newSize) else { return false }
         windowSize = newSize
-#if DEBUG
+#if DEBUG || PANE_TESTING
         AuthoritativeTerminalRenderInstrumentation.recordPTYResizeAccepted()
 #endif
 
@@ -394,9 +394,9 @@ final class PTYController {
         )
     }
 
-    private func receive(_ bytes: [UInt8], from generation: UInt64) {
+    private func receive(_ bytes: Data, from generation: UInt64) {
         guard generationGate.acceptsOutput(from: generation), process != nil else { return }
-        onEvent?(.received(Data(bytes)))
+        onEvent?(.received(bytes))
     }
 
     private func scheduleTermination(waitStatus: Int32?, generation: UInt64) {

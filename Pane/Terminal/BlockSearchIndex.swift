@@ -16,6 +16,7 @@ actor BlockSearchIndex {
         let output: String
         let directory: String
         let status: String
+        let source: Fields
 
         func contains(_ needle: String, filter: BlockSearchFilter) -> Bool {
             switch filter {
@@ -36,20 +37,52 @@ actor BlockSearchIndex {
         }
     }
 
-    private var documents: [Document] = []
+    private struct Fields: Equatable, Sendable {
+        let command: String
+        let output: String
+        let directory: String
+        let status: String
+    }
+
+    private var documents: [UUID: Document] = [:]
+    private var orderedIDs: [UUID] = []
+    private(set) var normalizedDocumentCount = 0
     private var generation: UInt64 = 0
 
     @discardableResult
     func replace(blocks: [CommandBlock]) -> UInt64 {
-        generation &+= 1
-        documents = blocks.map { block in
-            Document(
+        guard !Task.isCancelled else { return generation }
+        var updated = documents
+        var changed = false
+        var normalizedCount = 0
+        let ids = blocks.map(\.id)
+        for (offset, block) in blocks.enumerated() {
+            if offset.isMultiple(of: 64), Task.isCancelled { return generation }
+            let fields = Fields(command: block.command, output: block.output,
+                                directory: block.workingDirectory, status: block.statusText)
+            guard updated[block.id]?.source != fields else { continue }
+            changed = true
+            normalizedCount += 1
+            updated[block.id] = Document(
                 id: block.id,
                 command: Self.normalize(block.command),
                 output: Self.normalize(block.output),
                 directory: Self.normalize(block.workingDirectory),
-                status: Self.normalize(block.statusText)
+                status: Self.normalize(block.statusText),
+                source: fields
             )
+        }
+        guard !Task.isCancelled else { return generation }
+        if ids != orderedIDs {
+            let retained = Set(ids)
+            updated = updated.filter { retained.contains($0.key) }
+            changed = true
+        }
+        if changed {
+            generation &+= 1
+            documents = updated
+            orderedIDs = ids
+            normalizedDocumentCount += normalizedCount
         }
         return generation
     }
@@ -82,10 +115,11 @@ actor BlockSearchIndex {
         )
         let ids: [UUID]
         if needle.isEmpty {
-            ids = documents.map(\.id)
+            ids = orderedIDs
         } else {
-            ids = documents.compactMap { document in
-                document.contains(needle, filter: query.filter) ? document.id : nil
+            ids = orderedIDs.compactMap { id in
+                guard let document = documents[id] else { return nil }
+                return document.contains(needle, filter: query.filter) ? document.id : nil
             }
         }
         guard requestGeneration == generation else { return nil }

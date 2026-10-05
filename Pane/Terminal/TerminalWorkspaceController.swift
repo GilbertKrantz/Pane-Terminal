@@ -493,6 +493,10 @@ final class TerminalWorkspaceController: ObservableObject {
         guard !closingTabIDs.contains(id), let tab = tabs.first(where: { $0.id == id }) else { return }
         let signpost = PanePerformanceSignposts.beginTabSwitch()
         defer { PanePerformanceSignposts.endTabSwitch(signpost) }
+        if selectedTabID != id {
+            selectedTab?.session.presentationTimings.cancel()
+            tab.session.presentationTimings.beginTabDisplay()
+        }
         tabs.forEach { $0.session.visibilityState = $0.id == id ? .selected : .background }
         selectedTabID = id
         tab.lastSelectedAt = Date()
