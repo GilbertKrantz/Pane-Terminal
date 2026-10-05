@@ -32,6 +32,7 @@ struct TerminalSessionDiagnostics: Codable, Equatable, Sendable {
     let blockCount: Int
     let estimatedRetainedOutputBytes: Int
     let terminalMount: TerminalMountDiagnostics
+    let presentationTimings: PanePresentationTimingSnapshot
 }
 
 struct TerminalMountDiagnostics: Codable, Equatable, Sendable {

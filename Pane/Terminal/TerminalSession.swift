@@ -102,7 +102,13 @@ final class TerminalSession: NSObject, ObservableObject {
         didSet { scheduleBlockSearch() }
     }
     @Published private(set) var scrollbackPruningNotice: ScrollbackPruningNotice?
-    @Published private var indexedBlockSearchIDs: [UUID]?
+    @Published private var indexedBlockSearchIDs: [UUID]? {
+        didSet { indexedBlockSearchIDSet = Set(indexedBlockSearchIDs ?? []) }
+    }
+    private var indexedBlockSearchIDSet: Set<UUID> = []
+    private var searchIndexNeedsUpdate = true
+    lazy var blocksPresentation = BlocksPresentationState(session: self)
+    let presentationTimings = PanePresentationTimings()
     @Published private var indexedBlockSearchQuery: BlockSearchQuery?
     @Published private(set) var isBlockSearchPresented = false
     @Published var blockSearchFocusGeneration: UInt64 = 0
@@ -201,7 +207,9 @@ final class TerminalSession: NSObject, ObservableObject {
     var blockSearchTask: Task<Void, Never>?
 #if DEBUG
     let lifecycleDebugID = UUID()
-    var debugShutdownCompleted = false
+#endif
+#if DEBUG || PANE_TESTING
+    var debugShutdownCompleted: Bool { completedShutdownResult != nil }
 #endif
 
     var blocks: [CommandBlock] {
@@ -224,10 +232,10 @@ final class TerminalSession: NSObject, ObservableObject {
             return blockTimeline.blocks
         }
         guard indexedBlockSearchQuery == query,
-              let indexedBlockSearchIDs else {
+              indexedBlockSearchIDs != nil else {
             return []
         }
-        let matches = Set(indexedBlockSearchIDs)
+        let matches = indexedBlockSearchIDSet
         return blockTimeline.blocks.filter { matches.contains($0.id) }
     }
 
@@ -355,7 +363,7 @@ final class TerminalSession: NSObject, ObservableObject {
             guard let self else { return }
             self.blockTimeline = timeline
             self.blockTimelineGeneration &+= 1
-            self.rebuildBlockSearchIndex(with: timeline.blocks)
+            self.invalidateBlockSearchIndex()
         }
         blockLifecycleController.onTimelinePruned = { [weak self] notice in
             guard let self else { return }
@@ -443,7 +451,8 @@ final class TerminalSession: NSObject, ObservableObject {
                 lastFailedValidationAt: terminalMountCoordinator.lastFailedValidationAt,
                 lastRepairAttemptAt: terminalMountCoordinator.lastRepairAttemptAt,
                 lastRepairResultAt: terminalMountCoordinator.lastRepairResultAt
-            )
+            ),
+            presentationTimings: presentationTimings.snapshot()
         )
     }
 
@@ -451,6 +460,7 @@ final class TerminalSession: NSObject, ObservableObject {
         let projectedMode = interactionController.presentationMode
         let projectedInput = interactionController.effectiveInputRequirement
         if mode != projectedMode {
+            presentationTimings.cancelBlockDisplay()
             mode = projectedMode
         }
         if inputRequirement != projectedInput {
@@ -470,6 +480,10 @@ final class TerminalSession: NSObject, ObservableObject {
             frame: .zero,
             font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         )
+        terminalView.onDisplaySubmitted = { [weak self] in
+            guard let self, self.visibilityState == .selected, self.mode == .terminal else { return }
+            self.presentationTimings.didSubmitDisplay(visibleBlocks: [])
+        }
         terminalView.autoresizingMask = [.width, .height]
         terminalView.changeScrollback(
             ScrollbackPolicy.standard.terminalLineLimit
@@ -889,6 +903,8 @@ final class TerminalSession: NSObject, ObservableObject {
 
     func dismissBlockSearch() {
         guard isBlockSearchPresented else { return }
+        blockSearchTask?.cancel()
+        blockSearchTask = nil
         isBlockSearchPresented = false
         let priorMode = modeBeforeSearch
         modeBeforeSearch = nil
@@ -904,20 +920,16 @@ final class TerminalSession: NSObject, ObservableObject {
         blockLifecycleController.dismissPruningNotice()
     }
 
-    private func rebuildBlockSearchIndex(with blocks: [CommandBlock]) {
+    private func invalidateBlockSearchIndex() {
+        searchIndexNeedsUpdate = true
         blockSearchTask?.cancel()
-        let query = BlockSearchQuery(
-            text: blockSearchText,
-            filter: blockSearchFilter
-        )
-        blockSearchTask = Task { @MainActor [weak self, blockSearchIndex] in
-            await blockSearchIndex.replace(blocks: blocks)
-            guard let self, !Task.isCancelled else { return }
-            await self.performBlockSearch(query)
-        }
+        blockSearchTask = nil
+        guard isBlockSearchPresented else { return }
+        scheduleBlockSearch()
     }
 
     private func scheduleBlockSearch() {
+        guard isBlockSearchPresented else { return }
         let query = BlockSearchQuery(
             text: blockSearchText,
             filter: blockSearchFilter
@@ -939,6 +951,13 @@ final class TerminalSession: NSObject, ObservableObject {
     }
 
     private func performBlockSearch(_ query: BlockSearchQuery) async {
+        if searchIndexNeedsUpdate {
+            guard !Task.isCancelled else { return }
+            let timelineGeneration = blockTimelineGeneration
+            await blockSearchIndex.replace(blocks: blockTimeline.blocks)
+            guard !Task.isCancelled, timelineGeneration == blockTimelineGeneration else { return }
+            searchIndexNeedsUpdate = false
+        }
         guard !Task.isCancelled,
               let result = await blockSearchIndex.search(
                   query,
@@ -1123,15 +1142,15 @@ final class TerminalSession: NSObject, ObservableObject {
     private func handlePTYEvent(_ event: PTYController.Event) {
         switch event {
         case .received(let data):
-            handleProcessData(Array(data))
+            handleProcessData(data)
         case .terminated(let waitStatus):
             handleProcessTermination(waitStatus: waitStatus)
         }
     }
 
-    private func handleProcessData(_ bytes: [UInt8]) {
+    private func handleProcessData(_ data: Data) {
         guard ptyController.isRunning else { return }
-        if visibilityState == .background, !bytes.isEmpty {
+        if visibilityState == .background, !data.isEmpty {
             onMeaningfulBackgroundOutput?()
         }
         refreshForegroundProcessModeForOutputIfNeeded()
@@ -1139,9 +1158,9 @@ final class TerminalSession: NSObject, ObservableObject {
         // The persistent direct terminal is fed exactly once. The live block
         // terminal below is an independent emulator and receives parsed block
         // output, never a second feed through this primary view.
-        terminalView?.feed(byteArray: bytes[...])
+        terminalView?.feed(byteArray: Array(data)[...])
 
-        let transcriptBytes = transcriptFilter.consume(Data(bytes))
+        let transcriptBytes = transcriptFilter.consume(data)
         handleStreamEvents(streamParser.consume(transcriptBytes))
     }
 
@@ -1194,6 +1213,10 @@ final class TerminalSession: NSObject, ObservableObject {
                 }
 
                 if blockTimeline.activeBlockID != nil {
+                    if visibilityState == .selected, mode == .blocks,
+                       let id = blockTimeline.activeBlockID {
+                        presentationTimings.beginBlockDisplay(id: id)
+                    }
                     lifecycleFaultCheckpointHandler?(.commandFinalizationStarted)
                     let signpost = PanePerformanceSignposts.beginBlockFinalization()
                     let windowSize = ptyController.windowSize
@@ -1203,6 +1226,10 @@ final class TerminalSession: NSObject, ObservableObject {
                         columns: Int(windowSize.ws_col),
                         rows: Int(windowSize.ws_row)
                     ) {
+                        if isBlockSearchPresented, let block = blockTimeline.block(id: id),
+                           !BlockSearchQuery(text: blockSearchText, filter: blockSearchFilter).matches(block) {
+                            presentationTimings.cancelBlockDisplay()
+                        }
                         selectedBlockID = id
                         if let command = blockTimeline.block(id: id)?.command {
                             Task { @MainActor [weak self] in
@@ -1756,6 +1783,7 @@ final class TerminalSession: NSObject, ObservableObject {
     enum HistoryRemoval { case currentSession, previousSessions, exactCommands, output, all }
 
     func applyHistoryRemoval(_ removal: HistoryRemoval) {
+        CommandClickableTextView.clearCachedOutput()
         // Permanent deletion must also discard the reversible timeline snapshot.
         dismissBlockRemovalNotice()
         switch removal {
@@ -2281,7 +2309,7 @@ final class TerminalSession: NSObject, ObservableObject {
         let generation = focusGeneration
         guard pendingAuthoritativeFocusRepairGeneration != generation else { return }
         pendingAuthoritativeFocusRepairGeneration = generation
-#if DEBUG
+#if DEBUG || PANE_TESTING
         AuthoritativeTerminalRenderInstrumentation.recordFocusRepairAttempt()
 #endif
         DispatchQueue.main.async { [weak self] in
@@ -2311,7 +2339,7 @@ final class TerminalSession: NSObject, ObservableObject {
               let window = terminalView.window else { return }
         if window.firstResponder !== terminalView {
             window.makeFirstResponder(terminalView)
-#if DEBUG
+#if DEBUG || PANE_TESTING
             AuthoritativeTerminalRenderInstrumentation.recordFocusResponderChange()
 #endif
         }
@@ -2359,7 +2387,7 @@ final class TerminalSession: NSObject, ObservableObject {
             terminalView.terminal.updateFullScreen()
             terminalView.setNeedsDisplay(terminalView.bounds)
             terminalView.layer?.setNeedsDisplay()
-#if DEBUG
+#if DEBUG || PANE_TESTING
             AuthoritativeTerminalRenderInstrumentation.recordFullScreenInvalidation()
 #endif
         }
@@ -2400,7 +2428,7 @@ final class TerminalSession: NSObject, ObservableObject {
         return .liveMirror
     }
 
-#if DEBUG
+#if DEBUG || PANE_TESTING
     var debugAuthoritativeTerminalView: TerminalView? { terminalView }
     var debugAuthoritativeHostView: NSView? { authoritativeTerminalHostView }
     var debugProcessGeneration: UInt64 { processGeneration }

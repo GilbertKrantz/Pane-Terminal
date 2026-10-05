@@ -22,7 +22,9 @@ let package = Package(
             dependencies: ["SwiftTerm"],
             path: "Pane",
             exclude: ["Info.plist", "App/PaneApp.swift", "AppIcons.icon"],
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            // Read-only test hooks are available in optimized SwiftPM tests.
+            // Xcode's shipping Release app does not define PANE_TESTING.
+            swiftSettings: [.swiftLanguageMode(.v5), .define("PANE_TESTING")]
         ),
         .testTarget(
             name: "PaneTests",

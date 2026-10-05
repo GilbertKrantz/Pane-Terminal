@@ -1,0 +1,253 @@
+warning: '--skip-update' option is deprecated and will be removed in a future release
+warning: /Users/chandraw/Library/org.swift.swiftpm/configuration is not accessible or not writable, disabling user-level cache features.
+warning: /Users/chandraw/Library/org.swift.swiftpm/security is not accessible or not writable, disabling user-level cache features.
+Fetching https://github.com/migueldeicaza/SwiftTerm.git from cache
+Fetching https://github.com/apple/swift-argument-parser from cache
+Fetched https://github.com/migueldeicaza/SwiftTerm.git from cache (0.25s)
+Computing version for https://github.com/migueldeicaza/SwiftTerm.git
+Fetched https://github.com/apple/swift-argument-parser from cache (0.32s)
+Computed https://github.com/migueldeicaza/SwiftTerm.git at 1.14.0 (8.40s)
+Computing version for https://github.com/apple/swift-argument-parser
+Computed https://github.com/apple/swift-argument-parser at 1.8.2 (0.65s)
+Creating working copy for https://github.com/migueldeicaza/SwiftTerm.git
+Working copy of https://github.com/migueldeicaza/SwiftTerm.git resolved at 1.14.0
+Creating working copy for https://github.com/apple/swift-argument-parser
+Working copy of https://github.com/apple/swift-argument-parser resolved at 1.8.2
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/13] /tmp/PanePerformanceAudit/arm64-apple-macosx/debug/PanePackageTests.derived/runner.swift
+[2/13] Write sources
+[7/13] Copying Shaders.metal
+[8/13] Write sources
+[9/13] Copying Fixtures
+[10/13] Write swift-version--58304C5D6DBC2206.txt
+[12/72] Compiling SwiftTerm File.swift
+[13/72] Compiling SwiftTerm HeadlessTerminal.swift
+[14/72] Compiling SwiftTerm KittyGraphics.swift
+[15/72] Compiling SwiftTerm KittyKeyboardEncoder.swift
+[16/72] Compiling SwiftTerm SearchService.swift
+[17/72] Compiling SwiftTerm SearchState.swift
+[18/72] Compiling SwiftTerm SelectionService.swift
+[19/72] Compiling SwiftTerm SixelDcsHandler.swift
+[20/72] Compiling SwiftTerm BufferSet.swift
+[21/72] Compiling SwiftTerm CharData.swift
+[22/72] Compiling SwiftTerm CharSets.swift
+[23/72] Compiling SwiftTerm CircularList.swift
+[24/72] Compiling SwiftTerm KittyKeyboardProtocol.swift
+[25/72] Compiling SwiftTerm KittyPlaceholder.swift
+[26/72] Compiling SwiftTerm Line.swift
+[27/72] Compiling SwiftTerm LocalProcess.swift
+[28/72] Compiling SwiftTerm Colors.swift
+[29/72] Compiling SwiftTerm EscapeSequenceParser.swift
+[30/72] Compiling SwiftTerm EscapeSequences.swift
+[31/72] Compiling SwiftTerm ExtensionsTerminal.swift
+[32/76] Compiling SwiftTerm iOSTerminalView.swift
+[33/76] Compiling SwiftTerm iOSTextInput.swift
+[34/76] Compiling SwiftTerm iOSTextStorage.swift
+[35/76] Compiling SwiftTerm resource_bundle_accessor.swift
+[36/76] Compiling SwiftTerm MacAccessibilityService.swift
+[37/76] Compiling SwiftTerm MacCaretView.swift
+[38/76] Compiling SwiftTerm MacDebugView.swift
+[39/76] Compiling SwiftTerm MacExtensions.swift
+[40/76] Compiling SwiftTerm MacFindBarView.swift
+[41/76] Compiling SwiftTerm MacLocalTerminalView.swift
+[42/76] Compiling SwiftTerm MacTerminalView.swift
+[43/76] Compiling SwiftTerm Position.swift
+[44/76] Compiling SwiftTerm Pty.swift
+[45/76] Compiling SwiftTerm SearchEngine.swift
+[46/76] Compiling SwiftTerm SearchLineCache.swift
+[47/76] Compiling SwiftTerm SearchOptions.swift
+[48/76] Compiling SwiftTerm CoreTextGlyphRasterizer.swift
+[49/76] Compiling SwiftTerm GlyphAtlas.swift
+[50/76] Compiling SwiftTerm MetalBufferingMode.swift
+[51/76] Compiling SwiftTerm MetalError.swift
+[52/76] Compiling SwiftTerm MetalTerminalRenderer.swift
+[53/76] Compiling SwiftTerm iOSCaretView.swift
+[54/76] Compiling SwiftTerm iOSDoubleButton.swift
+[55/76] Compiling SwiftTerm iOSExtensions.swift
+[56/76] Compiling SwiftTerm iOSKeyboardView.swift
+[57/76] Compiling SwiftTerm UnicodeWidthData.swift
+[58/76] Compiling SwiftTerm Utilities.swift
+[59/76] Compiling SwiftTerm SwiftUITerminalView.swift
+[60/76] Compiling SwiftTerm iOSAccessoryView.swift
+[61/76] Compiling SwiftTerm SyncDebug.swift
+[62/76] Compiling SwiftTerm Terminal.swift
+[63/76] Compiling SwiftTerm TerminalOptions.swift
+[64/76] Compiling SwiftTerm TerminalViewSearch.swift
+[65/76] Emitting module SwiftTerm
+[66/76] Compiling SwiftTerm TerminalProgressBarView.swift
+[67/76] Compiling SwiftTerm TerminalViewDelegate.swift
+[68/76] Compiling SwiftTerm Buffer.swift
+[69/76] Compiling SwiftTerm BufferLine.swift
+[70/76] Compiling SwiftTerm AppleTerminalView.swift
+[71/76] Compiling SwiftTerm BlockElementRenderer.swift
+[72/76] Compiling SwiftTerm BoxDrawingRenderer.swift
+[73/76] Compiling SwiftTerm CaretView.swift
+[74/76] Compiling SwiftTerm Extensions.swift
+[75/133] Compiling Pane BoundedOutputCompactor.swift
+[76/133] Compiling Pane CommandSerializer.swift
+[77/133] Compiling Pane FocusCoordinator.swift
+[78/133] Compiling Pane PTYController.swift
+[79/137] Compiling Pane TerminalInteractionController.swift
+[80/137] Compiling Pane TerminalReplaySanitizer.swift
+[81/137] Compiling Pane TerminalSession+Autocomplete.swift
+[82/137] Compiling Pane TerminalSession+Lifecycle.swift
+[83/137] Compiling Pane CommandBlock.swift
+[84/137] Compiling Pane CommandHistory.swift
+[85/137] Compiling Pane InMemoryRuntimeStateStore.swift
+[86/137] Compiling Pane InputMode.swift
+[87/137] Compiling Pane PanePreferencesSnapshot.swift
+[88/137] Compiling Pane PanePreferencesStore.swift
+[89/137] Compiling Pane PaneLocalDataManager.swift
+[90/137] Compiling Pane AlternateScreenTranscriptFilter.swift
+[91/137] Compiling Pane CompletionSourceMapping.swift
+[92/137] Compiling Pane ExecutableIndex.swift
+[93/137] Compiling Pane LocalAutocompleteProvider.swift
+[94/137] Compiling Pane ProjectContextProvider.swift
+[95/137] Compiling Pane BehavioralCompletion.swift
+[96/137] Compiling Pane CompletionPipeline.swift
+[97/137] Compiling Pane CompletionRanker.swift
+[98/137] Compiling Pane CompletionService.swift
+[99/137] Emitting module Pane
+[100/137] Compiling Pane ContentView.swift
+[101/137] Compiling Pane ModeIndicatorView.swift
+[102/137] Compiling Pane PaneSettingsView.swift
+[103/137] Compiling Pane TerminalWorkspaceView.swift
+[104/137] Compiling Pane ComposerContextCoordinator.swift
+[105/137] Compiling Pane PanePerformanceSignposts.swift
+[106/137] Compiling Pane PanePerformanceThresholds.swift
+[107/137] Compiling Pane PanePreferences.swift
+[108/137] Compiling Pane PTYGenerationGate.swift
+[109/137] Compiling Pane ScrollbackPolicy.swift
+[110/137] Compiling Pane ShellConfiguration.swift
+[111/137] Compiling Pane ShellIntegration.swift
+[112/137] Compiling Pane PredictionTypes.swift
+[113/137] Compiling Pane RuntimeState.swift
+[114/137] Compiling Pane RuntimeStateController.swift
+[115/137] Compiling Pane RuntimeStatePersistenceCoordinator.swift
+[116/137] Compiling Pane SQLiteRuntimeStateStore.swift
+[117/137] Compiling Pane SensitiveDataSanitizer.swift
+[118/137] Compiling Pane TerminalSecurityState.swift
+[119/137] Compiling Pane WorkspaceSnapshotStore.swift
+[120/137] Compiling Pane PaneDiagnosticsModels.swift
+[121/137] Compiling Pane PaneProcessMetrics.swift
+[122/137] Compiling Pane PaneResourceCounters.swift
+[123/137] Compiling Pane CommandAutocomplete.swift
+[124/137] Compiling Pane BlocksView.swift
+[125/137] Compiling Pane CommandBlockView.swift
+[126/137] Compiling Pane CommandClickableTextView.swift
+[127/137] Compiling Pane CommandComposerView.swift
+[128/137] Compiling Pane TerminalSession.swift
+[129/137] Compiling Pane TerminalViewRepresentable.swift
+[130/137] Compiling Pane TerminalWorkspaceController.swift
+[131/137] Compiling Pane WarmZshCompletionClient.swift
+[132/137] Compiling Pane BlockLifecycleController.swift
+[133/137] Compiling Pane BlockOutputSanitizer.swift
+[134/137] Compiling Pane BlockSearchIndex.swift
+[135/137] Compiling Pane BlockStreamParser.swift
+[136/177] Compiling PaneCompatibilityTests PaneSoakRunner.swift
+[137/177] Compiling PaneCompatibilityTests CompatibilityModels.swift
+[138/177] Compiling PaneCompatibilityTests resource_bundle_accessor.swift
+[139/177] Compiling PaneCompatibilityTests WorkspaceStressRunner.swift
+[140/177] Compiling PaneCompatibilityTests FixtureProcessRunner.swift
+[141/177] Compiling PaneCompatibilityTests FixtureLocator.swift
+[142/177] Compiling PaneCompatibilityTests WorkspaceStressRunnerTests.swift
+[143/177] Emitting module PaneCompatibilityTests
+[144/177] Compiling PaneCompatibilityTests PaneSoakRunnerTests.swift
+[145/177] Compiling PaneCompatibilityTests CompatibilityTests.swift
+[146/177] Compiling PaneTests BlockOutputSanitizerTests.swift
+[147/177] Compiling PaneTests BlockStreamParserTests.swift
+[148/179] Compiling PaneTests AlternateScreenTranscriptFilterTests.swift
+[149/179] Compiling PaneTests AutocompleteRequestGateTests.swift
+[150/179] Compiling PaneTests BlockLifecycleControllerTests.swift
+[151/179] Compiling PaneTests PanePreferencesStoreTests.swift
+[152/179] Compiling PaneTests ProjectContextProviderTests.swift
+[153/179] Compiling PaneTests InputModeTests.swift
+[154/179] Compiling PaneTests LargeOutputHardeningTests.swift
+[155/179] Compiling PaneTests CommandHistoryTests.swift
+[156/179] Compiling PaneTests CommandSerializerTests.swift
+[157/179] Compiling PaneTests BlocksViewScrollTests.swift
+[158/179] Compiling PaneTests CommandAutocompleteTests.swift
+[159/179] Compiling PaneTests TerminalWorkspaceControllerTests.swift
+[160/179] Compiling PaneTests WorkspaceSnapshotStoreTests.swift
+[161/179] Compiling PaneTests ResourceLifecycleHardeningTests.swift
+[162/179] Compiling PaneTests ResourcePerformanceTests.swift
+[163/179] Compiling PaneTests CompletionServiceTests.swift
+[164/179] Compiling PaneTests ComposerContextTests.swift
+[165/179] Compiling PaneTests SessionRecoveryTests.swift
+[166/179] Compiling PaneTests ShellConfigurationTests.swift
+[167/179] Compiling PaneTests RuntimeStateStoreTests.swift
+[168/179] Compiling PaneTests SensitiveDataSanitizerTests.swift
+[169/179] Compiling PaneTests CompletionInteractionTests.swift
+[170/179] Compiling PaneTests CompletionRankerTests.swift
+[171/179] Compiling PaneTests TerminalInteractionControllerTests.swift
+[172/179] Compiling PaneTests TerminalReplaySanitizerTests.swift
+[173/179] Compiling PaneTests TerminalSessionHardeningTests.swift
+[174/179] Compiling PaneTests TerminalSessionIntegrationTests.swift
+[175/179] Compiling PaneTests CommandBlockTimelineTests.swift
+[176/179] Compiling PaneTests CommandClickableTextViewTests.swift
+[177/179] Emitting module PaneTests
+[178/181] Compiling PanePackageTests runner.swift
+[179/181] Emitting module PanePackageTests
+[179/181] Write Objects.LinkFileList
+[180/181] Linking PanePackageTests
+Build complete! (42.84s)
+Test Suite 'Selected tests' started at 2026-10-02 13:30:00.374.
+Test Suite 'PanePackageTests.xctest' started at 2026-10-02 13:30:00.376.
+Test Suite 'CommandClickableTextViewTests' started at 2026-10-02 13:30:00.376.
+Test Case '-[PaneTests.CommandClickableTextViewTests testCompletedSnapshotUsesPlainBlockOutputPresentation]' started.
+Test Case '-[PaneTests.CommandClickableTextViewTests testCompletedSnapshotUsesPlainBlockOutputPresentation]' passed (0.143 seconds).
+Test Case '-[PaneTests.CommandClickableTextViewTests testHeightUsesTheProposedWidthInsteadOfTheInitialZeroWidth]' started.
+Test Case '-[PaneTests.CommandClickableTextViewTests testHeightUsesTheProposedWidthInsteadOfTheInitialZeroWidth]' passed (0.018 seconds).
+Test Suite 'CommandClickableTextViewTests' passed at 2026-10-02 13:30:00.537.
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.161 (0.162) seconds
+Test Suite 'LargeOutputHardeningTests' started at 2026-10-02 13:30:00.537.
+Test Case '-[PaneTests.LargeOutputHardeningTests testCompletedOutputUsesBoundedUTF8SafeHeadTailExcerpt]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testCompletedOutputUsesBoundedUTF8SafeHeadTailExcerpt]' passed (0.032 seconds).
+Test Case '-[PaneTests.LargeOutputHardeningTests testIndexedSearchHandlesTenThousandBlocksAtSessionScope]' started.
+2026-10-02 13:30:00.950 xctest[7434:97173] Connection Invalid error for service com.apple.hiservices-xpcservice.
+2026-10-02 13:30:00.950 xctest[7434:97167] Error received in message reply handler: Connection invalid
+Test Case '-[PaneTests.LargeOutputHardeningTests testIndexedSearchHandlesTenThousandBlocksAtSessionScope]' passed (0.393 seconds).
+Test Case '-[PaneTests.LargeOutputHardeningTests testIndexedSearchRejectsStaleDebouncedGeneration]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testIndexedSearchRejectsStaleDebouncedGeneration]' passed (0.052 seconds).
+Test Case '-[PaneTests.LargeOutputHardeningTests testLifecyclePublishesSessionLevelPruningNotice]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testLifecyclePublishesSessionLevelPruningNotice]' passed (0.000 seconds).
+Test Case '-[PaneTests.LargeOutputHardeningTests testPolicyPrunesByCombinedOutputAndReplayBytesDeterministically]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testPolicyPrunesByCombinedOutputAndReplayBytesDeterministically]' passed (0.000 seconds).
+Test Case '-[PaneTests.LargeOutputHardeningTests testPolicyPrunesOldestFinalizedBlocksButNeverRunningOrQueued]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testPolicyPrunesOldestFinalizedBlocksButNeverRunningOrQueued]' passed (0.000 seconds).
+Test Case '-[PaneTests.LargeOutputHardeningTests testRichReplayAndPlainOutputShareOneBoundedCapture]' started.
+Test Case '-[PaneTests.LargeOutputHardeningTests testRichReplayAndPlainOutputShareOneBoundedCapture]' passed (0.058 seconds).
+Test Suite 'LargeOutputHardeningTests' passed at 2026-10-02 13:30:01.073.
+	 Executed 7 tests, with 0 failures (0 unexpected) in 0.535 (0.536) seconds
+Test Suite 'ResourcePerformanceTests' started at 2026-10-02 13:30:01.073.
+Test Case '-[PaneTests.ResourcePerformanceTests testCompletionCancellationWaitsForTrackedTaskCleanup]' started.
+Test Case '-[PaneTests.ResourcePerformanceTests testCompletionCancellationWaitsForTrackedTaskCleanup]' passed (0.004 seconds).
+Test Case '-[PaneTests.ResourcePerformanceTests testGitCacheUsesVisibilitySpecificTTL]' started.
+Test Case '-[PaneTests.ResourcePerformanceTests testGitCacheUsesVisibilitySpecificTTL]' passed (0.002 seconds).
+Test Case '-[PaneTests.ResourcePerformanceTests testLifecycleEventRingRetainsNewestEventsInOrder]' started.
+Test Case '-[PaneTests.ResourcePerformanceTests testLifecycleEventRingRetainsNewestEventsInOrder]' passed (0.000 seconds).
+Test Case '-[PaneTests.ResourcePerformanceTests testPerformanceThresholdsMatchP2ReleaseGuardrails]' started.
+Test Case '-[PaneTests.ResourcePerformanceTests testPerformanceThresholdsMatchP2ReleaseGuardrails]' passed (0.000 seconds).
+Test Case '-[PaneTests.ResourcePerformanceTests testProcessMetricsAndSoakSamplingAreBoundedAndPopulated]' started.
+Test Case '-[PaneTests.ResourcePerformanceTests testProcessMetricsAndSoakSamplingAreBoundedAndPopulated]' passed (0.007 seconds).
+Test Case '-[PaneTests.ResourcePerformanceTests testResourceCountersAreBalancedAndSnapshotIsCodable]' started.
+Test Case '-[PaneTests.ResourcePerformanceTests testResourceCountersAreBalancedAndSnapshotIsCodable]' passed (0.000 seconds).
+Test Suite 'ResourcePerformanceTests' passed at 2026-10-02 13:30:01.086.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.013 (0.013) seconds
+Test Suite 'PanePackageTests.xctest' passed at 2026-10-02 13:30:01.086.
+	 Executed 15 tests, with 0 failures (0 unexpected) in 0.709 (0.710) seconds
+Test Suite 'Selected tests' passed at 2026-10-02 13:30:01.086.
+	 Executed 15 tests, with 0 failures (0 unexpected) in 0.709 (0.712) seconds
+Pane lifecycle session[88DA881A-4A33-4512-B744-0A4FB1094710] created
+Pane lifecycle session[88DA881A-4A33-4512-B744-0A4FB1094710] shutdown started
+Pane lifecycle autocomplete[5803259F-985A-47DF-9302-2C8728ACDDB3] stopped
+Pane lifecycle session[88DA881A-4A33-4512-B744-0A4FB1094710] shutdown completed
+Pane lifecycle session[88DA881A-4A33-4512-B744-0A4FB1094710] deallocated
+Pane lifecycle autocomplete[A5169FD1-5D8F-4BD1-9298-61C8A37142A2] request started
+Pane lifecycle autocomplete[A5169FD1-5D8F-4BD1-9298-61C8A37142A2] cancelled and stopped
+◇ Test run started.
+↳ Testing Library Version: 1501
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

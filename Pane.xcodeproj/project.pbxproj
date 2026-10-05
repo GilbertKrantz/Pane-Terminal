@@ -108,6 +108,7 @@
 		F10000000000000000000001 /* TerminalWorkspaceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000001 /* TerminalWorkspaceController.swift */; };
 		F10000000000000000000002 /* TerminalWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000002 /* TerminalWorkspaceView.swift */; };
 		F10000000000000000000003 /* TerminalWorkspaceControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F200000000000000000000003 /* TerminalWorkspaceControllerTests.swift */; };
+		E10000000000000000000001 /* RecycledBlocksTimeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000001 /* RecycledBlocksTimeline.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -226,6 +227,7 @@
 		F200000000000000000000001 /* TerminalWorkspaceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceController.swift; sourceTree = "<group>"; };
 		F200000000000000000000002 /* TerminalWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceView.swift; sourceTree = "<group>"; };
 		F200000000000000000000003 /* TerminalWorkspaceControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalWorkspaceControllerTests.swift; sourceTree = "<group>"; };
+		E20000000000000000000001 /* RecycledBlocksTimeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecycledBlocksTimeline.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -347,6 +349,7 @@
 				20000000000000000000000A /* ModeIndicatorView.swift */,
 				20000000000000000000002E /* PaneSettingsView.swift */,
 				200000000000000000000019 /* BlocksView.swift */,
+				E20000000000000000000001 /* RecycledBlocksTimeline.swift */,
 				20000000000000000000001A /* CommandBlockView.swift */,
 				20000000000000000000002F /* CommandClickableTextView.swift */,
 			);
@@ -647,6 +650,7 @@
 				100000000000000000000013 /* BlockStreamParser.swift in Sources */,
 				100000000000000000000014 /* ShellIntegration.swift in Sources */,
 				100000000000000000000015 /* BlocksView.swift in Sources */,
+				E10000000000000000000001 /* RecycledBlocksTimeline.swift in Sources */,
 				100000000000000000000016 /* CommandBlockView.swift in Sources */,
 				10000000000000000000002F /* CommandClickableTextView.swift in Sources */,
 				10000000000000000000001A /* AlternateScreenTranscriptFilter.swift in Sources */,

@@ -2,6 +2,26 @@ import XCTest
 @testable import Pane
 
 final class ResourcePerformanceTests: XCTestCase {
+    @MainActor
+    func testDisplayTimingWaitsForTheExpectedBlockAndCancellationDoesNotRecordSuccess() throws {
+        let timings = PanePresentationTimings()
+        let blockID = UUID()
+        timings.beginTabDisplay()
+        timings.beginBlockDisplay(id: blockID)
+        timings.didSubmitDisplay(visibleBlocks: [UUID()])
+        XCTAssertEqual(timings.tabDisplaySamplesMilliseconds.count, 1)
+        XCTAssertTrue(timings.blockDisplaySamplesMilliseconds.isEmpty)
+        timings.didSubmitDisplay(visibleBlocks: [blockID])
+        XCTAssertEqual(timings.blockDisplaySamplesMilliseconds.count, 1)
+        let snapshot = timings.snapshot()
+        XCTAssertEqual(try JSONDecoder().decode(PanePresentationTimingSnapshot.self,
+                                                from: JSONEncoder().encode(snapshot)), snapshot)
+        timings.beginTabDisplay()
+        timings.cancel()
+        timings.didSubmitDisplay(visibleBlocks: [])
+        XCTAssertEqual(timings.tabDisplaySamplesMilliseconds.count, 1)
+    }
+
     func testResourceCountersAreBalancedAndSnapshotIsCodable() throws {
 #if DEBUG
         let baseline = PaneResourceCounters.snapshot

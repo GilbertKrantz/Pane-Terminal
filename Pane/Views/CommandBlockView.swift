@@ -3,7 +3,9 @@ import SwiftUI
 struct CommandBlockView: View {
     let block: CommandBlock
     let isSelected: Bool
-    @ObservedObject var session: TerminalSession
+    // Finalized rows receive immutable presentation data from the timeline.
+    // Actions need the session, but draft/PTY changes must not invalidate rows.
+    let session: TerminalSession
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -68,7 +70,12 @@ struct CommandBlockView: View {
         .focusable()
         .focused($hasKeyboardFocus)
         .onChange(of: hasKeyboardFocus) { _, focused in
-            if focused { session.selectBlock(block.id) }
+            // AppKit assigns initial focus when a hosting row mounts. That
+            // is not a user selection and must not recenter the history.
+            if focused, let event = NSApp.currentEvent,
+               event.type == .keyDown || event.type == .leftMouseDown || event.type == .rightMouseDown {
+                session.selectBlock(block.id)
+            }
         }
         .onTapGesture { session.selectBlock(block.id) }
         .onHover { isHovered = $0 }

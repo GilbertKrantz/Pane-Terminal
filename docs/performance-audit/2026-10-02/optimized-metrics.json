@@ -1,0 +1,204 @@
+{
+  "configuration": "Release -O, isolated NSHostingView probe, macOS 27.0.1, arm64; same workloads as baseline. SwiftPM PANE_TESTING hooks enabled; no shells started.",
+  "timeline_samples": {
+    "10": [
+      {
+        "mounted_outputs": 8.0,
+        "mount_ms": 85.24203300476074,
+        "resize_ms": 12.717008590698242,
+        "draft_update_ms": 4.009008407592773
+      },
+      {
+        "mounted_outputs": 8.0,
+        "mount_ms": 33.81192684173584,
+        "resize_ms": 3.63004207611084,
+        "draft_update_ms": 3.188967704772949
+      },
+      {
+        "mounted_outputs": 8.0,
+        "mount_ms": 32.97007083892822,
+        "resize_ms": 4.188895225524902,
+        "draft_update_ms": 3.2171010971069336
+      }
+    ],
+    "100": [
+      {
+        "mounted_outputs": 8.0,
+        "mount_ms": 48.815011978149414,
+        "resize_ms": 3.751039505004883,
+        "draft_update_ms": 0.6510019302368164
+      },
+      {
+        "mounted_outputs": 8.0,
+        "mount_ms": 39.5359992980957,
+        "resize_ms": 4.055023193359375,
+        "draft_update_ms": 0.7139444351196289
+      },
+      {
+        "mounted_outputs": 8.0,
+        "mount_ms": 50.91404914855957,
+        "resize_ms": 4.739999771118164,
+        "draft_update_ms": 0.843048095703125
+      }
+    ],
+    "500": [
+      {
+        "mounted_outputs": 8.0,
+        "mount_ms": 61.17892265319824,
+        "resize_ms": 14.780044555664062,
+        "draft_update_ms": 0.96893310546875
+      },
+      {
+        "mounted_outputs": 8.0,
+        "mount_ms": 57.06799030303955,
+        "resize_ms": 4.972100257873535,
+        "draft_update_ms": 0.96893310546875
+      },
+      {
+        "mounted_outputs": 8.0,
+        "mount_ms": 49.26300048828125,
+        "resize_ms": 4.826903343200684,
+        "draft_update_ms": 0.9710788726806641
+      }
+    ],
+    "1000": [
+      {
+        "mounted_outputs": 8.0,
+        "mount_ms": 48.110008239746094,
+        "resize_ms": 5.195975303649902,
+        "draft_update_ms": 1.1600255966186523
+      },
+      {
+        "mounted_outputs": 8.0,
+        "mount_ms": 59.413909912109375,
+        "resize_ms": 4.886031150817871,
+        "draft_update_ms": 1.1249780654907227
+      },
+      {
+        "mounted_outputs": 8.0,
+        "mount_ms": 55.052995681762695,
+        "resize_ms": 5.275964736938477,
+        "draft_update_ms": 1.170039176940918
+      }
+    ]
+  },
+  "timeline_medians": {
+    "10": {
+      "mounted_outputs": 8.0,
+      "mount_ms": 33.812,
+      "resize_ms": 4.189,
+      "draft_update_ms": 3.217
+    },
+    "100": {
+      "mounted_outputs": 8.0,
+      "mount_ms": 48.815,
+      "resize_ms": 4.055,
+      "draft_update_ms": 0.714
+    },
+    "500": {
+      "mounted_outputs": 8.0,
+      "mount_ms": 57.068,
+      "resize_ms": 4.972,
+      "draft_update_ms": 0.969
+    },
+    "1000": {
+      "mounted_outputs": 8.0,
+      "mount_ms": 55.053,
+      "resize_ms": 5.196,
+      "draft_update_ms": 1.16
+    }
+  },
+  "text_samples": {
+    "4070": [
+      {
+        "update_ms": 5.067944526672363,
+        "layout_ms": 1.3190507888793945
+      },
+      {
+        "update_ms": 1.1650323867797852,
+        "layout_ms": 0.2690553665161133
+      },
+      {
+        "update_ms": 1.1289119720458984,
+        "layout_ms": 0.2570152282714844
+      }
+    ],
+    "65527": [
+      {
+        "update_ms": 2.050042152404785,
+        "layout_ms": 13.017058372497559
+      },
+      {
+        "update_ms": 2.1359920501708984,
+        "layout_ms": 4.678964614868164
+      },
+      {
+        "update_ms": 1.8759965896606445,
+        "layout_ms": 4.708051681518555
+      }
+    ],
+    "262108": [
+      {
+        "update_ms": 1.9739866256713867,
+        "layout_ms": 56.19394779205322
+      },
+      {
+        "update_ms": 1.9690990447998047,
+        "layout_ms": 15.342950820922852
+      },
+      {
+        "update_ms": 1.8500089645385742,
+        "layout_ms": 15.738964080810547
+      }
+    ]
+  },
+  "text_medians": {
+    "4070": {
+      "update_ms": 1.165,
+      "layout_ms": 0.269
+    },
+    "65527": {
+      "update_ms": 2.05,
+      "layout_ms": 4.708
+    },
+    "262108": {
+      "update_ms": 1.969,
+      "layout_ms": 15.739
+    }
+  },
+  "index_replacements": {
+    "100": {
+      "bytes": 389300,
+      "samples_ms": [
+        0.01800060272216797,
+        0.01609325408935547,
+        0.015974044799804688,
+        0.016927719116210938,
+        0.01609325408935547
+      ],
+      "median_ms": 0.016
+    },
+    "500": {
+      "bytes": 2021300,
+      "samples_ms": [
+        0.08499622344970703,
+        0.08308887481689453,
+        0.09000301361083984,
+        0.08594989776611328,
+        0.08404254913330078
+      ],
+      "median_ms": 0.085
+    },
+    "1000": {
+      "bytes": 4061300,
+      "samples_ms": [
+        0.16295909881591797,
+        0.1550912857055664,
+        0.15497207641601562,
+        0.15401840209960938,
+        0.15604496002197266
+      ],
+      "median_ms": 0.155
+    }
+  }
+}

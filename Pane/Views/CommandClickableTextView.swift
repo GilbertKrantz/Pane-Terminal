@@ -1,10 +1,88 @@
 import AppKit
 import SwiftUI
 
+private struct OutputLink: Sendable {
+    let range: NSRange
+    let url: URL
+}
+
+/// Serialized, bounded link detection. Large excerpts never scan for links
+/// synchronously while a history row is mounting on the main actor.
+private actor OutputLinkDetector {
+    static let shared = OutputLinkDetector()
+    private let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+    private var cache: [String: [OutputLink]] = [:]
+    private var retainedBytes = 0
+
+    func links(in text: String) -> [OutputLink] {
+        if let cached = cache[text] { return cached }
+        guard !Task.isCancelled else { return [] }
+        let links = Self.matches(text, detector: detector)
+        guard !Task.isCancelled else { return [] }
+        let cost = text.utf8.count
+        if cache.count >= 64 || retainedBytes + cost > 4 * 1024 * 1024 {
+            cache.removeAll(keepingCapacity: true)
+            retainedBytes = 0
+        }
+        if cost <= 4 * 1024 * 1024 {
+            cache[text] = links
+            retainedBytes += cost
+        }
+        return links
+    }
+
+    func clear() {
+        cache.removeAll()
+        retainedBytes = 0
+    }
+
+    nonisolated static func matches(_ text: String, detector: NSDataDetector?) -> [OutputLink] {
+        let value = text as NSString
+        return (detector?.matches(in: text, range: NSRange(location: 0, length: value.length)) ?? [])
+            .compactMap { match in
+                guard let url = URL(string: value.substring(with: match.range)) else { return nil }
+                return OutputLink(range: match.range, url: url)
+            }
+    }
+}
+
+private final class OutputHeightKey: NSObject {
+    let text: String
+    let font: NSFont?
+    let width: CGFloat
+    init(text: String, font: NSFont?, width: CGFloat) {
+        self.text = text; self.font = font; self.width = width
+    }
+    override var hash: Int {
+        var hasher = Hasher()
+        hasher.combine(text); hasher.combine(font?.fontName)
+        hasher.combine(font?.pointSize); hasher.combine(width)
+        return hasher.finalize()
+    }
+    override func isEqual(_ object: Any?) -> Bool {
+        guard let other = object as? OutputHeightKey else { return false }
+        return width == other.width && font == other.font && text == other.text
+    }
+}
+
+private enum OutputHeightCache {
+    static let values: NSCache<OutputHeightKey, NSNumber> = {
+        let cache = NSCache<OutputHeightKey, NSNumber>()
+        cache.totalCostLimit = 8 * 1024 * 1024
+        cache.countLimit = 256
+        return cache
+    }()
+}
+
 struct CommandClickableTextView: NSViewRepresentable {
     let text: String
     let font: NSFont
     let textColor: NSColor
+
+    static func clearCachedOutput() {
+        OutputHeightCache.values.removeAllObjects()
+        Task { await OutputLinkDetector.shared.clear() }
+    }
 
     func makeNSView(context: Context) -> CommandClickableNSTextView {
         Self.makeTextView()
@@ -40,10 +118,35 @@ struct CommandClickableTextView: NSViewRepresentable {
         // Session status changes do not change finalized output. Avoid resetting
         // TextKit and invalidating the lazy row's size on every session update.
         guard textView.string != text || textView.font != font || textView.textColor != textColor else { return }
-        textView.textStorage?.setAttributedString(attributedText)
+        let contentChanged = textView.string != text
+        if contentChanged {
+            textView.linkDetectionTask?.cancel()
+            textView.textStorage?.setAttributedString(NSAttributedString(
+                string: text, attributes: [.font: font, .foregroundColor: textColor]
+            ))
+            textView.usesOutputHeightCache = true
+        }
         textView.textColor = textColor
         textView.font = font
         textView.invalidateIntrinsicContentSize()
+        guard contentChanged else { return }
+        if text.utf8.count <= 8192 {
+            textView.installLinks(OutputLinkDetector.matches(text, detector: Self.detector))
+        } else {
+            textView.linkGeneration &+= 1
+            let revision = textView.linkGeneration
+            textView.linkDetectionTask = Task { @MainActor [weak textView, text] in
+                let links = await OutputLinkDetector.shared.links(in: text)
+                // Decoration is chunked so a link-heavy excerpt cannot replace
+                // an off-main scan with one large main-thread attribute pass.
+                for start in stride(from: 0, to: links.count, by: 128) {
+                    guard !Task.isCancelled, let view = textView,
+                          view.linkGeneration == revision else { return }
+                    view.installLinks(Array(links[start..<min(start + 128, links.count)]))
+                    await Task.yield()
+                }
+            }
+        }
     }
 
     func sizeThatFits(
@@ -55,34 +158,60 @@ struct CommandClickableTextView: NSViewRepresentable {
         return CGSize(width: width, height: textView.height(fitting: width))
     }
 
-    private var attributedText: NSAttributedString {
-        let attributed = NSMutableAttributedString(
-            string: text,
-            attributes: [
-                .font: font,
-                .foregroundColor: textColor
-            ]
-        )
-
-        for match in Self.urlMatches(in: text) {
-            let urlText = (text as NSString).substring(with: match.range)
-            guard let url = URL(string: urlText) else { continue }
-            attributed.addAttribute(.link, value: url, range: match.range)
-        }
-
-        return attributed
-    }
-
-    private static func urlMatches(in text: String) -> [NSTextCheckingResult] {
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
-            return []
-        }
-        let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        return detector.matches(in: text, options: [], range: range)
-    }
+    private static let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
 }
 
-final class CommandClickableNSTextView: NSTextView {
+final class CommandClickableNSTextView: NSTextView, NSTextStorageDelegate {
+    fileprivate var linkDetectionTask: Task<Void, Never>?
+    fileprivate var usesOutputHeightCache = false
+    fileprivate var linkGeneration: UInt64 = 0
+    fileprivate private(set) var contentRevision: UInt64 = 0
+    private var decoratingLinks = false
+    private var copiedRevision: UInt64?
+    private var measuredRevision: UInt64?
+    private var ownedStorage: NSTextStorage?
+
+    convenience init() { self.init(frame: .zero, textContainer: nil) }
+
+    override init(frame frameRect: NSRect, textContainer container: NSTextContainer?) {
+        let actualContainer: NSTextContainer
+        let retainedStorage: NSTextStorage?
+        if let container {
+            actualContainer = container
+            retainedStorage = container.layoutManager?.textStorage
+        } else {
+            let storage = NSTextStorage()
+            retainedStorage = storage
+            let layout = NSLayoutManager()
+            actualContainer = NSTextContainer(size: NSSize(width: 0, height: 10_000_000))
+            storage.addLayoutManager(layout)
+            layout.addTextContainer(actualContainer)
+        }
+        super.init(frame: frameRect, textContainer: actualContainer)
+        ownedStorage = retainedStorage
+        textStorage?.delegate = self
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        textStorage?.delegate = self
+    }
+
+    deinit { linkDetectionTask?.cancel() }
+
+    func textStorage(_ textStorage: NSTextStorage, didProcessEditing editedMask: NSTextStorageEditActions,
+                     range editedRange: NSRange, changeInLength delta: Int) {
+        if !decoratingLinks { contentRevision &+= 1 }
+    }
+
+    fileprivate func installLinks(_ links: [OutputLink]) {
+        guard let storage = textStorage else { return }
+        decoratingLinks = true
+        storage.beginEditing()
+        for link in links { storage.addAttribute(.link, value: link.url, range: link.range) }
+        storage.endEditing()
+        decoratingLinks = false
+    }
     override var intrinsicContentSize: NSSize {
         guard bounds.width > 0 else {
             return NSSize(width: NSView.noIntrinsicMetric, height: 0)
@@ -101,14 +230,24 @@ final class CommandClickableNSTextView: NSTextView {
 
     func height(fitting width: CGFloat) -> CGFloat {
         guard width.isFinite, width > 0, let textStorage else { return 0 }
+        if measuredRevision == contentRevision, measuredWidth == width { return measuredHeight }
+        let key = usesOutputHeightCache ? OutputHeightKey(text: string, font: font, width: width) : nil
+        if let key, let cached = OutputHeightCache.values.object(forKey: key) {
+            measuredWidth = width
+            measuredHeight = CGFloat(cached.doubleValue)
+            measuredRevision = contentRevision
+            return measuredHeight
+        }
         if measurementLayout.textStorage == nil {
             measurementStorage.addLayoutManager(measurementLayout)
             measurementLayout.addTextContainer(measurementContainer)
             measurementContainer.lineFragmentPadding = 0
         }
-        let textChanged = !measurementStorage.isEqual(to: textStorage)
-        if textChanged { measurementStorage.setAttributedString(textStorage) }
-        if textChanged || measuredWidth != width {
+        if copiedRevision != contentRevision {
+            measurementStorage.setAttributedString(textStorage)
+            copiedRevision = contentRevision
+        }
+        if measuredRevision != contentRevision || measuredWidth != width {
             // sizeThatFits is a measurement, not a layout pass. Resizing the
             // displayed NSTextView here invalidates SwiftUI's current proposal
             // and makes the enclosing lazy timeline's height oscillate.
@@ -116,6 +255,11 @@ final class CommandClickableNSTextView: NSTextView {
             measurementLayout.ensureLayout(for: measurementContainer)
             measuredWidth = width
             measuredHeight = ceil(measurementLayout.usedRect(for: measurementContainer).height)
+            measuredRevision = contentRevision
+            if let key {
+                OutputHeightCache.values.setObject(NSNumber(value: Double(measuredHeight)), forKey: key,
+                                                  cost: string.utf16.count * 2)
+            }
         }
         return measuredHeight
     }
